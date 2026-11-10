@@ -48,7 +48,10 @@ de `request_id`. `loadfile <path> replace` (mpv 0.41), `set_property` para pausa
 para el título. Reglas de cola, avance y errores: S11. mpv **muere con Pi** (sin
 `detached`/`unref`); `session_shutdown` cierra el socket y manda `quit`. Sin mpv → estado guiado del artboard
 con el comando del gestor detectado en `/etc/os-release` — `apt`, `dnf`, `pacman`, `zypper`, `apk`, `brew` — y, en Windows, `winget install shinchiro.mpv` (o `mpv-player.mpv-CI.MSVC` para el build de CI oficial);
-fallback a `https://mpv.io/installation/` cuando no hay match; `c` copia el comando y `r` reintenta.
+fallback a `https://mpv.io/installation/` cuando no hay match; `c` copia el comando y `r` reintenta. En Windows el
+instalador de `shinchiro.mpv` **no agrega mpv al PATH**: queda en `C:\Program Files\MPV Player\mpv.exe`, así que
+la detección prueba PATH y después ubicaciones conocidas, y el mensaje posterior a una instalación guiada no puede
+anunciar éxito hasta que el binario responda a una ejecución real (`--version`).
 
 S7 — Costura de resolución desde v1: `resolve(item) → Target | Failure` con `target`, `expiresAt`,
 `prefetchable` y taxonomía de fallas (`missing`, `network`, `not-found`, `scrape`, `expired`). v1 tiene una
@@ -126,6 +129,16 @@ filtro y sale del modo. Si no hay resultados, la card lo dice mostrando el térm
 — nunca una lista vacía sin explicación. Con el filtro vacío, `esc` oculta la card: el modo más interno se
 resuelve primero.
 
+S19 — Plataforma. El target IPC y los directorios dependen del SO: socket en `$XDG_RUNTIME_DIR` (Linux) o
+tmpdir (macOS), y `\\.\pipe\pi-streambeats-<uid>` en Windows; config en `$XDG_CONFIG_HOME` / `~/.config/pi-streambeats/`
+o `%APPDATA%\pi-streambeats\`. Las dos funciones que dependen de la plataforma son **puras y reciben `platform`
+como parámetro**, para poder testear los tres casos desde Linux. La conexión al socket/pipe se reintenta (~100 ms
+hasta 5 s): mpv tarda en crearlo. Las diferencias se resuelven en `lib/player/` y `lib/settings.ts` — los módulos
+que ya son dueños de I/O — sin puerto ni módulo nuevo.
+
+**Verificado en Windows 11, mpv 0.42.0, Node 22.23.2**: spawn con `--input-ipc-server=\\.\pipe\<name>` + JSON por
+líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión necesitó un reintento de 100 ms.
+
 ## Tasks
 
 | ID | S# | Tarea | Ruta | Commit |
@@ -141,6 +154,7 @@ resuelve primero.
 | T9 | S1, S4, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | n/a |
 | T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | n/a |
 | T11 | S9 | Suite completa verde y reporte | inline | n/a |
+| T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | n/a |
 
 ## Log
 
@@ -216,3 +230,11 @@ probado nada. (3) `winget install --id mpv` **no existe**: el paquete real es `s
 binario nativo `@typescript/typescript-win32-x64` y `@biomejs/cli-win32-x64`, `pnpm install` (6 paquetes, 5.7 s) y
 **`tsc -p .` sin errores en Windows**. Nota de entorno: `pnpm` debe invocarse como `pnpm.cmd` en PowerShell, porque
 `pnpm.ps1` lo bloquea la política de ejecución.
+
+L15 (transporte en Windows, verificado): el named pipe **funciona**. Probe real sobre Windows 11 con mpv 0.42.0 y
+Node 22.23.2 — spawn con `--input-ipc-server=\\.\pipe\sbprobe`, `net.connect("\\\\...")`, `get_property mpv-version`
+responde `{"data":"mpv v0.42.0-3-g902818753","error":"success"}` y `quit` cierra limpio. La conexión necesitó 1
+reintento de 100 ms. Y un cuarto caso del mismo mal del día: `winget` dijo "Successfully installed" pero mpv **no
+fue invocable** — el instalador no toca el PATH y el binario quedó en `C:\Program Files\MPV Player\mpv.exe`. De ahí
+la regla nueva en S6: una instalación guiada no puede anunciar éxito sin ejecutar el binario. Con esto Windows deja
+de ser una promesa sin respaldo: el transporte, el discovery y los directorios son trabajo de T12, no investigación.
