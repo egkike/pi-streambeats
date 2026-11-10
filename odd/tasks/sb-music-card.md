@@ -238,3 +238,10 @@ reintento de 100 ms. Y un cuarto caso del mismo mal del día: `winget` dijo "Suc
 fue invocable** — el instalador no toca el PATH y el binario quedó en `C:\Program Files\MPV Player\mpv.exe`. De ahí
 la regla nueva en S6: una instalación guiada no puede anunciar éxito sin ejecutar el binario. Con esto Windows deja
 de ser una promesa sin respaldo: el transporte, el discovery y los directorios son trabajo de T12, no investigación.
+
+L16 (plataformas, verbatim del usuario): "Windows desde arranque v1" y, para macOS, un CI "similar al que usamos
+en el repo de Go". Consecuencias: Windows nativo es **promesa de v1** — T12 bloquea la publicación, no es un slice
+posterior; macOS se valida por CI como contrato de soporte (no hay hardware de referencia), con `macos-26` arm64;
+`macos-26-intel` y `windows-latest` quedan como pendientes explícitos (el segundo llega con T12, cuando el mpv
+falso de los tests hable pipes). El job `gate` agrega los resultados y es el nombre único que llevará el
+`required_status_checks` del ruleset, para que sumar un runner no trabe `main`.

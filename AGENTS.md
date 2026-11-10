@@ -83,6 +83,9 @@ extensions → host → {library, player} → core → types
 - Cada comportamiento existente que un cambio toque recibe un test de que sigue funcionando.
 - Procesos externos (`spawn`) y `fetch` se inyectan siempre: si un test necesita ejecutar el binario,
   el diseño del módulo está mal.
+- **El transporte IPC real se prueba aparte**, no en los tests: `node scripts/ipc-probe.mjs [mpv]` spawnea mpv,
+  conecta al socket (Linux/macOS) o al named pipe (Windows), verifica el round-trip y sale distinto de cero si
+  falla. La CI lo corre en macOS contra un mpv instalado con Homebrew.
 
 ## Feedback Loop (antes de decir "listo")
 

@@ -7,7 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["extensions/**", "lib/**", "tests/**", "package.json", "tsconfig.json", "biome.json"]
+		"includes": ["extensions/**", "lib/**", "scripts/**", "tests/**", "package.json", "tsconfig.json", "biome.json"]
 	},
 	"formatter": {
 		"enabled": true,
