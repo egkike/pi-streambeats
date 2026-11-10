@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Banner 01 · La card como objeto</title>
+<style>
+  :root{
+    --page:#07090c; --bg:#0e1116; --surface:#151d25; --surface-2:#1d2833; --border:#2a3540;
+    --text:#d6dde5; --dim:#98a4b1; --muted:#7d8a97; --accent:#7cc7e8; --live:#8bd98a;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 24px 48px;background:var(--page);color:var(--text);font-family:var(--mono);font-size:14px;line-height:1.55}
+  .page{max-width:1330px;margin:0 auto}
+  .eyebrow{color:var(--muted);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase}
+  h1{font-size:17px;margin:8px 0 6px;font-weight:600}
+  .tradeoff{color:var(--dim);margin:0 0 20px;max-width:78ch;font-size:13px}
+
+  .banner{width:1280px;max-width:100%;height:400px;background:var(--bg);border:1px solid var(--border);
+    display:flex;align-items:center;justify-content:space-between;gap:48px;padding:0 64px;overflow:hidden;position:relative}
+  .banner::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(700px 340px at 78% 55%, rgba(124,199,232,.10), transparent 70%)}
+
+  .left{position:relative;z-index:1;min-width:0}
+  .wordmark{font-size:46px;font-weight:600;letter-spacing:-.02em;margin:0}
+  .wordmark .pi{color:var(--accent)}
+  .tagline{color:var(--dim);font-size:17px;margin:14px 0 0}
+  .chips{display:flex;gap:10px;margin-top:22px;color:var(--muted);font-size:13px}
+  .chip{border:1px solid var(--border);border-radius:3px;padding:3px 9px}
+
+  .card{position:relative;z-index:1;width:520px;flex:none;background:var(--surface);border:1px solid var(--border);font-size:16px;line-height:1.6}
+  .hd{display:flex;justify-content:space-between;gap:1ch;padding:10px 16px;border-bottom:1px solid var(--border)}
+  .dot{color:var(--live)}
+  .time{color:var(--dim);font-variant-numeric:tabular-nums}
+  .bar{padding:8px 16px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .bar .fill{color:var(--live)}
+  .row{display:flex;gap:1ch;padding:2px 16px;color:var(--muted);white-space:nowrap}
+  .row .k{width:2ch;flex:none;color:var(--accent)}
+  .row .v{overflow:hidden;text-overflow:ellipsis}
+  .ft{padding:8px 16px;border-top:1px solid var(--border);color:var(--muted);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cap{color:var(--muted);font-size:12px;margin:12px 0 0;max-width:100ch}
+  .notes{margin:16px 0 0;padding:0;list-style:none;color:var(--dim);font-size:13px;max-width:90ch}
+  .notes li{margin:0 0 6px;padding-left:2.2ch;text-indent:-2.2ch}
+  .notes li::before{content:"— ";color:var(--muted)}
+</style>
+</head>
+<body>
+<main class="page">
+  <p class="eyebrow">Banner 01 de 03 · primera imagen del README = ícono del hub</p>
+  <h1>La card como objeto</h1>
+  <p class="tradeoff">El producto se muestra a sí mismo: la mini card en tamaño grande, al lado del wordmark. Se entiende en un segundo qué es y cómo se ve; envejece el día que la card cambie de forma.</p>
+
+  <div class="banner" role="img" aria-label="pi-streambeats — your music, inside the editor; local library and the StreamBeats catalog">
+    <div class="left">
+      <p class="wordmark"><span class="pi">pi</span>-streambeats</p>
+      <p class="tagline">your music, inside the editor</p>
+      <div class="chips"><span class="chip">local library</span><span class="chip">StreamBeats</span><span class="chip">mpv</span></div>
+    </div>
+
+    <div class="card">
+      <div class="hd"><span class="dot">●</span><span class="time">0:47 / 3:18</span></div>
+      <div class="bar"><span class="fill">━━━━━━━━━╸</span>─────────────</div>
+      <div class="row"><span class="k"></span><span class="v">StreamBeats/Chillhop · 12 tracks</span></div>
+      <div class="row"><span class="k">▸</span><span class="v">04 - Paper Planes</span></div>
+      <div class="row"><span class="k"></span><span class="v">05 - Rainy Window</span></div>
+      <div class="ft">space n p · l browse · esc hide</div>
+    </div>
+  </div>
+
+  <p class="cap">Composición: wordmark a la izquierda sobre superficie oscura, la card a la derecha con su barra de progreso y sus filas reales. El halo del fondo es pintura estática, no animación.</p>
+
+  <ul class="notes">
+    <li><b>A favor:</b> el hub muestra un ícono que es literalmente el producto. Nada que explicar.</li>
+    <li><b>En contra:</b> acopla el banner al layout de la card; un rediseño de la card obliga a rehacer el SVG.</li>
+    <li><b>Materialización:</b> 1280×400, rectángulos y texto; sin gradientes animados ni imágenes externas.</li>
+  </ul>
+</main>
+</body>
+</html>

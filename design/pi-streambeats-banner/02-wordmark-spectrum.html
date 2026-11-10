@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Banner 02 · Wordmark + espectro</title>
+<style>
+  :root{
+    --page:#07090c; --bg:#0e1116; --surface:#151d25; --border:#2a3540;
+    --text:#d6dde5; --dim:#98a4b1; --muted:#7d8a97; --accent:#7cc7e8; --live:#8bd98a;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 24px 48px;background:var(--page);color:var(--text);font-family:var(--mono);font-size:14px;line-height:1.55}
+  .page{max-width:1330px;margin:0 auto}
+  .eyebrow{color:var(--muted);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase}
+  h1{font-size:17px;margin:8px 0 6px;font-weight:600}
+  .tradeoff{color:var(--dim);margin:0 0 20px;max-width:78ch;font-size:13px}
+
+  .banner{width:1280px;max-width:100%;height:400px;background:var(--bg);border:1px solid var(--border);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;position:relative;overflow:hidden}
+  .banner::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(620px 300px at 50% 42%, rgba(124,199,232,.09), transparent 72%)}
+
+  .wordmark{position:relative;z-index:1;font-size:96px;font-weight:600;letter-spacing:-.045em;margin:0;line-height:1}
+  .wordmark .pi{color:var(--accent)}
+  .wordmark .rest{color:var(--text)}
+
+  .spectrum{position:relative;z-index:1;display:flex;align-items:flex-end;gap:6px;height:52px}
+  .spectrum i{display:block;width:9px;background:var(--dim);border-radius:1px}
+  .spectrum i.on{background:var(--live)}
+  .spectrum i.acc{background:var(--accent)}
+
+  .tagline{position:relative;z-index:1;color:var(--dim);font-size:18px;margin:0;letter-spacing:.01em}
+  .meta{position:relative;z-index:1;color:var(--muted);font-size:14px;margin:0}
+  .cap{color:var(--muted);font-size:12px;margin:12px 0 0;max-width:100ch}
+  .notes{margin:16px 0 0;padding:0;list-style:none;color:var(--dim);font-size:13px;max-width:90ch}
+  .notes li{margin:0 0 6px;padding-left:2.2ch;text-indent:-2.2ch}
+  .notes li::before{content:"— ";color:var(--muted)}
+</style>
+</head>
+<body>
+<main class="page">
+  <p class="eyebrow">Banner 02 de 03 · primera imagen del README = ícono del hub</p>
+  <h1>Wordmark + espectro</h1>
+  <p class="tradeoff">Marca primero: el nombre enorme y un espectro de barras que cita la barra de progreso sin copiar la card. No envejece con la UI; dice menos sobre qué hace el producto.</p>
+
+  <div class="banner" role="img" aria-label="pi-streambeats — your music, inside the editor; local library and the StreamBeats catalog">
+    <p class="wordmark"><span class="pi">pi</span><span class="rest">-streambeats</span></p>
+
+    <div class="spectrum">
+      <i style="height:14px"></i><i style="height:22px"></i><i class="acc" style="height:34px"></i>
+      <i style="height:26px"></i><i class="on" style="height:44px"></i><i style="height:30px"></i>
+      <i style="height:18px"></i><i class="acc" style="height:38px"></i><i style="height:48px"></i>
+      <i style="height:28px"></i><i style="height:16px"></i><i class="on" style="height:36px"></i>
+      <i style="height:24px"></i><i style="height:12px"></i><i class="acc" style="height:30px"></i>
+      <i style="height:20px"></i><i style="height:10px"></i>
+    </div>
+
+    <p class="tagline">your music, inside the editor</p>
+    <p class="meta">local library · StreamBeats · mpv · Pi + Gentle Shell</p>
+  </div>
+
+  <p class="cap">El espectro son barras rectangulares de alturas distintas: la cita visual del progreso y de la música, sin depender de la forma exacta de la card. Se materializa como <span class="dim2">&lt;rect&gt;</span>s en el SVG.</p>
+
+  <ul class="notes">
+    <li><b>A favor:</b> el banner no caduca con la UI y funciona a cualquier escala, incluso como favicon.</li>
+    <li><b>En contra:</b> no muestra el producto; alguien que no conoce el proyecto no ve una card de música.</li>
+    <li><b>Riesgo:</b> un espectro es el cliché de todo producto de audio. Se distingue solo por la tipografía y la paleta.</li>
+  </ul>
+</main>
+</body>
+</html>

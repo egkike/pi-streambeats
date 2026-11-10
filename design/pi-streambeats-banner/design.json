@@ -1,0 +1,27 @@
+{
+  "title": "Banner del README",
+  "brief": "Banner 1280×400 para docs/assets. Es la primera imagen del README y por eso se convierte en el ícono de la tarjeta en el hub de Gentle. Se materializa como SVG estático: sin animación, fuentes del sistema, sin codepoints de emoji. Paleta tomada de los artboards del card (fondo #0e1116, acento #7cc7e8, verde #8bd98a). Tres direcciones que se diferencian por qué ponen de héroe: el producto, la marca o el gesto.",
+  "artboards": [
+    {
+      "file": "01-terminal-card.html",
+      "title": "La card como objeto",
+      "tradeoff": "Se entiende en un segundo qué es; envejece cuando cambie el layout de la card",
+      "width": 1360,
+      "height": 720
+    },
+    {
+      "file": "02-wordmark-spectrum.html",
+      "title": "Wordmark + espectro",
+      "tradeoff": "No caduca con la UI y escala a favicon; dice menos sobre qué hace el producto",
+      "width": 1360,
+      "height": 720
+    },
+    {
+      "file": "03-keyboard-chord.html",
+      "title": "El acorde de teclas",
+      "tradeoff": "Vende el gesto y no depende de la card; a tamaño de ícono se lee como tres cajas",
+      "width": 1360,
+      "height": 720
+    }
+  ]
+}

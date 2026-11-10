@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Banner 03 · El acorde de teclas</title>
+<style>
+  :root{
+    --page:#07090c; --bg:#0e1116; --surface:#151d25; --key:#1a232c; --key-edge:#0a0e13;
+    --border:#2a3540; --text:#d6dde5; --dim:#98a4b1; --muted:#7d8a97; --accent:#7cc7e8; --live:#8bd98a;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 24px 48px;background:var(--page);color:var(--text);font-family:var(--mono);font-size:14px;line-height:1.55}
+  .page{max-width:1330px;margin:0 auto}
+  .eyebrow{color:var(--muted);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase}
+  h1{font-size:17px;margin:8px 0 6px;font-weight:600}
+  .tradeoff{color:var(--dim);margin:0 0 20px;max-width:78ch;font-size:13px}
+
+  .banner{width:1280px;max-width:100%;height:400px;background:var(--bg);border:1px solid var(--border);
+    display:flex;flex-direction:column;justify-content:center;padding:0 72px;position:relative;overflow:hidden}
+  .banner::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(560px 300px at 32% 50%, rgba(124,199,232,.10), transparent 70%)}
+
+  .top{display:flex;align-items:baseline;gap:14px;position:relative;z-index:1}
+  .wordmark{font-size:24px;font-weight:600;letter-spacing:-.01em;margin:0}
+  .wordmark .pi{color:var(--accent)}
+  .top .hint{color:var(--muted);font-size:13px}
+
+  .chord{display:flex;align-items:center;gap:14px;margin:34px 0 0;position:relative;z-index:1}
+  .key{background:var(--key);border:1px solid var(--border);border-bottom:4px solid var(--key-edge);
+    border-radius:7px;padding:10px 22px 12px;font-size:34px;letter-spacing:.02em;color:var(--text)}
+  .key.z{color:var(--accent);border-color:#2f4a58;border-bottom-color:#12303d}
+  .plus{color:var(--muted);font-size:26px}
+
+  .now{display:flex;align-items:baseline;gap:2ch;margin:34px 0 0;position:relative;z-index:1;font-size:21px}
+  .now .dot{color:var(--live)}
+  .now .title{color:var(--text)}
+  .now .sep{color:var(--muted)}
+  .now .folder{color:var(--dim)}
+  .now .time{margin-left:auto;color:var(--dim);font-variant-numeric:tabular-nums}
+
+  .cap{color:var(--muted);font-size:12px;margin:12px 0 0;max-width:100ch}
+  .notes{margin:16px 0 0;padding:0;list-style:none;color:var(--dim);font-size:13px;max-width:90ch}
+  .notes li{margin:0 0 6px;padding-left:2.2ch;text-indent:-2.2ch}
+  .notes li::before{content:"— ";color:var(--muted)}
+</style>
+</head>
+<body>
+<main class="page">
+  <p class="eyebrow">Banner 03 de 03 · primera imagen del README = ícono del hub</p>
+  <h1>El acorde de teclas</h1>
+  <p class="tradeoff">El héroe es el gesto: la combinación que trae la música sin salir del editor, y debajo la línea de estado con lo que está sonando. Memorable y distinto; hay que leer la tecla para entenderlo.</p>
+
+  <div class="banner" role="img" aria-label="pi-streambeats — press ctrl+alt+z to bring your music into the editor; local library and the StreamBeats catalog">
+    <div class="top">
+      <p class="wordmark"><span class="pi">pi</span>-streambeats</p>
+      <span class="hint">your music, inside the editor</span>
+      <span class="hint" style="color:#5f6b78">local library · StreamBeats</span>
+    </div>
+
+    <div class="chord">
+      <span class="key">ctrl</span><span class="plus">+</span>
+      <span class="key">alt</span><span class="plus">+</span>
+      <span class="key z">z</span>
+    </div>
+
+    <div class="now">
+      <span class="dot">●</span>
+      <span class="title">Neon Nights</span>
+      <span class="sep">·</span>
+      <span class="folder">Chillhop</span>
+      <span class="time">0:47 / 3:18</span>
+    </div>
+  </div>
+
+  <p class="cap">Las teclas son rectángulos con borde inferior más grueso: se leen como teclas sin usar glifos de teclado ni emojis. La línea de abajo es la barra de estado real, con el título que la card no repite.</p>
+
+  <ul class="notes">
+    <li><b>A favor:</b> vende la propuesta —música sin salir del editor— en un solo gesto, y no depende para nada del layout de la card.</li>
+    <li><b>En contra:</b> una tecla es un dato, no una imagen: a tamaño de ícono del hub se lee como tres cajas grises.</li>
+    <li><b>Riesgo:</b> si mañana el atajo por defecto cambia, el banner queda mintiendo.</li>
+  </ul>
+</main>
+</body>
+</html>
