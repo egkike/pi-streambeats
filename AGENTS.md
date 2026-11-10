@@ -153,6 +153,12 @@ Mientras no haya repositorio, esto es la intención declarada, no una regla vige
 Un riesgo aceptado se escribe acá con **el disparador que lo reabre**. Si no tiene disparador, no está
 aceptado: está olvidado.
 
+- **Publicación en el hub de Gentle diferida.** El repo no lleva ningún topic todavía, incluido
+  `gentle-hub-project`, que es el que lo hace aparecer en el hub. Publicar una tarjeta que lleva a un README
+  sin nada instalable gasta la primera impresión, y los topics se agregan después en un comando.
+  **Revisar cuando** exista un slice que corra de verdad (`/sb-music` abre la card y reproduce): ese día se
+  agregan los topics y el hub lo crawlea en horas.
+
 ## Fuera de alcance (v1)
 
 Catálogo Bandcamp en streaming, `sync`/descargas, temas propios, pantalla de settings dentro de la

@@ -3,12 +3,12 @@
   "chosen": "02-wordmark-spectrum.html",
   "handoffs": {
     "02-wordmark-spectrum.html": {
-      "status": "in_progress",
+      "status": "implemented",
       "queued": false,
       "sentAt": "2026-11-10T23:46:17.588Z",
       "startedAt": "2026-11-10T23:46:49.795Z",
-      "implementedAt": null,
-      "note": "Materializando el banner como SVG estático en docs/assets y armando el README con la cabeza (banner primero = ícono del hub)"
+      "implementedAt": "2026-11-10T23:48:16.333Z",
+      "note": "SVG estático 1280×400 en docs/assets y README completo con el banner como primera imagen (ícono del hub)"
     }
   }
 }
