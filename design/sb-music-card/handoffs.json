@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "chosen": "01-lista-unica.html",
+  "chosen": "03-mini-card.html",
   "handoffs": {
     "01-lista-unica.html": {
       "status": "in_progress",
@@ -9,6 +9,13 @@
       "startedAt": "2026-11-10T18:44:42.081Z",
       "implementedAt": null,
       "note": "Arrancando: scaffolding del paquete + settings + scan de biblioteca + reducer/view del card + player mpv + status line y shortcuts"
+    },
+    "03-mini-card.html": {
+      "status": "sent",
+      "queued": false,
+      "sentAt": "2026-11-10T23:05:59.467Z",
+      "startedAt": null,
+      "implementedAt": null
     }
   }
 }
