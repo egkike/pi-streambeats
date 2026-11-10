@@ -107,11 +107,16 @@ absolutas con `/home/<user>`. `libraryRoot` por default es el directorio de mús
 `user-dirs.dirs`, fallback `~/Music`), **sin** sufijo `StreamBeats`. Ni la carpeta ni el cursor se persisten
 entre sesiones: la card siempre abre en `libraryRoot`.
 
-S15 — Dos estados. **Esquina (por defecto):** la card vive abajo a la derecha, chica y anclada, y muestra
-sólo tiempo y barra de progreso — el título lo posee la barra de estado (S12). **Expandida:** `l` la abre a la
-lista completa de S3 y `l` o `esc` la devuelven a la esquina, sin perder cursor ni carpeta. `/sb-music` abre
-expandida; la tecla `overlay` muestra u oculta la card y, si estaba oculta, aparece en la esquina. Al iniciar
-una sesión de Pi arranca colapsada.
+S15 — Tres estados. **Oculta (estado inicial):** nada en pantalla; la barra de estado es la única superficie de
+música (S12). **Esquina (por defecto al mostrarse):** la card vive abajo a la derecha, chica y anclada, y muestra
+sólo glifo de estado y tiempo con su barra de progreso — el título lo posee la barra de estado (S12).
+**Expandida:** `l` la abre a la lista completa de S3, sin perder cursor ni carpeta.
+
+Las teclas separan **presencia** de **tamaño**: `ctrl+alt+z` (tecla `overlay`) muestra u oculta y funciona desde
+el editor, sin que la card tenga foco — es la única forma de recuperarla cuando está oculta, porque `l` sólo actúa
+con la card enfocada; `l` expande y colapsa; `esc` oculta siempre, salvo en modo filtro (S18). Mostrar lleva
+**siempre a la esquina**, aunque se haya ocultado estando expandida. `/sb-music` abre directo en expandida. Al
+iniciar una sesión de Pi la card arranca **oculta**.
 
 S16 — Glifos. Una sola familia geométrica: `●` reproduciendo, `○` pausado, `▸` cursor, `▾` expandido, `━`/`─`
 progreso. Nunca emoji en el chrome. `settings.asciiGlyphs: true` cambia la familia a ASCII (`*`, `-`, `>`, `v`,
@@ -245,3 +250,13 @@ posterior; macOS se valida por CI como contrato de soporte (no hay hardware de r
 `macos-26-intel` y `windows-latest` quedan como pendientes explícitos (el segundo llega con T12, cuando el mpv
 falso de los tests hable pipes). El job `gate` agrega los resultados y es el nombre único que llevará el
 `required_status_checks` del ruleset, para que sumar un runner no trabe `main`.
+
+L17 (estados de la card; corrección encontrada al revisar y confirmada por el usuario): el documento se
+contradecía en dos puntos. (1) S15 decía que la card «arranca colapsada» — o sea visible en cada sesión de Pi
+ aunque nadie haya puesto música; corregido a **arranca oculta**. (2) S15 decía que `esc` desde la expandida
+vuelve a la esquina, mientras S13 decía que `esc` oculta; unificado en **`esc` oculta siempre**, con la excepción
+del modo filtro. El modelo de teclas separa **presencia** de **tamaño**: `ctrl+alt+z` es la única puerta que
+funciona con el teclado en el editor (`l` sólo actúa con la card enfocada), `l` expande/colapsa y `/sb-music`
+abre expandida. Mostrar siempre lleva a la esquina, aunque se haya ocultado estando expandida. Efecto colateral
+bueno: el diseño deja de depender de la incógnita «¿el shortcut dispara con el overlay enfocado?», porque `esc`
+cubre la salida desde adentro.

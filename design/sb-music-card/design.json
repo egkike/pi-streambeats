@@ -1,6 +1,6 @@
 {
   "title": "Card de sb-music",
-  "brief": "Card de música dentro del TUI de Pi: navegar la biblioteca local de StreamBeats, reproducir con mpv y mostrar qué suena, sin sacarle el teclado al editor. Composición elegida: 03 (esquina) es el estado POR DEFECTO y 01 (lista) es el estado EXPANDIDO que abre `l`; 02 (dos paneles) no forma parte de la composición. Datos ilustrativos: la biblioteca es inventada, no el catálogo real.",
+  "brief": "Card de música dentro del TUI de Pi: navegar la biblioteca local de StreamBeats, reproducir con mpv y mostrar qué suena, sin sacarle el teclado al editor. Composición elegida: 03 (esquina) es el estado que aparece al mostrar la card, que ARRANCA OCULTA, y 01 (lista) es el estado EXPANDIDO que abre `l`; 02 (dos paneles) no forma parte de la composición. Datos ilustrativos: la biblioteca es inventada, no el catálogo real.",
   "artboards": [
     {
       "file": "01-lista-unica.html",
