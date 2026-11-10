@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "01-lista-unica.html",
+  "handoffs": {
+    "01-lista-unica.html": {
+      "status": "in_progress",
+      "queued": false,
+      "sentAt": "2026-11-10T18:44:13.361Z",
+      "startedAt": "2026-11-10T18:44:42.081Z",
+      "implementedAt": null,
+      "note": "Arrancando: scaffolding del paquete + settings + scan de biblioteca + reducer/view del card + player mpv + status line y shortcuts"
+    }
+  }
+}

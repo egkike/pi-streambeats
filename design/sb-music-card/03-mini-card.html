@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sb-music · 03 Mini card</title>
+<style>
+  :root{
+    --page:#07090c;
+    --bg:#0e1116; --surface:#151d25; --surface-2:#1d2833; --border:#2a3540;
+    --text:#d6dde5; --dim:#98a4b1; --muted:#7d8a97;
+    --accent:#7cc7e8; --live:#8bd98a; --warn:#e5b567; --err:#ef7a72;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 24px 56px;background:var(--page);color:var(--text);font-family:var(--mono);font-size:14px;line-height:1.55}
+  .page{max-width:1120px;margin:0 auto}
+  .eyebrow{color:var(--muted);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase}
+  h1{font-size:17px;margin:8px 0 6px;font-weight:600}
+  .tradeoff{color:var(--dim);margin:0 0 22px;max-width:78ch;font-size:13px}
+  h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:30px 0 10px;font-weight:600}
+  .term{background:var(--bg);border:1px solid var(--border);padding:14px 16px 0;overflow-x:auto}
+  .editor{color:var(--muted);white-space:pre;margin:0;font-size:13px;line-height:1.45;min-height:11.5em}
+  .editor b{color:var(--dim);font-weight:400}
+  .stage{display:flex;justify-content:flex-end;align-items:flex-end;padding:0 0 10px}
+  .status{display:flex;gap:2ch;justify-content:space-between;padding:0 1ch;color:var(--muted);font-size:13.5px;line-height:1.5;border-top:1px solid var(--border);margin:0 -16px;padding-left:16px;padding-right:16px}
+  .status .l{display:flex;gap:2ch}
+  .status .live{color:var(--live)}
+  .status .segs{display:flex;gap:2ch}
+
+  .mini{width:46ch;background:var(--surface);border:1px solid var(--border);font-size:13.5px;line-height:1.5;margin-left:auto}
+  .mini .hd{display:flex;gap:1ch;justify-content:space-between;padding:0 1ch;border-bottom:1px solid var(--border)}
+  .mini .hd .t{color:var(--live);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mini .hd .dot{color:var(--live)}
+  .mini .hd .time{flex:none;color:var(--dim);font-variant-numeric:tabular-nums}
+  .mini .row{display:flex;gap:1ch;padding:0 1ch;white-space:nowrap;color:var(--muted)}
+  .mini .row .k{flex:none;color:var(--muted);width:2ch}
+  .mini .row .v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .mini .row.key{color:var(--dim)}
+  .mini .bar{padding:0 1ch;color:var(--dim);font-variant-numeric:tabular-nums}
+  .mini .bar .fill{color:var(--live)}
+  .mini .ft{padding:0 1ch;border-top:1px solid var(--border);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .side{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+  .dim{color:var(--muted)}
+  .dim2{color:var(--dim)}
+  .notes{margin:18px 0 0;padding:0;list-style:none;color:var(--dim);font-size:13px;max-width:86ch}
+  .notes li{margin:0 0 7px;padding-left:2.2ch;text-indent:-2.2ch}
+  .notes li::before{content:"— ";color:var(--muted)}
+  .cap{color:var(--muted);font-size:12px;margin:8px 0 0;max-width:96ch}
+</style>
+</head>
+<body>
+<main class="page">
+  <p class="eyebrow">Dirección 03 de 03 · card de sb-music</p>
+  <h1>Mini card: el compañero que casi no ocupa lugar</h1>
+  <p class="tradeoff">Seis filas en una esquina. Está pensada para quedarse abierta mientras trabajás, no para navegar: elegir un tema es una tecla que la expande, y el caso normal es mirarla de reojo. Cuesta la navegación, que pasa a ser un segundo paso.</p>
+
+  <h2>Anclada abajo a la derecha · 46 celdas</h2>
+  <div class="term">
+    <p class="editor">  <b>▸</b> extraé el cliente de Bandcamp a un paquete propio y actualizá los tests
+
+  <b>●</b> Lo muevo a internal/catalog y dejo el cliente como adaptador.
+    · leyendo internal/catalog/client.go
+    · editando internal/catalog/client.go
+  <b>✓</b> go build ./... <span class="dim">(0.8s)</span>
+  <b>●</b> Falta ajustar los fixtures de parse_test.go: el album de testdata no tiene
+    data-tralbum y el parser devuelve error en vez de saltar.</p>
+    <div class="stage">
+      <div class="mini" role="group" aria-label="Mini card de música">
+        <div class="hd"><span class="t"><span class="dot">●</span> Neon Nights</span><span class="time">0:47 / 3:18</span></div>
+        <div class="bar"><span class="fill">━━━━━━━━━╸</span>─────────────</div>
+        <div class="row"><span class="k"></span><span class="v">StreamBeats/Chillhop · 12 tracks</span></div>
+        <div class="row key"><span class="k">▸</span><span class="v">04 - Paper Planes</span></div>
+        <div class="row"><span class="k"></span><span class="v">05 - Rainy Window</span></div>
+        <div class="ft">space n p · l browse · esc hide</div>
+      </div>
+    </div>
+    <div class="status">
+      <span class="l"><span class="live">●</span><span>Neon Nights</span><span class="dim">vol 70</span></span>
+      <span class="segs"><span class="dim2">ctrl+alt+z</span></span>
+    </div>
+  </div>
+  <p class="cap">El hecho vivo (título, tiempo) está en la fila de arriba; el progreso, en una barra de una fila; la carpeta y el próximo tema, debajo. <span class="dim2">l</span> expande a la lista completa de la dirección 01 sin perder qué está sonando. Nada de esto tapa el editor: la card ocupa 46 × 7 celdas en la esquina.</p>
+
+  <h2>Variante ASCII estricta · sin glifos ambiguos</h2>
+  <div class="term" style="padding-bottom:14px">
+    <div class="side">
+      <div class="mini" role="group" aria-label="Mini card en ASCII">
+        <div class="hd"><span class="t"><span class="dot">*</span> Neon Nights</span><span class="time">0:47 / 3:18</span></div>
+        <div class="bar"><span class="fill">#########</span>-------------</div>
+        <div class="row"><span class="k"></span><span class="v">StreamBeats/Chillhop - 12 tracks</span></div>
+        <div class="row key"><span class="k">&gt;</span><span class="v">04 - Paper Planes</span></div>
+        <div class="row"><span class="k"></span><span class="v">05 - Rainy Window</span></div>
+        <div class="ft">space n p - l browse - esc hide</div>
+      </div>
+      <div style="max-width:52ch;color:var(--dim);font-size:13px">
+        <p style="margin:0">Mismo diseño con <span class="dim2">*</span> para reproducción, <span class="dim2">&gt;</span> para cursor y <span class="dim2">#</span> para el progreso. Sirve en cualquier terminal y en cualquier locale, incluidos los CJK donde <span class="dim2">● ▸ ━</span> pasan a doble ancho y rompen la grilla.</p>
+        <p style="margin:10px 0 0">El repo de Go ya tomó esta decisión una vez: keycaps emoji en ghostty, tokens ASCII en el resto. La diferencia es que acá no podemos detectar el terminal desde la extensión.</p>
+      </div>
+    </div>
+  </div>
+
+  <ul class="notes">
+    <li><b>Qué decide esta dirección:</b> la card no es un navegador que abrís: es un objeto que dejás abierto. El modo navegación existe pero es un estado expandido del mismo componente.</li>
+    <li><b>Qué cuesta:</b> elegir un tema concreto son dos pasos (expandir, buscar). Con una biblioteca de 4 carpetas está bien; con 300 carpetas obliga a la vista completa casi siempre.</li>
+    <li><b>Lo que resuelve gratis:</b> el problema de "la card me tapa el editor" desaparece, y el uso real —mirar de reojo mientras el agente trabaja— queda cubierto sin abrir nada.</li>
+  </ul>
+</main>
+</body>
+</html>

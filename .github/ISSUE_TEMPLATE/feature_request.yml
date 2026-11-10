@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a capability the card or the player does not have yet.
+title: "feat: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the solution: it is easier to agree on what is missing than on how to build it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do today and where it gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: The behaviour you expect, in terms of keys, screens and messages when you can.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including doing nothing, or solving it outside the extension.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Library navigation
+        - Playback and transport
+        - Status line
+        - Settings
+        - Packaging and installation
+        - Other
+    validations:
+      required: true

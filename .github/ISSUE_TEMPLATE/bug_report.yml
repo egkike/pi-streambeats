@@ -1,0 +1,65 @@
+name: Bug report
+description: Something broke — the card, playback, or the status line.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Keep private paths and personal data out of it.
+        Security problems do not belong here: use the private advisory link instead.
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: What you saw, quoting the exact message the card or the status line showed.
+      placeholder: "Pressing ... showed ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest sequence that shows it, starting from opening the card.
+    validations:
+      required: true
+  - type: input
+    id: pi
+    attributes:
+      label: Pi version
+      description: Output of `pi --version`.
+      placeholder: "1.5.2"
+    validations:
+      required: true
+  - type: input
+    id: mpv
+    attributes:
+      label: mpv version
+      description: Output of `mpv --version`, or "not installed" if the card said so.
+      placeholder: "mpv v0.41.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux — Wayland
+        - Linux — X11
+        - Linux — TTY
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Terminal, locale (`LANG`), unusual library layout — anything that differs from a default setup.
+    validations:
+      required: false

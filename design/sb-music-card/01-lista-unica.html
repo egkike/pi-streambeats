@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sb-music · 01 Lista única</title>
+<style>
+  :root{
+    --page:#07090c;
+    --bg:#0e1116; --surface:#151d25; --surface-2:#1d2833; --border:#2a3540;
+    --text:#d6dde5; --dim:#98a4b1; --muted:#7d8a97;
+    --accent:#7cc7e8; --live:#8bd98a; --warn:#e5b567; --err:#ef7a72;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 24px 56px;background:var(--page);color:var(--text);font-family:var(--mono);font-size:14px;line-height:1.55}
+  .page{max-width:1120px;margin:0 auto}
+  .eyebrow{color:var(--muted);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase}
+  h1{font-size:17px;margin:8px 0 6px;font-weight:600}
+  .tradeoff{color:var(--dim);margin:0 0 22px;max-width:74ch;font-size:13px}
+  h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:30px 0 10px;font-weight:600}
+  .term{background:var(--bg);border:1px solid var(--border);padding:14px 16px;overflow-x:auto}
+  .ctx{color:var(--muted);white-space:pre;margin:0 0 12px;font-size:13px;line-height:1.45}
+  .ctx b{color:var(--dim);font-weight:400}
+
+  /* --- the card: pure cell grid, no sub-row padding --- */
+  .card{width:90ch;max-width:100%;margin:0 auto;background:var(--surface);border:1px solid var(--border);font-size:13.5px;line-height:1.5}
+  .card.narrow{width:78ch}
+  .hd{display:flex;gap:1ch;justify-content:space-between;padding:0 1ch;border-bottom:1px solid var(--border);color:var(--dim)}
+  .hd .id{color:var(--text);font-weight:600}
+  .hd .where{color:var(--muted)}
+  .bd{display:block}
+  .row{display:flex;gap:1ch;padding:0 1ch;white-space:nowrap;background:var(--surface)}
+  .row .mark{width:2ch;flex:none;color:var(--muted)}
+  .row .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .row .dur{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
+  .row.sel{background:var(--surface-2)}
+  .row.sel .mark{color:var(--accent)}
+  .row.live .mark .dot{color:var(--live)}
+  .row.live .name{color:var(--live)}
+  .ft{display:flex;gap:2ch;justify-content:space-between;padding:0 1ch;border-top:1px solid var(--border);color:var(--muted)}
+  .ft .bar{color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
+  .ft .bar .fill{color:var(--live)}
+  .bar-live{color:var(--text);font-variant-numeric:tabular-nums}
+
+  /* --- pi status bar under the card --- */
+  .status{display:flex;gap:2ch;justify-content:space-between;margin-top:0;padding:0 1ch;color:var(--muted);font-size:13.5px;line-height:1.5;border-top:1px solid var(--border)}
+  .status .l{display:flex;gap:2ch}
+  .status .live{color:var(--live)}
+  .status .segs{display:flex;gap:2ch}
+  .dim{color:var(--muted)}
+  .dim2{color:var(--dim)}
+
+  /* --- states block --- */
+  .states{display:flex;flex-wrap:wrap;gap:14px;margin-top:4px}
+  .states .card{margin:0;width:68ch}
+  .notes{margin:18px 0 0;padding:0;list-style:none;color:var(--dim);font-size:13px;max-width:86ch}
+  .notes li{margin:0 0 7px;padding-left:2.2ch;text-indent:-2.2ch}
+  .notes li::before{content:"— ";color:var(--muted)}
+  .cap{color:var(--muted);font-size:12px;margin:8px 0 0}
+</style>
+</head>
+<body>
+<main class="page">
+  <p class="eyebrow">Dirección 01 de 03 · card de sb-music</p>
+  <h1>Lista única con transporte en dos superficies</h1>
+  <p class="tradeoff">Familiar y denso: una lista, un encabezado con la ruta, y el transporte repartido entre el pie de la card (progreso y teclas) y la barra de estado de Pi (qué suena). Cuesta el centro de la pantalla mientras está abierta.</p>
+
+  <h2>Ancho cómodo · 90 × 15 celdas</h2>
+  <div class="term">
+    <p class="ctx">  <b>▸</b> mirá si el parser tolera que falte data-tralbum y decime dónde explota
+
+  <b>●</b> Voy a revisar <b>parse.go</b>: el regex de slugs es el primer candidato.
+      <span class="dim">· leyendo internal/catalog/parse.go</span></p>
+
+    <div class="card" role="group" aria-label="Card de música, lista única">
+      <div class="hd"><span><span class="id">sb-music</span> <span class="where">StreamBeats/Chillhop</span></span><span>12 tracks · 41:20</span></div>
+      <div class="bd">
+        <div class="row"><span class="mark"></span><span class="name">01 - Arcade Dreams.mp3</span><span class="dur">3:42</span></div>
+        <div class="row"><span class="mark"></span><span class="name">02 - Blue Hour.mp3</span><span class="dur">4:05</span></div>
+        <div class="row live"><span class="mark"><span class="dot">●</span> </span><span class="name">03 - Neon Nights.mp3</span><span class="dur">3:18</span></div>
+        <div class="row sel"><span class="mark">▸ </span><span class="name">04 - Paper Planes.mp3</span><span class="dur">2:57</span></div>
+        <div class="row"><span class="mark"></span><span class="name">05 - Rainy Window.mp3</span><span class="dur">4:31</span></div>
+        <div class="row"><span class="mark"></span><span class="name">06 - Slow Static.mp3</span><span class="dur">3:09</span></div>
+        <div class="row"><span class="mark"></span><span class="name">07 - Midnight Commute (extended midnight mix, remastered)</span><span class="dur">6:12</span></div>
+        <div class="row"><span class="mark"></span><span class="name">08 - Velvet Hours.mp3</span><span class="dur">3:55</span></div>
+        <div class="row"><span class="mark"></span><span class="name">09 - Lantern.mp3</span><span class="dur">3:27</span></div>
+        <div class="row"><span class="mark"></span><span class="name">10 - Cold Coffee.mp3</span><span class="dur">4:18</span></div>
+        <div class="row"><span class="mark"></span><span class="name">11 - Backseat.mp3</span><span class="dur">2:44</span></div>
+        <div class="row"><span class="mark"></span><span class="name">12 - Aurora Lines.mp3</span><span class="dur">3:02</span></div>
+      </div>
+      <div class="ft">
+        <span>space pause · n next · p prev · tab source · esc hide</span>
+        <span class="bar">0:47 <span class="fill">━━━━━━╸</span>───────────── 3:18</span>
+      </div>
+    </div>
+
+    <div class="status">
+      <span class="l"><span class="live">●</span><span>Neon Nights</span><span class="dim">Chillhop</span></span>
+      <span class="segs"><span class="dim">vol 70</span><span class="dim2">ctrl+alt+z</span></span>
+    </div>
+  </div>
+  <p class="cap">El marcador son <b>dos celdas fijas</b>: la izquierda es el cursor (<span class="dim2">▸</span>), la derecha es reproducción (<span class="live">●</span>). Las tres combinaciones posibles se leen sin ambigüedad y ninguna columna se mueve.</p>
+
+  <h2>Ancho mínimo · 78 × 8 celdas</h2>
+  <div class="term">
+    <div class="card narrow" role="group" aria-label="Card angosta">
+      <div class="hd"><span><span class="id">sb-music</span> <span class="where">/Chillhop</span></span><span>12 · 41:20</span></div>
+      <div class="bd">
+        <div class="row live"><span class="mark"><span class="dot">●</span> </span><span class="name">03 - Neon Nights.mp3</span><span class="dur">3:18</span></div>
+        <div class="row sel"><span class="mark">▸ </span><span class="name">04 - Paper Planes.mp3</span><span class="dur">2:57</span></div>
+        <div class="row"><span class="mark"></span><span class="name">05 - Rainy Window.mp3</span><span class="dur">4:31</span></div>
+        <div class="row"><span class="mark"></span><span class="name">07 - Midnight Commute (ext…</span><span class="dur">6:12</span></div>
+        <div class="row"><span class="mark"></span><span class="name">08 - Velvet Hours.mp3</span><span class="dur">3:55</span></div>
+      </div>
+      <div class="ft"><span>space · n · p · esc</span><span class="bar">0:47 <span class="fill">━━━━━╸</span>──────── 3:18</span></div>
+    </div>
+  </div>
+  <p class="cap">A 78 columnas se cae el breadcrumb a la carpeta actual, se acortan las teclas y la barra de progreso cede celdas. Nada se envuelve: se trunca con <span class="dim2">…</span>.</p>
+
+  <h2>Estados compartidos por las tres direcciones</h2>
+  <div class="states">
+    <div class="card" role="group" aria-label="Estado vacío">
+      <div class="hd"><span><span class="id">sb-music</span> <span class="where">StreamBeats</span></span><span>0 tracks</span></div>
+      <div class="bd">
+        <div class="row"><span class="mark"></span><span class="name">No audio files in this folder.</span><span class="dur"></span></div>
+        <div class="row"><span class="mark"></span><span class="name dim2">library root  ~/Music/StreamBeats</span><span class="dur"></span></div>
+        <div class="row"><span class="mark"></span><span class="name dim2">change libraryRoot in ~/.config/pi-streambeats/settings.json</span><span class="dur"></span></div>
+      </div>
+      <div class="ft"><span>r reload · esc hide</span><span></span></div>
+    </div>
+    <div class="card" role="group" aria-label="mpv ausente">
+      <div class="hd"><span><span class="id">sb-music</span> <span class="where">mpv</span></span><span>missing</span></div>
+      <div class="bd">
+        <div class="row"><span class="mark"><span class="dot" style="color:var(--err)">●</span> </span><span class="name">mpv is not installed. Playback is disabled.</span><span class="dur"></span></div>
+        <div class="row"><span class="mark"></span><span class="name dim2">Fedora / RHEL    sudo dnf install mpv</span><span class="dur"></span></div>
+        <div class="row"><span class="mark"></span><span class="name dim2">Debian / Ubuntu  sudo apt install mpv</span><span class="dur"></span></div>
+        <div class="row"><span class="mark"></span><span class="name dim2">Arch             sudo pacman -S mpv</span><span class="dur"></span></div>
+      </div>
+      <div class="ft"><span>c copy command · r check again</span><span></span></div>
+    </div>
+  </div>
+  <p class="cap">El estado vacío no finge que falló una búsqueda: dice qué falta, muestra la ruta real que está usando y nombra el archivo donde se cambia. El de mpv copia el comando del gestor detectado en <span class="dim2">/etc/os-release</span>.</p>
+
+  <ul class="notes">
+    <li><b>Qué decide esta dirección:</b> la card es un navegador de lista. Se abre, elegís, y la barra de estado se queda con el hecho vivo cuando la card se oculta.</li>
+    <li><b>Qué cuesta:</b> mientras está visible ocupa el centro del editor. Es la que mejor se lee y la que más interrumpe.</li>
+    <li><b>Craft aplicado:</b> una fila por hecho, cero filas en blanco, marcador de ancho fijo, duraciones tabulares, un solo glifo por rol, ningún emoji en el chrome.</li>
+  </ul>
+</main>
+</body>
+</html>

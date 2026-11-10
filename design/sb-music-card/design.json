@@ -1,0 +1,27 @@
+{
+  "title": "Card de sb-music",
+  "brief": "Card de música dentro del TUI de Pi: navegar la biblioteca local de StreamBeats, reproducir con mpv y mostrar qué suena, sin sacarle el teclado al editor. Tres direcciones que se diferencian por estructura (una lista, dos paneles, mini card) y por dónde vive el hecho vivo. Datos ilustrativos: la biblioteca es inventada, no el catálogo real.",
+  "artboards": [
+    {
+      "file": "01-lista-unica.html",
+      "title": "Lista única con transporte en dos superficies",
+      "tradeoff": "Familiar y denso, se lee de un vistazo; ocupa el centro del editor mientras está abierta",
+      "width": 1180,
+      "height": 1320
+    },
+    {
+      "file": "02-dos-paneles.html",
+      "title": "Dos paneles con el árbol como navegación",
+      "tradeoff": "Escala a bibliotecas grandes y hace visible la fuente; pide ≥100 columnas y agrega un segundo modelo de foco",
+      "width": 1460,
+      "height": 1400
+    },
+    {
+      "file": "03-mini-card.html",
+      "title": "Mini card anclada, con variante ASCII",
+      "tradeoff": "Casi no ocupa lugar y puede quedarse abierta; navegar pasa a ser un segundo paso (expandir)",
+      "width": 1180,
+      "height": 1200
+    }
+  ]
+}

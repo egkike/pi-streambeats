@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sb-music · 02 Dos paneles</title>
+<style>
+  :root{
+    --page:#07090c;
+    --bg:#0e1116; --surface:#151d25; --surface-2:#1d2833; --border:#2a3540;
+    --text:#d6dde5; --dim:#98a4b1; --muted:#7d8a97;
+    --accent:#7cc7e8; --live:#8bd98a; --warn:#e5b567; --err:#ef7a72;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 24px 56px;background:var(--page);color:var(--text);font-family:var(--mono);font-size:14px;line-height:1.55}
+  .page{max-width:1400px;margin:0 auto}
+  .eyebrow{color:var(--muted);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase}
+  h1{font-size:17px;margin:8px 0 6px;font-weight:600}
+  .tradeoff{color:var(--dim);margin:0 0 22px;max-width:78ch;font-size:13px}
+  h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:30px 0 10px;font-weight:600}
+  .term{background:var(--bg);border:1px solid var(--border);padding:14px 16px;overflow-x:auto}
+  .ctx{color:var(--muted);white-space:pre;margin:0 0 12px;font-size:13px;line-height:1.45}
+  .ctx b{color:var(--dim);font-weight:400}
+
+  .card{width:140ch;max-width:100%;margin:0 auto;background:var(--surface);border:1px solid var(--border);font-size:13.5px;line-height:1.5}
+  .card.narrow{width:78ch}
+  .card.fold{width:96ch}
+  .hd{display:flex;gap:1ch;justify-content:space-between;padding:0 1ch;border-bottom:1px solid var(--border);color:var(--dim)}
+  .hd .id{color:var(--text);font-weight:600}
+
+  .cols{display:flex;align-items:stretch}
+  .pane{display:flex;flex-direction:column;min-width:0}
+  .pane.tree{width:28ch;flex:none}
+  .pane.tracks{flex:1;border-left:1px solid var(--border)}
+  .pane-hd{display:flex;gap:1ch;justify-content:space-between;padding:0 1ch;color:var(--muted);border-bottom:1px solid var(--border)}
+  .pane.focus .pane-hd{color:var(--dim)}
+  .pane.focus .pane-hd .caret{color:var(--accent)}
+  .pane-hd .caret{color:var(--muted)}
+
+  .row{display:flex;gap:1ch;padding:0 1ch;white-space:nowrap}
+  .row .mark{width:2ch;flex:none;color:var(--muted)}
+  .row .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .row .num{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
+  .row.sel{background:var(--surface-2)}
+  .row.sel .mark{color:var(--accent)}
+  .row.live .mark .dot{color:var(--live)}
+  .row.live .name{color:var(--live)}
+  .row.ind{color:var(--dim)}
+  .row.ind .name{color:var(--dim)}
+  .row.root .name{color:var(--text)}
+
+  .ft{display:flex;gap:2ch;justify-content:space-between;padding:0 1ch;border-top:1px solid var(--border);color:var(--muted)}
+  .ft .bar{color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
+  .ft .bar .fill{color:var(--live)}
+  .status{display:flex;gap:2ch;justify-content:space-between;padding:0 1ch;color:var(--muted);font-size:13.5px;line-height:1.5;border-top:1px solid var(--border)}
+  .status .l{display:flex;gap:2ch}
+  .status .live{color:var(--live)}
+  .status .segs{display:flex;gap:2ch}
+  .dim{color:var(--muted)}
+  .dim2{color:var(--dim)}
+  .notes{margin:18px 0 0;padding:0;list-style:none;color:var(--dim);font-size:13px;max-width:86ch}
+  .notes li{margin:0 0 7px;padding-left:2.2ch;text-indent:-2.2ch}
+  .notes li::before{content:"— ";color:var(--muted)}
+  .cap{color:var(--muted);font-size:12px;margin:8px 0 0;max-width:96ch}
+</style>
+</head>
+<body>
+<main class="page">
+  <p class="eyebrow">Dirección 02 de 03 · card de sb-music</p>
+  <h1>Dos paneles: el árbol es la navegación</h1>
+  <p class="tradeoff">Escala a bibliotecas grandes y vuelve visible de dónde sale cada track, porque la fuente (biblioteca local o catálogo) es la raíz del árbol. Pide ≥ 100 columnas y le come ancho al editor mientras está abierta.</p>
+
+  <h2>Ancho amplio · 140 celdas</h2>
+  <div class="term">
+    <p class="ctx">  <b>▸</b> sumá el comando de sync al README y corré los tests de packaging
+
+  <b>●</b> El comando ya está documentado; falta el test de hash inválido.</p>
+
+    <div class="card" role="group" aria-label="Card de música, dos paneles">
+      <div class="hd"><span><span class="id">sb-music</span> <span class="dim">local library</span></span><span>2 roots · 4 folders · 43 tracks</span></div>
+      <div class="cols">
+        <div class="pane tree focus">
+          <div class="pane-hd"><span><span class="caret">▾</span> folders</span><span>tab</span></div>
+          <div class="row root"><span class="mark">▾ </span><span class="name">Local library</span><span class="num"></span></div>
+          <div class="row ind"><span class="mark">  </span><span class="name">StreamBeats</span><span class="num"></span></div>
+          <div class="row ind sel"><span class="mark">  ▸ </span><span class="name">Chillhop</span><span class="num">12</span></div>
+          <div class="row ind"><span class="mark">  </span><span class="name">Dark Piano</span><span class="num">9</span></div>
+          <div class="row ind"><span class="mark">  </span><span class="name">Neon Drive</span><span class="num">14</span></div>
+          <div class="row ind"><span class="mark">  </span><span class="name">Sunrise Sessions</span><span class="num">8</span></div>
+          <div class="row ind"><span class="mark">  </span><span class="name">Lofi Records</span><span class="num">3</span></div>
+          <div class="row root"><span class="mark">  </span><span class="name dim2">StreamBeats catalog</span><span class="num"></span></div>
+          <div class="row ind"><span class="mark"></span><span class="name dim2">network</span><span class="num"></span></div>
+        </div>
+        <div class="pane tracks">
+          <div class="pane-hd"><span><span class="caret">▾</span> Chillhop</span><span>12 tracks · 41:20</span></div>
+          <div class="row"><span class="mark"></span><span class="name">01 - Arcade Dreams.mp3</span><span class="num">3:42</span></div>
+          <div class="row"><span class="mark"></span><span class="name">02 - Blue Hour.mp3</span><span class="num">4:05</span></div>
+          <div class="row live"><span class="mark"><span class="dot">●</span> </span><span class="name">03 - Neon Nights.mp3</span><span class="num">3:18</span></div>
+          <div class="row sel"><span class="mark">▸ </span><span class="name">04 - Paper Planes.mp3</span><span class="num">2:57</span></div>
+          <div class="row"><span class="mark"></span><span class="name">05 - Rainy Window.mp3</span><span class="num">4:31</span></div>
+          <div class="row"><span class="mark"></span><span class="name">06 - Slow Static.mp3</span><span class="num">3:09</span></div>
+          <div class="row"><span class="mark"></span><span class="name">07 - Midnight Commute (extended midnight mix)</span><span class="num">6:12</span></div>
+          <div class="row"><span class="mark"></span><span class="name">08 - Velvet Hours.mp3</span><span class="num">3:55</span></div>
+          <div class="row"><span class="mark"></span><span class="name">09 - Lantern.mp3</span><span class="num">3:27</span></div>
+          <div class="row"><span class="mark"></span><span class="name">10 - Cold Coffee.mp3</span><span class="num">4:18</span></div>
+          <div class="row"><span class="mark"></span><span class="name">11 - Backseat.mp3</span><span class="num">2:44</span></div>
+          <div class="row"><span class="mark"></span><span class="name">12 - Aurora Lines.mp3</span><span class="num">3:02</span></div>
+        </div>
+      </div>
+      <div class="ft">
+        <span>tab pane · space pause · n next · p prev · enter play · esc hide</span>
+        <span class="bar">0:47 <span class="fill">━━━━━━━━━╸</span>───────────── 3:18</span>
+      </div>
+    </div>
+
+    <div class="status">
+      <span class="l"><span class="live">●</span><span>Neon Nights</span><span class="dim">Chillhop</span></span>
+      <span class="segs"><span class="dim">vol 70</span><span class="dim2">ctrl+alt+z</span></span>
+    </div>
+  </div>
+  <p class="cap">El panel con foco se marca por el <b>color del encabezado</b> y su <span class="dim2">▾</span> en acento, no por un borde. Paneles separados por una regla de una celda, sin cajas anidadas. La fuente es un nodo del árbol: <span class="dim2">Local library</span> y <span class="dim2">StreamBeats catalog</span> son hermanos, y lo que no se puede navegar todavía se muestra igual con su estado.</p>
+
+  <h2>Punto de quiebre · 96 celdas: el árbol se pliega</h2>
+  <div class="term">
+    <div class="card fold" role="group" aria-label="Card con árbol plegado">
+      <div class="hd"><span><span class="id">sb-music</span> <span class="dim">▸ Local library</span></span><span>nav row · h collapse</span></div>
+      <div class="cols">
+        <div class="pane tree" style="width:18ch">
+          <div class="pane-hd"><span><span class="caret dim2">▸</span> roots</span><span></span></div>
+          <div class="row root"><span class="mark"></span><span class="name">Local library</span><span class="num"></span></div>
+          <div class="row ind"><span class="mark"></span><span class="name dim2">Catalog</span><span class="num"></span></div>
+        </div>
+        <div class="pane tracks">
+          <div class="pane-hd"><span><span class="caret">▾</span> StreamBeats/Chillhop</span><span>12 · 41:20</span></div>
+          <div class="row live"><span class="mark"><span class="dot">●</span> </span><span class="name">03 - Neon Nights.mp3</span><span class="num">3:18</span></div>
+          <div class="row sel"><span class="mark">▸ </span><span class="name">04 - Paper Planes.mp3</span><span class="num">2:57</span></div>
+          <div class="row"><span class="mark"></span><span class="name">05 - Rainy Window.mp3</span><span class="num">4:31</span></div>
+          <div class="row"><span class="mark"></span><span class="name">06 - Slow Static.mp3</span><span class="num">3:09</span></div>
+        </div>
+      </div>
+      <div class="ft"><span>space · n · p · esc</span><span class="bar">0:47 <span class="fill">━━━━━━╸</span>──────── 3:18</span></div>
+    </div>
+  </div>
+
+  <h2>Ancho mínimo · 78 celdas: el árbol desaparece</h2>
+  <div class="term">
+    <div class="card narrow" role="group" aria-label="Card angosta de un panel">
+      <div class="hd"><span><span class="id">sb-music</span> <span class="dim">▸ local</span></span><span>12 · 41:20</span></div>
+      <div class="row ind"><span class="mark">..</span><span class="name dim2">StreamBeats/Chillhop</span><span class="num"></span></div>
+      <div class="row live"><span class="mark"><span class="dot">●</span> </span><span class="name">03 - Neon Nights.mp3</span><span class="num">3:18</span></div>
+      <div class="row sel"><span class="mark">▸ </span><span class="name">04 - Paper Planes.mp3</span><span class="num">2:57</span></div>
+      <div class="row"><span class="mark"></span><span class="name">05 - Rainy Window.mp3</span><span class="num">4:31</span></div>
+      <div class="row"><span class="mark"></span><span class="name">07 - Midnight Commute (e…</span><span class="num">6:12</span></div>
+      <div class="ft"><span>tab source · .. up · esc</span><span class="bar">0:47 <span class="fill">━━━━━╸</span>──────── 3:18</span></div>
+    </div>
+  </div>
+  <p class="cap">A 78 columnas la navegación se muda a una fila <span class="dim2">..</span> que sube de carpeta y a <span class="dim2">tab</span> para cambiar de fuente. No se esconde información necesaria: la ruta y la fuente siguen visibles en el encabezado.</p>
+
+  <ul class="notes">
+    <li><b>Qué decide esta dirección:</b> navegar y reproducir son dos paneles, con el vocabulario de un IDE (tree + pane + tab). La fuente es estructura, no un modo oculto.</li>
+    <li><b>Qué cuesta:</b> necesita ancho; abajo de 100 columnas hay que replegarla y eso es código y estado extra. Duplica el modelo de foco (qué panel tiene el cursor).</li>
+    <li><b>Pregunta que abre:</b> con 43 tracks y 4 carpetas se ve bien; con 300 carpetas el árbol necesita scroll propio y ahí empieza a competir con el panel de tracks.</li>
+  </ul>
+</main>
+</body>
+</html>

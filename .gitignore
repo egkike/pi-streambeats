@@ -1,0 +1,27 @@
+# Dependencias
+node_modules/
+
+# La extensión no se compila: la corre jiti. Nada de dist/ ni artefactos de tsc.
+dist/
+*.tsbuildinfo
+*.tgz
+
+# Estado de runtime que nunca se versiona
+*.log
+*.sock
+
+# Ruido del sistema y del editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Configuración local de Pi (paquetes instalados con -l)
+.pi/
+
+# Screenshots del canvas de diseño: pueden mostrar pantalla del usuario.
+design/**/.screenshots/
+
+# Cachés de herramientas de agentes (además, .atl/.gitignore ya ignora todo con "*")
+.atl/
