@@ -14,12 +14,13 @@ mensaje claro y no rompe. Los `peerDependencies` (`@earendil-works/pi-coding-age
 instalar el árbol completo del host en desarrollo sin que nada lo use.
 
 S2 — Settings en `$XDG_CONFIG_HOME/pi-streambeats/settings.json` (default `~/.config/pi-streambeats/`):
-`{ "libraryRoot": "<path>", "shortcuts": { "overlay", "playPause", "next", "prev" } }`.
+`{ "libraryRoot": "<path>", "shortcuts": { "overlay", "playPause", "next", "prev" }, "asciiGlyphs": false }`.
 Defaults: overlay `ctrl+alt+z`, playPause `ctrl+alt+space`, next `ctrl+alt+n`, prev `ctrl+alt+p`.
 Archivo ausente → defaults y se escribe una vez (dir 0750, file 0600, escritura atómica tmp+rename).
 Archivo malformado → defaults + advertencia, nunca crash. Claves desconocidas se ignoran.
 
-S3 — La card reproduce el artboard `design/sb-music-card/01-lista-unica.html`:
+S3 — Estado **expandido** de la card: reproduce el artboard `design/sb-music-card/01-lista-unica.html` (el
+estado por defecto es la esquina, S15):
 fila de encabezado con `sb-music` (énfasis) + breadcrumb (dim) + `N tracks · M:SS` a la derecha;
 filas con **columna de marcador de 2 celdas** (celda 1 cursor `▸`, celda 2 reproducción `●`), nombre con
 truncado `…`, duración alineada a la derecha con dígitos tabulares; fila del cursor con superficie elevada;
@@ -46,7 +47,8 @@ S6 — Reproducción con mpv: spawn con `--idle --no-video --no-terminal --input
 de `request_id`. `loadfile <path> replace` (mpv 0.41), `set_property` para pausa/volumen, `force-media-title`
 para el título. Reglas de cola, avance y errores: S11. mpv **muere con Pi** (sin
 `detached`/`unref`); `session_shutdown` cierra el socket y manda `quit`. Sin mpv → estado guiado del artboard
-con el comando del gestor detectado en `/etc/os-release` y `c` para copiarlo.
+con el comando del gestor detectado en `/etc/os-release` — `apt`, `dnf`, `pacman`, `zypper`, `apk`, `brew` — y, en Windows, `winget install shinchiro.mpv` (o `mpv-player.mpv-CI.MSVC` para el build de CI oficial);
+fallback a `https://mpv.io/installation/` cuando no hay match; `c` copia el comando y `r` reintenta.
 
 S7 — Costura de resolución desde v1: `resolve(item) → Target | Failure` con `target`, `expiresAt`,
 `prefetchable` y taxonomía de fallas (`missing`, `network`, `not-found`, `scrape`, `expired`). v1 tiene una
@@ -84,11 +86,12 @@ estado, no solo el color. Sin nada reproduciendo o al terminar la cola **no hay 
 Título limpio: se quita el prefijo de número de pista seguido de `" - "` y la extensión de audio; si el nombre
 de archivo no coincide exactamente con ese patrón se muestra tal cual **con** su extensión, sin adivinar. La
 carpeta es el nombre del directorio contenedor. Si no entra en el ancho disponible se trunca con `…` y el
-segmento de tiempo es lo último en ceder.
+segmento de tiempo es lo último en ceder. La barra de estado es la **única dueña del título**: la card en la
+esquina no lo repite (muestra sólo tiempo y progreso) y la barra no muestra volumen (S11).
 
 S13 — Teclas dentro de la card, todas anunciadas en su fila de pie: `↑`/`↓` y `k`/`j` mueven el cursor;
-`enter` entra a una carpeta o reproduce un archivo; `u` y `\u232b` suben de carpeta; `esc` oculta la card (no sube);
-`space` pausa o continúa; `s` stop; `n`/`>` siguiente y `p`/`<` anterior; `+`/`-` volumen; `z` shuffle.
+`enter` entra a una carpeta o reproduce un archivo; `u` y `\u232b` suben de carpeta; `esc` oculta la card salvo en modo filtro, donde primero lo limpia (S18); `l` expande y colapsa (S15);
+`/` abre el filtro (S18); `space` pausa o continúa; `s` stop; `n`/`>` siguiente y `p`/`<` anterior; `+`/`-` volumen; `z` shuffle.
 Las teclas de selección respetan las keybindings de Pi (`tui.select.*`) cuando estén disponibles. El mapa de
 transporte de la app Go se hereda como **teclas**, no como fila visual: esa fila del repo Go es decorativa
 (README: "The transport row at the bottom is visual only") y el piso de craft prohíbe chrome muerto.
@@ -98,7 +101,30 @@ inclusive como techo; si `libraryRoot` está fuera de HOME, el techo es `library
 (`at home`) y no se mueve. Breadcrumb: ruta **relativa a `libraryRoot`** cuando la carpeta actual está dentro de
 él (`StreamBeats/Chillhop`, como el artboard); si está por encima, se muestra con `~/…`. Nunca se muestran rutas
 absolutas con `/home/<user>`. `libraryRoot` por default es el directorio de música XDG (`XDG_MUSIC_DIR` de
-`user-dirs.dirs`, fallback `~/Music`), **sin** sufijo `StreamBeats`.
+`user-dirs.dirs`, fallback `~/Music`), **sin** sufijo `StreamBeats`. Ni la carpeta ni el cursor se persisten
+entre sesiones: la card siempre abre en `libraryRoot`.
+
+S15 — Dos estados. **Esquina (por defecto):** la card vive abajo a la derecha, chica y anclada, y muestra
+sólo tiempo y barra de progreso — el título lo posee la barra de estado (S12). **Expandida:** `l` la abre a la
+lista completa de S3 y `l` o `esc` la devuelven a la esquina, sin perder cursor ni carpeta. `/sb-music` abre
+expandida; la tecla `overlay` muestra u oculta la card y, si estaba oculta, aparece en la esquina. Al iniciar
+una sesión de Pi arranca colapsada.
+
+S16 — Glifos. Una sola familia geométrica: `●` reproduciendo, `○` pausado, `▸` cursor, `▾` expandido, `━`/`─`
+progreso. Nunca emoji en el chrome. `settings.asciiGlyphs: true` cambia la familia a ASCII (`*`, `-`, `>`, `v`,
+`=`) para terminales donde los geométricos ocupen dos celdas. **No hay detección automática**: es una decisión
+del usuario, no una adivinanza del código.
+
+S17 — Mouse. Un click sobre una fila la selecciona y la activa: carpeta → entra, archivo → reproduce. La rueda
+recorre la lista. El hover resalta la fila bajo el puntero para que el click sea predecible. `renderFrame`
+devuelve, además de las líneas, un mapa de zonas por fila (`hits`), de modo que resolver el impacto no acopla la
+vista a coordenadas de pantalla.
+
+S18 — Filtro. `/` entra en modo filtro sobre la **carpeta actual**: se escribe y la lista se reduce por
+coincidencia de nombre, incremental. `enter` confirma y deja la selección en el primer resultado; `esc` limpia el
+filtro y sale del modo. Si no hay resultados, la card lo dice mostrando el término activo y ofreciendo limpiarlo
+— nunca una lista vacía sin explicación. Con el filtro vacío, `esc` oculta la card: el modo más interno se
+resuelve primero.
 
 ## Tasks
 
@@ -108,8 +134,8 @@ absolutas con `/home/<user>`. `libraryRoot` por default es el directorio de mús
 | T2 | S2, S10 | `lib/settings.ts`: defaults, lectura, escritura atómica, malformado | worker | n/a |
 | T3 | S7 | `lib/types.ts` + interfaz de resolución | worker | n/a |
 | T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | n/a |
-| T5 | S3, S11, S13 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación y teclas | worker | n/a |
-| T6 | S3, S9 | `lib/core/view.ts`: `renderFrame` con roles, marcadores, truncado, progreso | worker | n/a |
+| T5 | S3, S11, S13, S15, S18 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación, teclas y filtro | worker | n/a |
+| T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | n/a |
 | T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | n/a |
 | T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | n/a |
 | T9 | S1, S4, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | n/a |
@@ -168,3 +194,25 @@ presente), así que instaló los `peerDependencies` como árbol real (126 paquet
 `ERR_PNPM_IGNORED_BUILDS` por `@google/genai` y `protobufjs`, transitivos de `pi-coding-agent`. Corrección:
 sacar `peerDependencies` del manifiesto hasta T9 y borrar el `.npmrc` que prometía una protección inexistente.
 Lección: un archivo de configuración que no se verifica es una suposición con formato de decisión.
+
+L12 (anclaje, glifos, mouse y filtro, verbatim): "Esquina, expandible"; "Geométricos + escape hatch"; "Mouse
+completo"; "Filtro en la carpeta". Consecuencias: la card vive en la esquina por defecto y `l` la expande al
+artboard 01 (S15); el `esc` resuelve primero el modo filtro y después oculta (S18); los glifos llevan escape
+hatch `asciiGlyphs` en settings (S2, S16); el mouse necesita mapa de impactos en el render (S17).
+
+L13 (barra, volumen, arranque y mpv, verbatim): "Barra siempre, card no repite"; "Solo dentro de la card";
+"libraryRoot"; "Seis gestores + fallback al sitio". Consecuencias: el título lo posee la barra de estado y la card
+en la esquina muestra sólo tiempo y progreso (S12, S15); el volumen no tiene segmento permanente (S11); no se
+persiste carpeta ni cursor entre sesiones (S14); el setup guiado cubre seis gestores con fallback a mpv.io (S6).
+
+L14 (primera validación en Windows real, VM `Windows11`, Node 22.23.2): tres hallazgos, dos son bugs nuestros.
+(1) `pnpm lint` **falla** en Windows por CRLF: git convierte LF→CRLF al hacer checkout y `biome ci` exige LF, así
+que cada archivo «difiere del formateo» mientras la CI de Linux sigue verde. Arreglo: `.gitattributes` con
+`* text=auto eol=lf`. (2) `pnpm test` **corre 0 tests y sale con éxito**: el script usaba comillas simples
+(`node --test 'tests/*.test.ts'`), que en `cmd.exe` llegan literales a Node y el glob no matchea. Arreglo:
+comillas dobles, probadas en las dos plataformas. Es el mismo mal de todo el día: una puerta que pasa sin haber
+probado nada. (3) `winget install --id mpv` **no existe**: el paquete real es `shinchiro.mpv` (0.42.0) o
+`mpv-player.mpv-CI.MSVC` (0.41.0); S6 corregido. Lo que sí funcionó: `corepack enable` + `pnpm 12.18.0`, el
+binario nativo `@typescript/typescript-win32-x64` y `@biomejs/cli-win32-x64`, `pnpm install` (6 paquetes, 5.7 s) y
+**`tsc -p .` sin errores en Windows**. Nota de entorno: `pnpm` debe invocarse como `pnpm.cmd` en PowerShell, porque
+`pnpm.ps1` lo bloquea la política de ejecución.

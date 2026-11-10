@@ -119,6 +119,10 @@ abierta, o si se agregó una dependencia de runtime sin decisión explícita.
 
 - Rama `main`. **Nunca `master`** (las librerías de git en JS lo ponen por default; se corrige con
   `git symbolic-ref HEAD refs/heads/main`).
+- **El repo fuerza LF** (`.gitattributes`, `* text=auto eol=lf`). Un checkout en Windows con CRLF hace fallar
+  `biome ci` ahí aunque la CI de Linux siga verde.
+- Los scripts de `package.json` deben funcionar en `cmd.exe` y en `sh`: una comilla simple no protege un glob en
+  Windows, y el runner de tests sale con éxito aunque no encuentre ningún archivo.
 - Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`).
 - Un commit = una unidad de trabajo revisable (~400 líneas autoradas), con **tests y docs del mismo
   comportamiento adentro**.

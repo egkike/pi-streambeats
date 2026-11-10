@@ -1,0 +1,8 @@
+# El formateador exige LF. Sin esto, un checkout en Windows convierte a CRLF y
+# `pnpm lint` (biome ci) falla ahí mientras la CI de Linux sigue verde.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
