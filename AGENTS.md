@@ -173,6 +173,9 @@ commit → assess → review nativa si está debida (las correcciones van como c
        → git push → gh pr create
 ```
 
+- **`git switch main` no trae commits.** Antes de ramificar: `git pull --ff-only`. Una `main` local atrasada hace que el
+  assess mida el candidato contra un `origin/main` más nuevo y cuente como propio el trabajo ya mergeado (medí 1596
+  líneas en vez de 26 por esto).
 - Los comandos de delivery van **solos** y con `cd` literal. Mezclar cambio y entrega en un mismo comando se
   rechaza a propósito, y en pipes el guard no puede atribuir el directorio.
 - **Nunca se empuja una rama que no es la chequeada en el directorio actual.** El guard evalúa el candidato del
