@@ -153,7 +153,8 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 | T2 | S2, S10 | `lib/settings.ts`: defaults, lectura, escritura atómica, malformado | inline | hecho (PR #2) | `430a2da` |
 | T3 | S7 | `lib/types.ts` + interfaz de resolución | worker | hecho | `872d5c2` |
 | T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | hecho (PR #5) | `87be737` |
-| T5 | S3, S11, S13, S15, S18 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación, teclas y filtro | worker | abierta | — |
+| T5 | S3, S11, S13, S15 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación y teclas | worker | hecho (PR pendiente) | `c29a5e5` |
+| T5b | S18 | `lib/core/model.ts`: filtro sobre la carpeta actual (unidad 2 de T5) | worker | abierta | — |
 | T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | abierta | — |
 | T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | abierta | — |
 | T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | abierta | — |
@@ -337,3 +338,18 @@ dueño), pero **no 26**, que es Active LTS desde el 2026-10-28 (`Lithium`, hoy 2
 "Sumar 26 y conservar 24". La matriz queda en 22.19.0 y 24 y 26 sobre ubuntu-26.04, más macOS en 26, y el probe
 IPC pasa a 26. Ninguno de los dos pendientes reales se arregla con un bump: Windows necesita T12 (el mpv falso por
 named pipes) y `macos-26-intel` sigue sin hardware de referencia (L16).
+
+L24 (T5 partido en dos unidades, y el modelo cerrado): `lib/core/model.ts` (471 líneas) + `tests/core/model.test.ts`
+(651), commits `dbd23bd` (mover `LibraryEntry` a `types.ts`) y `c29a5e5`, issue #7. El documento tenía T5 con S3, S11,
+S13, S15 y S18 juntos; se parte en la entrega para no duplicar la carga de review: **T5** queda con S3/S11/S13/S15 y
+**T5b** toma S18 (filtro), que es una interacción autocontenida. Preparación hecha por el padre, no por el worker:
+`LibraryEntry` vivía en `lib/library/scan.ts` y el estado de la card tiene que guardarlo, así que importarlo desde
+`lib/core` invertía la dirección de dependencias — el test de frontera no lo habría visto, porque vigila `node:*` y el
+host, no a `library`. Ahora vive en `lib/types.ts` y `scan.ts` lo re-exporta. Decisiones del worker donde la spec
+callaba, todas registradas en su reporte: step de volumen 5; cursor sin wrap y reseteado por carpeta; `p` en el
+primer tema es no-op y `n` en el último termina la cola; `advance()` es el único camino de avance (auto, `n` y falla);
+un último tema roto conserva `cannot open, skipping`; cargas de carpeta optimistas hasta que llega `folder-loaded`;
+`node:path` dentro de core sólo para `dirname`, sin filesystem; `/` **no** entra en la tabla de teclas todavía
+(anunciar una tecla que no hace nada viola "sin chrome muerto"). Pendiente declarado: `focus` lo maneja el host, así
+que T9 debe cablear `focus`/`blur` o `l` no responde después de `/sb-music`; y las fallas de scan de S5 todavía no
+tienen evento — llegan con T6/T9. Gate local: 113/113.
