@@ -1,18 +1,20 @@
 # PR governance gate — issue-first workflow (owner-approved issues only).
 #
-# Enforcement of AGENTS.md "Git Governance": every pull request must
+# Enforcement of AGENTS.md "Git Governance": a pull request in the CODE lane must
 #   1. close or resolve at least one issue of THIS repository via a body
 #      keyword (`Closes #N`, `Fixes #N`, `Resolves #N` — case-insensitive),
 #   2. that issue must carry the `status:approved` label (owner approval),
 #   3. carry EXACTLY ONE `type:*` label for the PR-type summary.
 #
-# This check is a REVIEW SIGNAL, NOT A MERGE LOCK: the only required context on
-# `main` is `gate` from ci.yml. The docs/tracking lane (docs/**, README.md,
-# AGENTS.md, odd/**, design/**) travels without an issue when no code comes with
-# it, so a docs-only PR may be merged with this check red — that is the lane
-# working as declared, not a failure of the gate.
+# The DOCS/TRACKING lane travels without an issue when no code comes with it, so
+# the `lane` job decides which lane the PR is in and `issue-gate` is skipped for
+# tracking-only changes. Skipping is deliberate: a check that paints red on every
+# documentation PR teaches reviewers to ignore red. A skipped check reports
+# nothing was verified, which is the truth; a green one would claim it was.
 #
-# Runners ship `gh` preinstalled; nothing here needs jq or a checkout.
+# This check is a REVIEW SIGNAL, NOT A MERGE LOCK: the only required context on
+# `main` is `gate` from ci.yml. Runners ship `gh` preinstalled; nothing here needs
+# jq or a checkout of the code.
 
 name: pr-gate
 
@@ -37,9 +39,38 @@ permissions:
   pull-requests: read
 
 jobs:
+  lane:
+    name: lane
+    # Pinned, never ubuntu-latest: an image migration stays a visible workflow edit.
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Which lane is this pull request in
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          # The CODE lane of AGENTS.md. Everything else — docs/, design/,
+          # odd/, README, AGENTS.md, .github/ — rides the tracking lane.
+          filters: |
+            code:
+              - 'extensions/**'
+              - 'lib/**'
+              - 'tests/**'
+              - 'scripts/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'tsconfig.json'
+              - 'biome.json'
+
   issue-gate:
     name: issue-gate
-    # Pinned, never ubuntu-latest: an image migration stays a visible workflow edit.
+    needs: lane
+    if: needs.lane.outputs.code == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:

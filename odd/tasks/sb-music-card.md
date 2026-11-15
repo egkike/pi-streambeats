@@ -305,3 +305,11 @@ ahora dice la verdad del ruleset); `pr-gate.yml` adaptado, que exige `Closes #N`
 `gate`; y las etiquetas `status:approved`, los cinco `type:*` y `size:exception`. Descartado a propósito:
 `close-unsolicited-prs.yml` (implementa una política de ingreso sólo por issues que este repo todavía no
 declaró) y `release.yml` (publica binarios; acá no hay artefacto compilado).
+
+L21 (el rojo del carril de docs, corregido): el primer run de `pr-gate` sobre el PR #3 falló con `no issue
+linkage`, que era el comportamiento copiado de la referencia (docs viaja sin issue y mergea con el check en rojo).
+Encontrado en vivo, no en revisión: un check rojo permanente en cada PR de docs entrena a ignorar el rojo. Corrección:
+un job `lane` con `paths-filter` decide el carril con la lista de AGENTS.md, y `issue-gate` se **saltea** cuando el
+PR no toca código. Salteado y no verde: un verde afirmaría que verificó algo. `.github/**` pasó al carril de
+tracking (es gobierno, no código de producto), y el `tipo:*` y la vinculación siguen exigidos en el carril de
+código.

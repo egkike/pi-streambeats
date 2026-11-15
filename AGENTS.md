@@ -143,17 +143,17 @@ contexto único y estable (agrega `check` e `ipc`, y acepta `skipped` cuando un 
 que verificar), para que sumar un runner no trabe `main`.
 
 - **El dueño mergea. Los agentes no.** Abren PR, corren checks y esperan.
-- **Carriles**:
-  - **Código** (`extensions/**`, `lib/**`, `tests/**`, `scripts/**`, `package.json`, `tsconfig.json`, `biome.json`,
-    `.github/workflows/ci.yml`): issue con `status:approved` **antes** de la rama → PR con `Closes #N` → checks
+- **Carriles** (los decide un `paths-filter` en `pr-gate`, no una convención):
+  - **Código** (`extensions/**`, `lib/**`, `tests/**`, `scripts/**`, `package.json`, `pnpm-lock.yaml`,
+    `tsconfig.json`, `biome.json`): issue con `status:approved` **antes** de la rama → PR con `Closes #N` → checks
     verdes → merge del dueño.
-  - **Docs y tracking** (`docs/**`, `design/**`, `README.md`, `AGENTS.md`, `odd/**`): PR, sin issue cuando no
-    viaja código.
+  - **Docs y tracking** (`docs/**`, `design/**`, `README.md`, `AGENTS.md`, `odd/**`, `.github/**`): PR, sin issue
+    cuando no viaja código.
   `status:approved` lo pone el dueño. El agente puede pre-marcarlo **sólo** cuando el dueño ya autorizó ese ciclo
   en la conversación: la autorización de ciclo no se auto-autoriza y no se extiende al ciclo siguiente.
-- **`pr-gate` es señal, no candado**: exige `Closes #N` con la issue aprobada y exactamente un `type:*`. El único
-  check requerido es `gate`, así que el carril de docs puede mergear con `issue-gate` en rojo — eso es el carril
-  funcionando como está declarado, no una falla del gate.
+- **`pr-gate` es señal, no candado**: exige `Closes #N` con la issue aprobada y exactamente un `type:*`, y **se
+  saltea en el carril de docs/tracking**. Salteado, no verde: un verde afirmaría que verificó algo. El único check
+  requerido es `gate`.
 - **Review nativa (RDD) sobre el candidato ya commiteado**, no sobre el árbol sucio.
 - **Descubrimiento de vulnerabilidades** por el canal privado del repo (advisory), nunca en una issue pública.
 - **Etiquetas**: `status:approved`, exactamente un `type:feature|bug|docs|refactor|chore` por PR, y
