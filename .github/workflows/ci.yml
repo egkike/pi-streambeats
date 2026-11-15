@@ -52,8 +52,9 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     # Runner pinned, never -latest: an image migration has to be a visible edit.
-    # Ubuntu carries the declared Node floor; macOS executes the darwin code path.
-    # Windows joins with T12, once the fake mpv can speak named pipes.
+    # Ubuntu carries the declared Node floor and the Active LTS; macOS executes the
+    # darwin code path on the Active LTS. Windows joins with T12, once the fake mpv
+    # can speak named pipes.
     strategy:
       fail-fast: false
       matrix:
@@ -62,8 +63,10 @@ jobs:
             node: "22.19.0"
           - os: ubuntu-26.04
             node: "24"
+          - os: ubuntu-26.04
+            node: "26"
           - os: macos-26
-            node: "24"
+            node: "26"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -92,7 +95,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "26"
       - run: brew install mpv
       - run: node scripts/ipc-probe.mjs mpv
       - name: Diagnostics on failure

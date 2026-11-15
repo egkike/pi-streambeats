@@ -313,3 +313,14 @@ un job `lane` con `paths-filter` decide el carril con la lista de AGENTS.md, y `
 PR no toca código. Salteado y no verde: un verde afirmaría que verificó algo. `.github/**` pasó al carril de
 tracking (es gobierno, no código de producto), y el `tipo:*` y la vinculación siguen exigidos en el carril de
 código.
+
+L23 (matriz de Node; pregunta del usuario): "Nosotros tenemos ubuntu 26.04... deberíamos actualizar algún CI?"
+Verificado contra el calendario oficial de Node y las releases de cada action, no de memoria: el runner ya es
+`ubuntu-26.04` (coincide con la máquina, 26.04.1 LTS) y las cuatro actions están en su major actual —
+`actions/checkout@v7` (v7.0.1), `actions/setup-node@v7` (v7.1.0), `pnpm/action-setup@v6` (v6.1.1, que ya soporta
+pnpm v12), `dorny/paths-filter@v4` (v4.0.3). El agujero estaba en la matriz de Node: probábamos 22.19.0 (el piso
+declarado, hoy Maintenance LTS con EOL 2027-04-30) y 24 (Maintenance LTS desde el 2026-10-20, y lo que corre el
+dueño), pero **no 26**, que es Active LTS desde el 2026-10-28 (`Lithium`, hoy 26.13.1). Decisión del usuario:
+"Sumar 26 y conservar 24". La matriz queda en 22.19.0 y 24 y 26 sobre ubuntu-26.04, más macOS en 26, y el probe
+IPC pasa a 26. Ninguno de los dos pendientes reales se arregla con un bump: Windows necesita T12 (el mpv falso por
+named pipes) y `macos-26-intel` sigue sin hardware de referencia (L16).
