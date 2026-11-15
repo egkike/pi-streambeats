@@ -2,7 +2,8 @@
 
 Extensión de Pi / Gentle Shell `@egkike/pi-streambeats`: card de música (`/sb-music`) que navega la
 biblioteca local de StreamBeats y reproduce con mpv, sin sacarle el teclado al editor.
-Este documento es la especificación que leen los workers. Sin repo git todavía: **no hay commits**.
+Este documento es la especificación que leen los workers. Repo público `github.com/egkike/pi-streambeats`,
+rama `main`; lo commiteado es andamiaje, gobierno y diseño — **cero código de producto**: T2–T9 y T12 abiertas.
 
 ## Specs
 
@@ -146,20 +147,23 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 
 ## Tasks
 
-| ID | S# | Tarea | Ruta | Commit |
-|----|----|-------|------|--------|
-| T1 | S1 | Scaffolding: `package.json`, `tsconfig.json`, `README.md` | inline | n/a |
-| T2 | S2, S10 | `lib/settings.ts`: defaults, lectura, escritura atómica, malformado | worker | n/a |
-| T3 | S7 | `lib/types.ts` + interfaz de resolución | worker | n/a |
-| T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | n/a |
-| T5 | S3, S11, S13, S15, S18 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación, teclas y filtro | worker | n/a |
-| T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | n/a |
-| T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | n/a |
-| T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | n/a |
-| T9 | S1, S4, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | n/a |
-| T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | n/a |
-| T11 | S9 | Suite completa verde y reporte | inline | n/a |
-| T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | n/a |
+| ID | S# | Tarea | Ruta | Estado | Commit |
+|----|----|-------|------|--------|--------|
+| T1 | S1 | Scaffolding: `package.json`, `tsconfig.json`, `README.md` | inline | hecho | `872d5c2`, `f6da358` |
+| T2 | S2, S10 | `lib/settings.ts`: defaults, lectura, escritura atómica, malformado | worker | **abierta — siguiente** | — |
+| T3 | S7 | `lib/types.ts` + interfaz de resolución | worker | hecho | `872d5c2` |
+| T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | abierta | — |
+| T5 | S3, S11, S13, S15, S18 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación, teclas y filtro | worker | abierta | — |
+| T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | abierta | — |
+| T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | abierta | — |
+| T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | abierta | — |
+| T9 | S1, S4, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | abierta | — |
+| T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | abierta — frontera hecha, falta el host falso | `872d5c2` (parcial) |
+| T11 | S9 | Suite completa verde y reporte | inline | abierta — el gate está verde, la suite es de 4 tests | — |
+| T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
+
+El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
+`in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
 
 ## Log
 
@@ -260,3 +264,14 @@ funciona con el teclado en el editor (`l` sólo actúa con la card enfocada), `l
 abre expandida. Mostrar siempre lleva a la esquina, aunque se haya ocultado estando expandida. Efecto colateral
 bueno: el diseño deja de depender de la incógnita «¿el shortcut dispara con el overlay enfocado?», porque `esc`
 cubre la salida desde adentro.
+
+L18 (sincronización de estado; pedido verbatim): "Primero sincroniza y actualiza la doc para que quede limpio."
+Hechos verificados contra el repositorio: existe y es **público** en `github.com/egkike/pi-streambeats`, rama
+`main` con HEAD `66ede1e` empujado a `origin/main` y árbol limpio; 10 commits de andamiaje, gobierno y diseño.
+El ruleset `main-gate` está activo sobre `refs/heads/main` con dos reglas, `deletion` y `non_fast_forward`: los
+`required_status_checks` que anunciaba L16 **todavía no están configurados**, y tampoco hay PR obligatorio.
+Esto **supera L7**: hay repositorio otra vez y las unidades de trabajo se commitean. Corregido en consecuencia:
+el header de este documento (decía «no hay commits»), la tabla de Tasks — que ahora lleva columna `Estado` con
+los commits reales — y el encabezado de Git Governance en `AGENTS.md`, que describía la política como objetivo
+futuro. Hallazgos al revisar: T1 y T3 estaban hechos sin marcarlo, y de T10 sólo existe el test de frontera. Nada
+de código de producto todavía. Con la política ya vigente, la próxima unidad de código abre issue antes de la rama.

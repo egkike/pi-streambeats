@@ -133,9 +133,12 @@ abierta, o si se agregó una dependencia de runtime sin decisión explícita.
 - Nunca se commitea sin pedido explícito del dueño. `node_modules/`, binarios y sockets nunca entran.
 - Los cambios de comportamiento actualizan `odd/tasks/<feature>.md`: `L<n>` nuevo y `S<n>` afectados.
 
-## Git Governance (política objetivo — el repo todavía no existe)
+## Git Governance (vigente desde que el repo existe)
 
-Mientras no haya repositorio, esto es la intención declarada, no una regla vigente:
+El repositorio existe y es público: `github.com/egkike/pi-streambeats`, rama `main`. El ruleset `main-gate` está
+activo sobre `refs/heads/main` con `deletion` y `non_fast_forward`; los `required_status_checks` y el PR
+obligatorio todavía no están configurados (`gate` es el nombre único que los llevará, para que sumar un runner no
+trabe `main`). Con repositorio, esto **ya no es intención declarada sino política que se aplica**:
 
 - **El dueño mergea. Los agentes no.** Abren PR, corren checks, y esperan.
 - **Issue-first para código**: la issue (con su alcance) existe antes de la rama. Docs y `odd/` pueden
