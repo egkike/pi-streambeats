@@ -22,16 +22,16 @@ on:
   pull_request:
     types: [opened, edited, synchronize, labeled, unlabeled]
 
-# The group is keyed on the event ACTION, never on the ref alone. A single
-# `gh pr create --label` emits `opened` and `labeled` about a second apart, and a
-# ref-only group makes those two runs cancel each other: the survivor reports
-# success while the cancelled check-run stays attached to the head SHA, so the PR
-# shows red and mergeStateStatus reports UNSTABLE — the gate passing and looking
-# failed at the same time. Cancellation is only meaningful for repeats of the SAME
-# event (several pushes on one PR), which this still does.
+# One run per event ACTION, and nothing cancels. This job takes a few seconds, and a
+# cancelled check-run stays attached to the head SHA and paints the PR red even when every
+# run that survived passed: we saw three runs for one PR, one of them cancelled, and
+# mergeStateStatus reported UNSTABLE while the gate itself was green. Keying the group by
+# the action keeps `opened` and `labeled` (emitted about a second apart by a single
+# `gh pr create --label`) from killing each other; not cancelling keeps repeats of the SAME
+# event from leaving the same scar.
 concurrency:
   group: pr-gate-${{ github.workflow }}-${{ github.ref }}-${{ github.event.action }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
