@@ -12,11 +12,14 @@
  * `lib/types.ts` and the `Platform` type — never `lib/core`.
  *
  * mpv is spawned as a plain child: no `detached`, no `unref` (L6), so it dies with Pi, and shutdown
- * sends `quit` on the socket it already has.
+ * sends `quit` on the socket it already has. The life cycle around that has three rules the native
+ * review made explicit: the socket lives in a private directory nobody can pre-create (R1-001), a
+ * shutdown during startup terminates the child instead of orphaning it (R4-004), and a lost
+ * connection gets exactly one retry before it becomes a state the host can act on (R4-005).
  */
-import { mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { posix } from "node:path";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join, posix } from "node:path";
 import type { Platform } from "../settings.ts";
 import type { ResolveResult, Track, TrackResolver } from "../types.ts";
 
@@ -30,43 +33,74 @@ const REPLY_TIMEOUT_MS = 5000;
 /** The Windows pipe prefix. Written as a constant because the backslashes are the point. */
 const PIPE_PREFIX = "\\\\.\\pipe\\";
 
+/** The extension's own directory name, under whatever private base a platform gives us. */
+const DIR_NAME = "pi-streambeats";
+
+/** A directory only its owner may enter (R1-001): the socket's name is not a secret, its path is. */
+const PRIVATE_MODE = 0o700;
+
 /* --- the IPC target and the argv: pure, platform in, string out (S6, S19) ---------------------- */
 
 export interface IpcTargetContext {
 	readonly platform: Platform;
 	readonly env: Readonly<Record<string, string | undefined>>;
-	/** The current user's id: the identity half of every fallback path (S19). */
+	/** The current user's id: the only identity a Windows pipe name can carry (S19). */
 	readonly uid: number;
 	/**
-	 * The OS temp directory. Injected so this stays a pure function; production passes `os.tmpdir()`,
-	 * which is the real answer on macOS (`/var/folders/…`) and not a guess. Without it, `$TMPDIR` is
-	 * honoured when absolute and `/tmp` is the fallback.
+	 * The user's home directory, where macOS keeps its caches. Passed in, never read from the
+	 * environment here: a path function that guesses is a path function that lies (S19).
 	 */
-	readonly tmpDir?: string;
+	readonly home?: string;
+	/**
+	 * Makes a fresh directory with a name nobody can predict or pre-create, mode 0700, and returns
+	 * its absolute path. It is the last resort when the platform has no private base to build on, so
+	 * the randomness is injected I/O instead of a uid-derived path (R1-001). Production passes
+	 * `privateTempDir`; a test passes a stub.
+	 */
+	readonly privateDir?: () => string;
 }
 
 /**
- * Where mpv listens (S6, S19): `$XDG_RUNTIME_DIR/pi-streambeats/mpv.sock` on Linux, a tmpdir path
- * that carries the uid on macOS and as the Linux fallback, and a named pipe with the uid on
- * Windows. Nothing lands in a shared temp directory without an identity in its path.
+ * Where mpv listens (S6, S19): `$XDG_RUNTIME_DIR/pi-streambeats/mpv.sock` on Linux,
+ * `~/Library/Caches/pi-streambeats/mpv.sock` on macOS, and a named pipe with the uid on Windows.
+ * Nothing lands in a shared temp directory under a name another local user can predict: when a
+ * platform offers no private base, the path comes from an unpredictable `mkdtemp` directory
+ * (R1-001). A fixed uid-derived fallback was the finding: it could be pre-created or symlinked by
+ * anybody, and it collided between sessions.
  */
 export function ipcTarget(ctx: IpcTargetContext): string {
-	const uid = Math.trunc(ctx.uid);
-	if (ctx.platform === "win32") return `${PIPE_PREFIX}pi-streambeats-${uid}`;
+	if (ctx.platform === "win32") return `${PIPE_PREFIX}${DIR_NAME}-${Math.trunc(ctx.uid)}`;
 
-	const runtime = ctx.platform === "linux" ? absolute(ctx.env.XDG_RUNTIME_DIR) : undefined;
-	if (runtime) return posix.join(runtime, "pi-streambeats", "mpv.sock");
-	return posix.join(tmpBase(ctx), `pi-streambeats-${uid}`, "mpv.sock");
+	// Linux: the runtime directory already belongs to this login session and is 0700 by contract.
+	if (ctx.platform === "linux") {
+		const runtime = absolute(ctx.env.XDG_RUNTIME_DIR);
+		if (runtime) return posix.join(runtime, DIR_NAME, "mpv.sock");
+	}
+
+	// macOS: a per-user cache. `$XDG_RUNTIME_DIR` is a Linux convention, so it is not consulted here.
+	if (ctx.platform === "darwin") {
+		const home = absolute(ctx.home);
+		if (home) return posix.join(home, "Library", "Caches", DIR_NAME, "mpv.sock");
+	}
+
+	// No private base: the injected `mkdtemp` decides, because a name we choose is a name others know.
+	const fallback = absolute(ctx.privateDir?.());
+	if (!fallback) throw new Error("no private directory available for the mpv socket: pass privateDir");
+	return posix.join(fallback, "mpv.sock");
+}
+
+/**
+ * The production fallback: a fresh directory under the OS temp root, named by `mkdtemp`, mode 0700.
+ * Exported so the unpredictability is a testable fact rather than a claim in a comment (R1-001).
+ */
+export function privateTempDir(): string {
+	return mkdtempSync(join(tmpdir(), `${DIR_NAME}-`));
 }
 
 /** An absolute path, or nothing: a relative XDG base is ignored the way the XDG spec says (S10). */
 function absolute(value: string | undefined): string | undefined {
 	const trimmed = value?.trim();
 	return trimmed && posix.isAbsolute(trimmed) ? trimmed : undefined;
-}
-
-function tmpBase(ctx: IpcTargetContext): string {
-	return absolute(ctx.tmpDir) ?? absolute(ctx.env.TMPDIR) ?? "/tmp";
 }
 
 /** mpv's argv (S6). A list of arguments, never a command line: no path is ever interpolated into a shell. */
@@ -86,6 +120,8 @@ export interface SpawnOptions {
 /** The slice of `ChildProcess` this module uses, so a test can hand in a plain object. */
 export interface SpawnedProcess {
 	unref?(): unknown;
+	/** Signal the child we spawned; never a process we did not (R4-004). */
+	kill?(signal?: string): unknown;
 	on(event: "error", listener: (error: Error) => void): unknown;
 	on(event: "exit", listener: (code: number | null, signal: string | null) => void): unknown;
 	readonly stderr?: { on(event: "data", listener: (chunk: string | Buffer) => void): unknown } | null;
@@ -137,8 +173,13 @@ export interface PlayerDeps {
 	readonly env: Readonly<Record<string, string | undefined>>;
 	/** Defaults to `process.getuid()`, and to 0 on Windows where there is no uid. */
 	readonly uid?: number;
-	/** Defaults to `os.tmpdir()`. Injected so the target is a function of its arguments (S19). */
-	readonly tmpDir?: string;
+	/** The directory macOS puts its cache in. Defaults to `os.homedir()`; never read inside the pure path. */
+	readonly home?: string;
+	/**
+	 * Makes a fresh unpredictable private directory (mode 0700) for the fallback socket path.
+	 * Defaults to `privateTempDir`; injected so the fallback is testable without real I/O (R1-001).
+	 */
+	readonly privateDir?: () => string;
 	/** Defaults to `"mpv"`: on Windows the installer often leaves it off `PATH` (T12 looks it up). */
 	readonly mpvPath?: string;
 	/** The level the session starts at, if the caller wants one applied on connect (S11: core owns 70). */
@@ -181,10 +222,18 @@ class MpvPlayer implements Player {
 	readonly #pending = new Map<number, PendingRequest>();
 	#nextRequestId = 1;
 	#socket?: PlayerSocket;
+	/** The child we spawned and therefore own. Replaced on the one retry, never left behind (R4-004). */
+	#child?: SpawnedProcess;
 	#buffer = "";
 	#starting?: Promise<void>;
+	/** The single reconnect in flight, if any: a `play` that lands inside it waits for it (R4-005). */
+	#recovering?: Promise<void>;
 	#closing = false;
+	/** The level this session last asked for; re-applied after a recovery (R4-002). */
+	#volume: number | undefined;
 	#gaveUp = false;
+	/** True once the one retry was spent: a second loss is terminal, not a loop (R4-005). */
+	#retried = false;
 	#reported = false;
 	#lastError?: string;
 	#stderr = "";
@@ -200,14 +249,16 @@ class MpvPlayer implements Player {
 			platform: deps.platform,
 			env: deps.env,
 			uid: deps.uid ?? process.getuid?.() ?? 0,
-			// `os.tmpdir()` is the real answer on macOS (`/var/folders/…`), which `$TMPDIR` alone is not.
-			tmpDir: deps.tmpDir ?? tmpdir(),
+			home: deps.home ?? homedir(),
+			privateDir: deps.privateDir ?? privateTempDir,
 		});
 	}
 
-	start(): Promise<void> {
+	async start(): Promise<void> {
 		this.#starting ??= this.#connect();
-		return this.#starting;
+		await this.#starting;
+		// A retry after a lost connection is still starting: a play must not race past it (R4-005).
+		if (this.#recovering) await this.#recovering;
 	}
 
 	/**
@@ -244,8 +295,12 @@ class MpvPlayer implements Player {
 		});
 	}
 
-	setVolume(level: number): Promise<void> {
-		return this.#serialize(() => this.#setProperty("volume", Math.trunc(level)));
+	async setVolume(level: number): Promise<void> {
+		const value = Math.trunc(level);
+		await this.#serialize(() => this.#setProperty("volume", value));
+		// Remembered only once it landed, so a recovery restores what the session actually asked for and
+		// a level set before connecting is not applied twice (R4-002).
+		this.#volume = value;
 	}
 
 	async quit(): Promise<void> {
@@ -256,7 +311,13 @@ class MpvPlayer implements Player {
 		this.#socket = undefined;
 		// Nothing is left to wait for: whatever was in flight would wait forever on a dying socket.
 		this.#settleAll({ error: "quit" });
-		if (!socket) return;
+		if (!socket) {
+			// No channel means the child is still connecting or already unreachable. Kill it HERE, not
+			// when the connect loop happens to notice: the caller may never come back to us, and an mpv
+			// that outlives the process holding its socket is the leak R4-004 was meant to close (R4-003).
+			this.#terminateChild();
+			return;
+		}
 
 		try {
 			socket.write(`${JSON.stringify({ command: ["quit"], request_id: this.#nextRequestId++ })}\n`);
@@ -269,22 +330,85 @@ class MpvPlayer implements Player {
 	/* --- connecting -------------------------------------------------------------------------- */
 
 	async #connect(): Promise<void> {
-		try {
-			prepareSocketDir(this.#deps.platform, this.#target);
-		} catch (error) {
-			this.#unavailable(`cannot prepare the socket directory: ${reasonOf(error)}`);
-			return;
-		}
+		if (!this.#prepareSocketDir()) return;
 
-		const child = this.#spawn();
-		if (!child) return;
-
-		const socket = await this.#connectWithRetry();
+		const socket = await this.#reachNewChild();
 		if (!socket) return;
 
 		this.#attach(socket);
 		await this.#applyInitialVolume();
 		this.#emit({ kind: "ready" });
+	}
+
+	/**
+	 * One retry for a lost connection (R4-005). One mpv crash must not disable playback for the rest
+	 * of the session, and it must not become a respawn loop either: the second loss is terminal and
+	 * leaves the `unavailable` report the host acts on by recreating the player (S6's `r` key).
+	 */
+	#recover(): void {
+		if (this.#retried) {
+			const detail = this.#lastError;
+			this.#unavailable(detail ? `the mpv connection closed again: ${detail}` : "the mpv connection closed again");
+			return;
+		}
+		this.#retried = true;
+
+		const recovering = this.#reconnect();
+		this.#recovering = recovering;
+		const settled = () => {
+			if (this.#recovering === recovering) this.#recovering = undefined;
+		};
+		void recovering.then(settled, settled);
+	}
+
+	async #reconnect(): Promise<void> {
+		// The replacement child has nothing loaded: no future `end-file` can be about the lost track.
+		this.#trackId = undefined;
+		this.#trackName = undefined;
+		// The old child lost its only control channel: it may be alive and unreachable, so it goes.
+		this.#terminateChild();
+		if (!this.#prepareSocketDir()) return;
+
+		const socket = await this.#reachNewChild();
+		if (!socket) return;
+
+		this.#attach(socket);
+		// A fresh mpv comes up at its own default level. Telling the host `ready` without restoring the
+		// session volume would reset it silently after a recovery (R4-002).
+		await this.#applyInitialVolume();
+		this.#emit({ kind: "ready" });
+	}
+
+	/** The socket's directory, or a report and `false`: an untrusted path is not worth an mpv process. */
+	#prepareSocketDir(): boolean {
+		try {
+			prepareSocketDir(this.#deps.platform, this.#target);
+			return true;
+		} catch (error) {
+			this.#unavailable(`cannot prepare the socket directory: ${reasonOf(error)}`);
+			return false;
+		}
+	}
+
+	/**
+	 * Spawn the child and wait for the socket it is supposed to create. A shutdown that lands in this
+	 * window sends SIGTERM to the child we spawned instead of leaking an mpv that holds the socket
+	 * (R4-004): a child already gone is tolerated, it is not waited for, and it is not a report — the
+	 * only thing shutdown says is that it shut down.
+	 */
+	async #reachNewChild(): Promise<PlayerSocket | undefined> {
+		if (this.#closing) return undefined;
+		const child = this.#spawn();
+		if (!child) return undefined;
+
+		const socket = await this.#connectWithRetry();
+		if (this.#closing) {
+			// The last attempt may have landed after the shutdown: nothing owns this socket or child.
+			socket?.destroy?.();
+			this.#terminateChild();
+			return undefined;
+		}
+		return socket;
 	}
 
 	#spawn(): SpawnedProcess | undefined {
@@ -297,17 +421,45 @@ class MpvPlayer implements Player {
 			return undefined;
 		}
 
+		this.#child = child;
+		this.#stderr = "";
 		// Draining stderr keeps the pipe from filling up and gives a dead mpv a reason to quote.
 		child.stderr?.on("data", (chunk) => {
 			this.#stderr = `${this.#stderr}${String(chunk)}`.slice(-2000);
 		});
-		child.on("error", (error) => this.#unavailable(`cannot run ${command}: ${error.message}`));
-		child.on("exit", (code) => {
-			if (this.#closing) return;
-			const detail = this.#stderr.trim();
-			this.#unavailable(`${command} exited${code === null ? "" : ` with code ${code}`}${detail ? `: ${detail}` : ""}`);
+		child.on("error", (error) => {
+			// A child we replaced is not our process anymore: its late error is not a report about us.
+			if (this.#child !== child) return;
+			this.#unavailable(`cannot run ${command}: ${error.message}`);
 		});
+		child.on("exit", (code) => this.#onChildExit(child, command, code));
 		return child;
+	}
+
+	#onChildExit(child: SpawnedProcess, command: string, code: number | null): void {
+		// Replacing a child is our decision, and its death is not news about the current one.
+		if (this.#child !== child) return;
+		this.#child = undefined;
+		if (this.#closing) return;
+		// With a socket attached, the close that follows is the trigger for the one retry (R4-005):
+		// reporting here would race that retry with a terminal state.
+		if (this.#socket) return;
+		const detail = this.#stderr.trim();
+		this.#unavailable(`${command} exited${code === null ? "" : ` with code ${code}`}${detail ? `: ${detail}` : ""}`);
+	}
+
+	/**
+	 * SIGTERM the child we spawned. A child that is already gone is tolerated: the signal is a
+	 * request, and shutdown never waits for the answer (R4-004).
+	 */
+	#terminateChild(): void {
+		const child = this.#child;
+		this.#child = undefined;
+		try {
+			child?.kill?.("SIGTERM");
+		} catch {
+			// ESRCH: it died on its own between the decision and the signal.
+		}
 	}
 
 	async #connectWithRetry(): Promise<PlayerSocket | undefined> {
@@ -324,34 +476,45 @@ class MpvPlayer implements Player {
 			await delay(retryMs);
 		}
 
-		if (!this.#closing) {
-			this.#unavailable(`mpv is not listening on ${this.#target} (${attempts} attempts)`);
+		if (this.#closing) {
+			// A shutdown that landed while an attempt was in flight takes the child with it here, before
+			// the caller resumes: returning first would leave it alive for the rest of the budget (R4-003).
+			this.#terminateChild();
+			return undefined;
 		}
+		this.#unavailable(`mpv is not listening on ${this.#target} (${attempts} attempts)`);
 		return undefined;
 	}
 
 	#attach(socket: PlayerSocket): void {
 		this.#socket = socket;
+		// A new peer starts mid-line: a fragment left over from the dead one is not its message.
+		this.#buffer = "";
+		this.#lastError = undefined;
 		socket.setEncoding?.("utf8");
 		socket.on("data", (chunk) => this.#onData(String(chunk)));
 		socket.on("error", (error) => {
-			// The close that follows carries the report, so the reason is only kept here.
+			// The close that follows decides what happens next; the reason is kept for the retry's report.
 			this.#lastError = error.message;
 		});
 		socket.on("close", () => this.#onClose());
 	}
 
 	async #applyInitialVolume(): Promise<void> {
-		const level = this.#deps.volume;
+		// The last level this session asked for wins over the session-start default, so a recovery puts
+		// the card back where the user left it instead of at mpv's own default (R4-002).
+		const level = this.#volume ?? this.#deps.volume;
 		if (level === undefined) return;
-		await this.#request(["set_property", "volume", Math.trunc(level)]);
+		this.#volume = Math.trunc(level);
+		await this.#request(["set_property", "volume", this.#volume]);
 	}
 
 	#onClose(): void {
 		this.#socket = undefined;
 		this.#settleAll({ error: "closed" });
 		if (this.#closing) return;
-		this.#unavailable(this.#lastError ? `the mpv connection closed: ${this.#lastError}` : "the mpv connection closed");
+		if (this.#gaveUp) return;
+		this.#recover();
 	}
 
 	/* --- the protocol ------------------------------------------------------------------------ */
@@ -492,6 +655,8 @@ class MpvPlayer implements Player {
 
 	#unavailable(message: string): void {
 		this.#gaveUp = true;
+		// Giving up must not leave a child holding the socket we could not reach it on (R4-004).
+		this.#terminateChild();
 		this.#settleAll({ error: "unavailable" });
 		if (this.#reported) return;
 		this.#reported = true;
@@ -565,11 +730,43 @@ function attempt(connect: ConnectFn, target: string, timeoutMs: number): Promise
 	});
 }
 
-/** Linux and macOS sockets are files: their directory must exist before mpv may create the socket. */
+/**
+ * Linux and macOS sockets are files: their directory must exist before mpv may create the socket.
+ *
+ * The directory must also be ours and private (R1-001): a pre-created directory, a symlink planted
+ * by another local user or a path owned by somebody else would let them impersonate mpv. A
+ * directory we own that an older version left readable is tightened instead of trusted.
+ */
 function prepareSocketDir(platform: Platform, target: string): void {
 	// A Windows named pipe lives in the kernel: there is no directory, and no file to clean up.
 	if (platform === "win32") return;
-	mkdirSync(posix.dirname(target), { recursive: true, mode: 0o700 });
+	ensurePrivateDir(posix.dirname(target));
+}
+
+/**
+ * Create `dir` with mode 0700, or reuse it only when it is a real directory owned by this user. The
+ * ownership and mode checks are the point of the guard, so both are verified and not assumed: the
+ * path is predictable, and what makes it safe is that nobody else can have made it first.
+ */
+export function ensurePrivateDir(dir: string): void {
+	const existing = lstatSync(dir, { throwIfNoEntry: false });
+	if (!existing) {
+		// A first run on macOS may not have ~/Library/Caches yet. Create the ancestors without a
+		// recursive call on the leaf, which would hand this mode to every parent it invented (R1-001).
+		mkdirSync(posix.dirname(dir), { recursive: true });
+		mkdirSync(dir, { mode: PRIVATE_MODE });
+		const created = lstatSync(dir);
+		if (!created.isDirectory() || (created.mode & 0o777) !== PRIVATE_MODE) {
+			throw new Error(`${dir} could not be made private`);
+		}
+		return;
+	}
+
+	if (existing.isSymbolicLink()) throw new Error(`${dir} is a symlink, refusing to use it`);
+	if (!existing.isDirectory()) throw new Error(`${dir} is not a directory`);
+	const uid = process.getuid?.();
+	if (uid !== undefined && existing.uid !== uid) throw new Error(`${dir} belongs to another user`);
+	if ((existing.mode & 0o777) !== PRIVATE_MODE) chmodSync(dir, PRIVATE_MODE);
 }
 
 function replyOf(parsed: Readonly<Record<string, unknown>>, requestId: number): MpvReply {

@@ -8,7 +8,7 @@
  * socket they can create on the host that runs them.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -136,11 +136,22 @@ interface SpawnedCall {
 	readonly options: SpawnOptions;
 }
 
-function fakeChild() {
+/** The fake mpv process: it records the signals it was sent and can pretend it was already gone. */
+type FakeChild = SpawnedProcess & {
+	readonly unrefCalls: number;
+	/** Every signal this child received, in order: SIGTERM during a shutdown is a fact, not a flag. */
+	readonly killSignals: string[];
+	/** Set this to make `kill` fail the way it does for a process that is already dead. */
+	killError?: Error;
+	emit(event: string, value: unknown): void;
+};
+
+function fakeChild(): FakeChild {
 	const listeners = new Map<string, ((...args: never[]) => void)[]>();
 	const child = {
 		unrefCalls: 0,
-		killed: false,
+		killSignals: [] as string[],
+		killError: undefined as Error | undefined,
 		stderr: null,
 		on(event: string, listener: (...args: never[]) => void) {
 			const known = listeners.get(event) ?? [];
@@ -152,19 +163,16 @@ function fakeChild() {
 			child.unrefCalls += 1;
 			return child;
 		},
-		kill() {
-			child.killed = true;
+		kill(signal?: string) {
+			child.killSignals.push(signal ?? "SIGTERM");
+			if (child.killError) throw child.killError;
 			return true;
 		},
 		emit(event: string, value: unknown) {
 			for (const listener of listeners.get(event) ?? []) listener(value as never);
 		},
 	};
-	return child as SpawnedProcess & {
-		readonly unrefCalls: number;
-		readonly killed: boolean;
-		emit(event: string, value: unknown): void;
-	};
+	return child as FakeChild;
 }
 
 interface Harness {
@@ -172,7 +180,10 @@ interface Harness {
 	readonly mpv: FakeMpv;
 	readonly reports: PlayerReport[];
 	readonly spawns: SpawnedCall[];
-	readonly child: ReturnType<typeof fakeChild>;
+	/** Every child the player spawned, in order: a lifecycle test has more than one. */
+	readonly children: FakeChild[];
+	/** The first child: most tests spawn exactly one. */
+	readonly child: FakeChild;
 	readonly target: string;
 	readonly attempts: () => number;
 }
@@ -183,7 +194,7 @@ function createHarness(overrides: Partial<PlayerDeps> = {}): Harness {
 
 	const reports: PlayerReport[] = [];
 	const spawns: SpawnedCall[] = [];
-	const child = fakeChild();
+	const children: FakeChild[] = [];
 	const env = { XDG_RUNTIME_DIR: root };
 	const target = join(root, "pi-streambeats", "mpv.sock");
 	let attempts = 0;
@@ -192,9 +203,10 @@ function createHarness(overrides: Partial<PlayerDeps> = {}): Harness {
 		platform: "linux",
 		env,
 		uid: 1000,
-		tmpDir: root,
 		spawn: (command, args, options) => {
 			spawns.push({ command, args, options });
+			const child = fakeChild();
+			children.push(child);
 			return child;
 		},
 		connect: (path) => {
@@ -211,7 +223,18 @@ function createHarness(overrides: Partial<PlayerDeps> = {}): Harness {
 		...overrides,
 	});
 
-	return { player, mpv, reports, spawns, child, target, attempts: () => attempts };
+	return {
+		player,
+		mpv,
+		reports,
+		spawns,
+		children,
+		get child() {
+			return children[0] as FakeChild;
+		},
+		target,
+		attempts: () => attempts,
+	};
 }
 
 /* --- the tests ------------------------------------------------------------------------------- */
@@ -238,7 +261,9 @@ describe("spawning mpv (S6)", { skip: unixSockets }, () => {
 		const h = createHarness({ retryMs: 5, connectTimeoutMs: 10 });
 		await h.player.start();
 
-		assert.deepEqual(readdirSync(dirname(h.target)), [], "the directory exists and is still empty");
+		const dir = dirname(h.target);
+		assert.deepEqual(readdirSync(dir), [], "the directory exists and is still empty");
+		assert.equal(statSync(dir).mode & 0o777, 0o700, "the socket lives in a private directory (R1-001)");
 	});
 
 	it("applies the session volume as soon as it connects", async () => {
@@ -502,6 +527,7 @@ describe("connecting to the socket (S19)", { skip: unixSockets }, () => {
 		assert.equal(report?.kind, "unavailable");
 		const message = report?.kind === "unavailable" ? report.message : "";
 		assert.ok(message.includes(h.target), `expected the target in "${message}"`);
+		assert.deepEqual(h.children[0]?.killSignals, ["SIGTERM"], "giving up terminates the mpv it could never reach");
 
 		// Every later request is a state, not a rejection.
 		await h.player.play(track);
@@ -542,13 +568,144 @@ describe("connecting to the socket (S19)", { skip: unixSockets }, () => {
 	});
 
 	it("reports the connection closing while it was expected to stay", async () => {
-		const h = createHarness();
+		// The single retry (R4-005) spends the connect budget before the loss becomes terminal.
+		const h = createHarness({ retryMs: 5, connectTimeoutMs: 40 });
 		await h.mpv.listen(h.target);
 		await h.player.start();
 		await h.mpv.close();
 
 		await waitFor(() => h.reports.length === 2);
 		assert.equal(h.reports[1]?.kind, "unavailable");
+	});
+});
+
+describe("the socket directory (R1-001)", { skip: unixSockets }, () => {
+	it("never reuses a socket directory that points somewhere else", async () => {
+		const h = createHarness({ retryMs: 5, connectTimeoutMs: 20 });
+		const elsewhere = join(root, "elsewhere");
+		mkdirSync(elsewhere, { mode: 0o700 });
+		symlinkSync(elsewhere, dirname(h.target));
+
+		await h.player.start();
+
+		assert.equal(h.reports[0]?.kind, "unavailable");
+		assert.equal(h.spawns.length, 0, "a socket we cannot trust is not worth an mpv process");
+	});
+});
+
+describe("shutdown during startup (R4-004)", { skip: unixSockets }, () => {
+	it("sends SIGTERM to the child it spawned when quit lands before the socket connects", async () => {
+		// No server: the connect keeps retrying, which is the window where a quit used to leak mpv.
+		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
+
+		const started = h.player.start();
+		await delay(30);
+		await h.player.quit();
+		await started;
+
+		assert.equal(h.spawns.length, 1);
+		assert.deepEqual(h.children[0]?.killSignals, ["SIGTERM"]);
+		await delay(50);
+		assert.deepEqual(h.reports, [], "a shutdown is not a lost connection");
+	});
+
+	it("tolerates a child that is already gone, without waiting for it", async () => {
+		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
+
+		const started = h.player.start();
+		await delay(10);
+		const child = h.children[0];
+		assert.ok(child);
+		child.killError = new Error("ESRCH: no such process");
+
+		await h.player.quit();
+		await started;
+
+		assert.deepEqual(child.killSignals, ["SIGTERM"]);
+		assert.deepEqual(h.reports, []);
+	});
+});
+
+describe("the lifecycle the review found half-closed (T9a)", { skip: unixSockets }, () => {
+	it("kills the child when the shutdown arrives, not when the connect budget ends (R4-003)", async () => {
+		// Nobody listens: the connect loop would keep trying for two seconds on its own.
+		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
+		const started = h.player.start();
+		await delay(20);
+		const child = h.children[0];
+		assert.ok(child);
+
+		const began = Date.now();
+		await h.player.quit();
+
+		assert.deepEqual(child.killSignals, ["SIGTERM"], "the child dies with the shutdown, not with the budget");
+		assert.ok(Date.now() - began < 1000, "and it does not wait for the remaining budget");
+		await started;
+		assert.deepEqual(h.reports, [], "a shutdown is not a lost connection");
+	});
+
+	it("restores the session volume on the replacement mpv (R4-002)", async () => {
+		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
+		await h.mpv.listen(h.target);
+		await h.player.start();
+		await h.player.setVolume(33);
+
+		await h.mpv.close();
+		await h.mpv.listen(h.target);
+		await waitFor(() => h.reports.length === 2);
+
+		const volumes = h.mpv.allCommands().filter((command) => command[0] === "set_property" && command[1] === "volume");
+		assert.deepEqual(volumes.at(-1), ["set_property", "volume", 33], "the replacement knows the level");
+	});
+});
+
+describe("a lost connection (R4-005)", { skip: unixSockets }, () => {
+	it("gets one retry: the player is usable again without a new player", async () => {
+		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
+		await h.mpv.listen(h.target);
+		await h.player.start();
+		await h.player.play(track);
+		assert.deepEqual(h.reports, [{ kind: "ready" }]);
+
+		// mpv dies; a replacement mpv creates the same socket again, which is what the retry connects to.
+		await h.mpv.close();
+		await h.mpv.listen(h.target);
+
+		await waitFor(() => h.reports.length === 2);
+		assert.deepEqual(h.reports[1], { kind: "ready" }, "the recovered player says so");
+		assert.equal(h.spawns.length, 2, "the retry spawns a replacement mpv");
+		assert.deepEqual(h.children[0]?.killSignals, ["SIGTERM"], "the unreachable child is terminated, not orphaned");
+
+		// The lost track is not invented as `failed` here: resyncing the model is the host's call (T9b).
+		assert.equal(h.reports.length, 2, "no fabricated end or failure for the track the crash took");
+
+		const next: Track = { ...track, id: "/music/Chillhop/02 - Dusk.mp3", title: "Dusk" };
+		await h.player.play(next);
+		assert.deepEqual(h.mpv.commandArgs(3), ["loadfile", next.id, "replace"], "the recovered player still plays");
+	});
+
+	it("is terminal the second time: one reportable unavailable, no retry loop", async () => {
+		const h = createHarness({ retryMs: 5, connectTimeoutMs: 40 });
+		await h.mpv.listen(h.target);
+		await h.player.start();
+
+		await h.mpv.close();
+		await h.mpv.listen(h.target);
+		await waitFor(() => h.reports.length === 2);
+		assert.equal(h.reports[1]?.kind, "ready");
+
+		await h.mpv.close();
+		await waitFor(() => h.reports.length === 3);
+		assert.equal(h.reports[2]?.kind, "unavailable");
+
+		await delay(120);
+		assert.equal(h.spawns.length, 2, "exactly one retry per session: the second loss spawns nothing");
+		assert.deepEqual(h.children[1]?.killSignals, ["SIGTERM"], "giving up does not leave the unreachable child running");
+
+		// The host acts on that report by recreating the player (S6's `r` key): every later call answers.
+		await h.player.play(track);
+		await h.player.quit();
+		assert.equal(h.reports.length, 3);
 	});
 });
 
