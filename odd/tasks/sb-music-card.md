@@ -154,7 +154,7 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 | T3 | S7 | `lib/types.ts` + interfaz de resolución | worker | hecho | `872d5c2` |
 | T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | hecho (PR #5) | `87be737` |
 | T5 | S3, S11, S13, S15 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación y teclas | worker | hecho (PR pendiente) | `c29a5e5` |
-| T5b | S18 | `lib/core/model.ts`: filtro sobre la carpeta actual (unidad 2 de T5) | worker | abierta | — |
+| T5b | S18 | `lib/core/model.ts`: filtro sobre la carpeta actual (unidad 2 de T5) | worker | hecho (PR pendiente) | `4f961c1` |
 | T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | hecho (PR pendiente) | `b00943f` |
 | T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | abierta | — |
 | T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | abierta | — |
@@ -381,3 +381,16 @@ faltaba era cableado, no decisión de alcance. Se agrega **T13** (S17) con ese c
 fila la selecciona y activa, rueda recorre la lista, hover resalta — que necesita tres cosas: el evento de click en
 `lib/core/model.ts`, la traducción de coordenadas a fila en `lib/host/` y que el host entregue los eventos de mouse
 del overlay. El corte de S17 que T6 respetó sigue siendo válido: el render devuelve datos, no maneja el mouse.
+
+L27 (T5b cerrado: el filtro, y el `esc` que resuelve por término): `lib/core/model.ts` y `lib/core/view.ts`
+extendidos, +18 tests de modelo y +13 de vista; **183/183** en el gate. Decisiones donde la spec callaba, todas
+defendibles: `esc` resuelve por **término y no por flag de modo**, así que un filtro confirmado con cero resultados no
+es un callejón sin salida y la oferta "esc clears" no miente; el término queda después de `enter` (el listado sigue
+angostado) pero `blur` cierra el modo y conserva el término mientras ocultar limpia todo; el filtro es de la carpeta,
+así que `loadFolder`/`folder-loaded` lo limpian; la coincidencia es substring case-insensitive sobre el nombre
+mostrado, nunca sobre el path, sin fuzzy ni folding de acentos; mientras el modo está abierto, las teclas imprimibles
+escriben y el transporte se suprime; el input reemplaza la fila del pie (los hints mentirían mientras las teclas son
+texto) y el término se trunca por el **principio** con `…` para que el caret quede visible. Riesgos declarados: con el
+input en el pie, el `notice` (por ejemplo `cannot open, skipping`) no se ve hasta salir del modo; `/` funciona en la
+esquina pero la línea de input sólo la dibuja el marco expandido, porque las dos filas de la esquina son de
+reproducción (S12/S15). Costo de anunciar `/`: el pie perdió 2 celdas de barra a 90 columnas y 4 a 78.
