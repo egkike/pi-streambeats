@@ -104,6 +104,18 @@ function ids(tracks: readonly Track[] | undefined): string[] {
 	return (tracks ?? []).map((item) => item.id);
 }
 
+/** The name a row shows, which is what the filter matches (S18). */
+function nameOf(entry: LibraryEntry): string {
+	return entry.kind === "folder" ? entry.folder.name : entry.track.title;
+}
+
+/** Open the filter and type a term, one key per character, never by editing the state. */
+function typing(state: CardState, text: string): CardState {
+	let typed = key(state, "/");
+	for (const character of text) typed = key(typed, character);
+	return typed;
+}
+
 /** Deterministic randomness, so a shuffle can be asserted exactly (S11). */
 const fixed: ModelDeps = { random: () => 0 };
 
@@ -174,6 +186,7 @@ describe("the key table (S13)", () => {
 			"+": "volume-up",
 			"-": "volume-down",
 			z: "toggle-shuffle",
+			"/": "start-filter",
 		};
 
 		for (const [id, action] of Object.entries(expected)) assert.equal(actionFor(id), action, id);
@@ -202,8 +215,12 @@ describe("the key table (S13)", () => {
 		}
 	});
 
-	it("leaves the filter key to S18 instead of announcing a key that does nothing", () => {
-		assert.equal(actionFor("/"), undefined);
+	it("announces / now that it opens the filter (S18, no dead chrome)", () => {
+		const hint = footerHints().find((candidate) => candidate.action === "start-filter");
+
+		assert.equal(actionFor("/"), "start-filter");
+		assert.equal(hint?.key, "/");
+		assert.equal(hint?.help, "filter");
 	});
 });
 
@@ -618,6 +635,185 @@ describe("navigating up (S14)", () => {
 	});
 });
 
+describe("the filter over the current folder (S18)", () => {
+	it("opens with / and keeps browsing the very same folder and listing", () => {
+		const state = browsingAlbum();
+		const opened = key(state, "/");
+
+		assert.equal(opened.filtering, true);
+		assert.equal(opened.filter, "");
+		assert.equal(opened.path, state.path);
+		assert.deepEqual(visibleEntries(opened), visibleEntries(state));
+	});
+
+	it("narrows the listing incrementally and case-insensitively", () => {
+		const first = typing(browsingAlbum(), "0");
+		assert.equal(visibleEntries(first).length, 4);
+
+		const narrowed = key(first, "4");
+		assert.deepEqual(visibleEntries(narrowed).map(nameOf), ["04 - D.mp3"]);
+
+		assert.deepEqual(visibleEntries(typing(browsingAlbum(), "EXTRAS")).map(nameOf), ["Extras"]);
+		assert.deepEqual(visibleEntries(typing(browsingAlbum(), "extras")).map(nameOf), ["Extras"]);
+	});
+
+	it("matches row names, not the folder path behind them", () => {
+		// Every row lives under .../Chillhop; none of their own names starts with it (S18).
+		const state = typing(browsingAlbum(), "Chillhop");
+
+		assert.deepEqual(visibleEntries(state), []);
+	});
+
+	it("keeps the cursor in range while the listing narrows under it", () => {
+		const moved = at(browsingAlbum(), ROW.d);
+		assert.equal(moved.cursor, 4);
+
+		const narrowed = typing(moved, "0");
+		assert.equal(visibleEntries(narrowed).length, 4);
+		assert.equal(narrowed.cursor, 3);
+
+		const single = key(narrowed, "4");
+		assert.equal(visibleEntries(single).length, 1);
+		assert.equal(single.cursor, 0);
+	});
+
+	it("leaves the mode with enter and puts the cursor on the first result", () => {
+		const narrowed = typing(at(browsingAlbum(), ROW.d), "0");
+		const reduction = press(narrowed, "enter");
+
+		assert.equal(reduction.state.filtering, false);
+		assert.equal(reduction.state.filter, "0");
+		assert.equal(reduction.state.cursor, 0);
+		assert.equal(selectedEntry(reduction.state)?.kind, "track");
+		assert.deepEqual(reduction.effects, []);
+	});
+
+	it("clears the term and leaves the mode with esc, without hiding the card", () => {
+		const narrowed = typing(browsingAlbum(), "0");
+		const cleared = key(narrowed, "escape");
+
+		assert.equal(cleared.filter, "");
+		assert.equal(cleared.filtering, false);
+		assert.equal(cleared.presence, "visible");
+		assert.deepEqual(visibleEntries(cleared), cleared.entries);
+	});
+
+	it("hides the card when esc finds nothing to clear (S13, S18)", () => {
+		const hidden = key(key(browsingAlbum(), "/"), "escape");
+
+		assert.equal(hidden.presence, "hidden");
+		assert.equal(hidden.filtering, false);
+	});
+
+	it("clears a confirmed filter with esc before hiding the card", () => {
+		const confirmed = key(typing(browsingAlbum(), "0"), "enter");
+		assert.equal(confirmed.presence, "visible");
+
+		const cleared = key(confirmed, "escape");
+		assert.equal(cleared.filter, "");
+		assert.equal(cleared.presence, "visible");
+
+		assert.equal(key(cleared, "escape").presence, "hidden");
+	});
+
+	it("deletes the last typed character with backspace instead of going up a folder", () => {
+		const narrowed = typing(browsingAlbum(), "04");
+		const reduction = press(narrowed, "backspace");
+
+		assert.equal(reduction.state.filter, "0");
+		assert.equal(reduction.state.filtering, true);
+		assert.equal(reduction.state.path, ALBUM);
+		assert.deepEqual(reduction.effects, []);
+	});
+
+	it("still goes up a folder with backspace and u outside the mode", () => {
+		const state = browsingAlbum();
+
+		assert.equal(press(state, "backspace").state.path, `${ROOT}/StreamBeats`);
+		assert.deepEqual(press(state, "backspace"), press(state, "u"));
+	});
+
+	it("types the transport letters instead of acting on playback while the mode is on", () => {
+		const opened = key(playing(ROW.b), "/");
+
+		assert.equal(key(opened, "s").filter, "s");
+		assert.equal(key(opened, "s").playing?.id, B.id);
+		assert.deepEqual(press(opened, "s").effects, []);
+		assert.equal(key(opened, "z").shuffle, false);
+		assert.equal(key(opened, "+").volume, 70);
+		assert.equal(key(opened, "space").filter, " ");
+	});
+
+	it("keeps the arrows moving the cursor inside the narrowed listing", () => {
+		const narrowed = typing(browsingAlbum(), "0");
+
+		assert.equal(key(narrowed, "down").cursor, 1);
+		assert.equal(key(key(narrowed, "down"), "up").cursor, 0);
+	});
+
+	it("reports no results as a state that keeps and names the term", () => {
+		const empty = typing(browsingAlbum(), "zzz");
+
+		assert.equal(empty.filter, "zzz");
+		assert.equal(empty.filtering, true);
+		assert.deepEqual(visibleEntries(empty), []);
+		assert.equal(selectedEntry(empty), undefined);
+		assert.equal(key(empty, "enter").filter, "zzz");
+	});
+
+	it("ignores / while the mode is already on", () => {
+		const opened = key(browsingAlbum(), "/");
+
+		assert.equal(press(opened, "/").state, opened);
+	});
+
+	it("drops the filter when the card moves to another folder", () => {
+		const narrowed = typing(browsingAlbum(), "Ext");
+		const confirmed = key(narrowed, "enter");
+		const entered = press(confirmed, "enter");
+
+		assert.deepEqual(entered.effects, [{ kind: "load-folder", path: `${ALBUM}/Extras` }]);
+		assert.equal(entered.state.filter, "");
+		assert.equal(entered.state.filtering, false);
+
+		const reloaded = loaded(typing(browsingAlbum(), "0"), ROOT, []);
+		assert.equal(reloaded.filter, "");
+		assert.equal(reloaded.filtering, false);
+
+		const up = press(key(typing(browsingAlbum(), "0"), "enter"), "u");
+		assert.equal(up.state.filter, "");
+	});
+
+	it("gives up the mode when the card loses the keyboard, keeping the term", () => {
+		const narrowed = typing(browsingAlbum(), "0");
+		const blurred = reduce(narrowed, { kind: "blur" }).state;
+
+		assert.equal(blurred.filtering, false);
+		assert.equal(blurred.filter, "0");
+	});
+
+	it("forgets the filter when the card hides", () => {
+		const hidden = reduce(typing(playing(ROW.b), "0"), { kind: "overlay" }).state;
+
+		assert.equal(hidden.presence, "hidden");
+		assert.equal(hidden.filter, "");
+		assert.equal(hidden.filtering, false);
+	});
+
+	it("does not mutate the state it filters and answers the same input the same way", () => {
+		const state = deepFreeze(typing(browsingAlbum(), "0"));
+		const snapshot = structuredClone(state);
+
+		press(state, "4");
+		press(state, "backspace");
+		press(state, "enter");
+		press(state, "escape");
+
+		assert.deepEqual(state, snapshot);
+		assert.deepEqual(press(state, "4"), press(state, "4"));
+	});
+});
+
 describe("the reducer stays pure (S8, AGENTS.md)", () => {
 	it("does not mutate the state it receives", () => {
 		const state = deepFreeze(playingB());
@@ -645,7 +841,7 @@ describe("the reducer stays pure (S8, AGENTS.md)", () => {
 		const unfocused = reduce(state, { kind: "blur" }).state;
 
 		assert.equal(press(unfocused, "l").state, unfocused);
-		assert.equal(press(state, "/").state, state);
+		assert.equal(press(state, "q").state, state);
 		assert.equal(reduce(state, { kind: "focus" }).state, state);
 	});
 });

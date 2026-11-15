@@ -20,6 +20,8 @@ export interface Glyphs {
 	readonly cursor: string;
 	/** Expanded (S15): `▾` geometric, `v` ASCII. */
 	readonly expanded: string;
+	/** The filter input's caret (S18): `▏` geometric, `|` ASCII. */
+	readonly caret: string;
 	readonly bar: {
 		/** The part already played (S3). */
 		readonly fill: string;
@@ -35,6 +37,7 @@ const GEOMETRIC: Glyphs = {
 	paused: "○",
 	cursor: "▸",
 	expanded: "▾",
+	caret: "▏",
 	bar: { fill: "━", head: "╸", rest: "─" },
 };
 
@@ -43,6 +46,7 @@ const ASCII: Glyphs = {
 	paused: "-",
 	cursor: ">",
 	expanded: "v",
+	caret: "|",
 	bar: { fill: "=", head: "=", rest: "-" },
 };
 
@@ -129,8 +133,13 @@ function expandedFrame(
 
 	lines.push(headerLine(state, theme, width, options));
 
-	const start = windowStart(entries.length, listRows, state.cursor);
-	for (let slot = 0; slot < listRows; slot++) {
+	// An empty listing with a term is a state, not a blank card (S18): the row says why it is empty.
+	const noResults = state.filter !== "" && entries.length === 0;
+	const rows = noResults ? Math.max(0, listRows - 1) : listRows;
+	if (noResults && listRows > 0) lines.push(noResultsLine(state, theme, width));
+
+	const start = windowStart(entries.length, rows, state.cursor);
+	for (let slot = 0; slot < rows; slot++) {
 		const index = start + slot;
 		const entry = entries[index];
 		if (!entry) {
@@ -141,7 +150,12 @@ function expandedFrame(
 		lines.push(entryLine(entry, index, state, theme, width, glyphs, durationWidth));
 	}
 
-	if (footerRows > 0) lines.push(footerLine(state, theme, width, options, glyphs));
+	if (footerRows > 0) {
+		// The input takes the footer's row (S18): the key hints would lie while the keys are text.
+		lines.push(
+			state.filtering ? filterLine(state, theme, width, glyphs) : footerLine(state, theme, width, options, glyphs),
+		);
+	}
 	return { lines, hits };
 }
 
@@ -339,6 +353,44 @@ function progressBar(theme: ViewTheme, elapsedMs: number, totalMs: number, width
 	return `${paint(theme, "success", filled)}${paint(theme, "dim", rest)}`;
 }
 
+/* --- the filter over the current folder (S18) ------------------------------------------------ */
+
+/**
+ * The filter input (S18): a prompt, the term and a caret that says "this is an input". It takes the
+ * footer's row, so the card keeps its height and the key hints stop claiming keys that now type.
+ */
+function filterLine(state: CardState, theme: ViewTheme, width: number, glyphs: Glyphs): string {
+	const pad = width >= 2 ? HORIZONTAL_PADDING : 0;
+	const inner = width - pad * 2;
+	if (inner <= 0) return spaces(width);
+
+	const caret = glyphs.caret;
+	const prompt = inner >= 2 ? "/" : "";
+	const room = Math.max(0, inner - printableLength(prompt) - printableLength(caret));
+	const term = truncateHead(printable(state.filter), room);
+	const content = (prompt ? paint(theme, "accent", prompt) : "") + term + paint(theme, "accent", caret);
+	const contentWidth = printableLength(prompt) + printableLength(term) + printableLength(caret);
+	return spaces(pad) + content + spaces(inner - contentWidth) + spaces(pad);
+}
+
+/**
+ * The no-results row (S18): an empty listing with a term is a state that explains itself, never a
+ * blank card. It names the term and offers the key that clears it, both from the only key table.
+ * A term too long for the row is shortened itself, so the offer to clear it never falls off the end.
+ */
+function noResultsLine(state: CardState, theme: ViewTheme, width: number): string {
+	const pad = width >= 2 ? HORIZONTAL_PADDING : 0;
+	const inner = width - pad * 2;
+	const clear = footerHints().find((hint) => hint.action === "hide")?.key ?? "esc";
+	const head = "no matches for ";
+	const tail = ` · ${clear} clears`;
+	const budget = inner - printableLength(head) - printableLength(tail) - 2;
+	const term = printable(state.filter);
+	const text =
+		budget > 0 ? `${head}"${truncate(term, budget)}"${tail}` : truncate(printable(`${head}"${term}"${tail}`), inner);
+	return spaces(pad) + paint(theme, "muted", text) + spaces(inner - printableLength(text)) + spaces(pad);
+}
+
 /* --- the corner card (S15) ------------------------------------------------------------------- */
 
 function cornerFrame(
@@ -435,6 +487,15 @@ function truncateTail(text: string, budget: number): string {
 	const tail = characters.slice(characters.length - (budget - 1)).join("");
 	const slash = tail.indexOf("/");
 	return `${ELLIPSIS}${slash > 0 ? tail.slice(slash) : tail}`;
+}
+
+/** Truncation for an input: keep its end, which is what the user just typed and is looking at. */
+function truncateHead(text: string, budget: number): string {
+	if (budget <= 0) return "";
+	const characters = [...text];
+	if (characters.length <= budget) return text;
+	if (budget === 1) return ELLIPSIS;
+	return `${ELLIPSIS}${characters.slice(characters.length - (budget - 1)).join("")}`;
 }
 
 /**
