@@ -85,7 +85,7 @@ function folderRow(marker: string, name: string, width = 90): string {
 	return fill(` ${marker} ${name.padEnd(width - 10)} ${"    "} `, width);
 }
 
-const HINTS = "↑ · enter · space · n · p · u · l · s · + · - · z · esc";
+const HINTS = "↑ · enter · space · n · p · u · l · / · s · + · - · z · esc";
 
 function footerLine(hints: string, right: string, width: number): string {
 	return between(` ${hints}`, `${right} `, width);
@@ -94,6 +94,16 @@ function footerLine(hints: string, right: string, width: number): string {
 function bar(width: number, elapsedMs: number, totalMs: number): string {
 	const head = Math.min(width - 1, Math.max(0, Math.round((elapsedMs / totalMs) * (width - 1))));
 	return `${"━".repeat(head)}╸${"─".repeat(width - 1 - head)}`;
+}
+
+/** The filter input: the prompt, the term and the caret that makes it read as an input (S18). */
+function filterRow(term: string, width: number): string {
+	return fill(` /${term}▏`, width);
+}
+
+/** The no-results row: it names the active term and offers to clear it (S18). */
+function noResultsRow(term: string, width: number): string {
+	return fill(` no matches for "${term}" · esc clears`, width);
 }
 
 describe("the expanded card at 90 columns (S3, S9)", () => {
@@ -114,7 +124,7 @@ describe("the expanded card at 90 columns (S3, S9)", () => {
 			entryRow("  ", "03 - Neon Nights.mp3", "3:18"),
 			entryRow("▸ ", "04 - Paper Planes.mp3", "2:57"),
 			entryRow("  ", "05 - Rainy Window.mp3", "4:31"),
-			footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, 90),
+			footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, 90),
 		]);
 	});
 
@@ -142,7 +152,7 @@ describe("the expanded card at 78 columns (S3, S9)", () => {
 			entryRow("  ", "04 - Paper Planes.mp3", "2:57", 78),
 			entryRow("  ", "05 - Rainy Window.mp3", "4:31", 78),
 			entryRow("  ", "07 - Midnight Commute (extended midnight mix, remastered deluxe edi…", "6:12", 78),
-			footerLine(HINTS, `0:47 ${bar(10, 47_000, 222_000)} 3:42`, 78),
+			footerLine(HINTS, `0:47 ${bar(6, 47_000, 222_000)} 3:42`, 78),
 		]);
 	});
 
@@ -226,13 +236,13 @@ describe("the footer (S3, S13)", () => {
 	it("announces every key from the model's table and the progress at 90 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, 90));
+		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, 90));
 	});
 
 	it("shrinks the progress bar instead of dropping a key at 78 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 78, 8, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(10, 47_000, 245_000)} 4:05`, 78));
+		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(6, 47_000, 245_000)} 4:05`, 78));
 	});
 
 	it("drops the progress when the total is not known yet instead of inventing one", () => {
@@ -254,7 +264,7 @@ describe("the footer (S3, S13)", () => {
 
 		assert.equal(frame.lines.length, 10);
 		assert.deepEqual(frame.lines.slice(7, 9), [" ".repeat(90), " ".repeat(90)]);
-		assert.equal(frame.lines[9], footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, 90));
+		assert.equal(frame.lines[9], footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, 90));
 	});
 });
 
@@ -298,10 +308,22 @@ describe("the ASCII glyph family (S16)", () => {
 		const geometric = glyphFamily(false);
 		const ascii = glyphFamily(true);
 
-		assert.deepEqual([geometric.playing, geometric.paused, geometric.cursor, geometric.expanded], ["●", "○", "▸", "▾"]);
+		assert.deepEqual(
+			[geometric.playing, geometric.paused, geometric.cursor, geometric.expanded, geometric.caret],
+			["●", "○", "▸", "▾", "▏"],
+		);
 		assert.deepEqual([geometric.bar.fill, geometric.bar.head, geometric.bar.rest], ["━", "╸", "─"]);
-		assert.deepEqual([ascii.playing, ascii.paused, ascii.cursor, ascii.expanded], ["*", "-", ">", "v"]);
+		assert.deepEqual(
+			[ascii.playing, ascii.paused, ascii.cursor, ascii.expanded, ascii.caret],
+			["*", "-", ">", "v", "|"],
+		);
 		assert.deepEqual([ascii.bar.fill, ascii.bar.head, ascii.bar.rest], ["=", "=", "-"]);
+	});
+
+	it("draws the filter caret in ASCII too", () => {
+		const frame = renderFrame(card({ filter: "Blue", filtering: true }), plain, 90, 4, options({ asciiGlyphs: true }));
+
+		assert.equal(frame.lines[3], fill(" /Blue|", 90));
 	});
 
 	it("renders the markers and the progress in ASCII when the setting asks for it", () => {
@@ -363,6 +385,105 @@ describe("the breadcrumb (S14)", () => {
 	});
 });
 
+describe("the filter (S18)", () => {
+	it("shows the term and the caret in the footer while the mode is on", () => {
+		const frame = renderFrame(card({ filter: "Blue", filtering: true }), plain, 90, 4, options());
+
+		assert.equal(frame.lines[3], filterRow("Blue", 90));
+	});
+
+	it("shows an empty input with its caret before anything is typed", () => {
+		const frame = renderFrame(card({ filter: "", filtering: true }), plain, 90, 4, options());
+
+		assert.equal(frame.lines[3], filterRow("", 90));
+	});
+
+	it("narrows the listing and the header summary to what the term matches", () => {
+		const frame = renderFrame(card({ filter: "Blue", filtering: true }), plain, 90, 4, options());
+
+		assert.deepEqual(frame.lines, [
+			between(" sb-music StreamBeats/Chillhop", "1 track · 4:05 ", 90),
+			entryRow("▸ ", "02 - Blue Hour.mp3", "4:05"),
+			" ".repeat(90),
+			filterRow("Blue", 90),
+		]);
+	});
+
+	it("keeps the click map on the filtered indexes", () => {
+		const frame = renderFrame(card({ filter: "Blue", filtering: true }), plain, 90, 4, options());
+
+		assert.deepEqual(frame.hits.get(1), { index: 0, entry: ENTRIES[2] });
+		assert.equal(frame.hits.size, 1);
+	});
+
+	it("names the active term and offers to clear it when nothing matches", () => {
+		const frame = renderFrame(card({ filter: "zzz", filtering: true }), plain, 90, 4, options());
+
+		assert.deepEqual(frame.lines, [
+			between(" sb-music StreamBeats/Chillhop", "0 tracks ", 90),
+			noResultsRow("zzz", 90),
+			" ".repeat(90),
+			filterRow("zzz", 90),
+		]);
+	});
+
+	it("keeps explaining the empty listing after the mode is confirmed", () => {
+		const frame = renderFrame(card({ filter: "zzz", filtering: false }), plain, 90, 4, options());
+
+		assert.equal(frame.lines[1], noResultsRow("zzz", 90));
+		assert.equal(frame.lines[3], fill(` ${HINTS} `, 90));
+	});
+
+	it("takes the footer's row so no key hint lies while the keys are text", () => {
+		const playing = card({ filter: "Blue", filtering: true, playing: B });
+		const frame = renderFrame(playing, plain, 90, 8, options({ elapsedMs: 47_000 }));
+
+		assert.equal(frame.lines[7], filterRow("Blue", 90));
+		assert.equal(frame.lines.join("\n").includes("━"), false);
+	});
+
+	it("renders the filter and the no-results rows at 78 columns too", () => {
+		const frame = renderFrame(card({ filter: "zzz", filtering: true }), plain, 78, 4, options());
+
+		assert.deepEqual(frame.lines, [
+			between(" sb-music StreamBeats/Chillhop", "0 tracks ", 78),
+			noResultsRow("zzz", 78),
+			" ".repeat(78),
+			filterRow("zzz", 78),
+		]);
+		for (const line of frame.lines) assert.equal([...line].length, 78);
+	});
+
+	it("scrolls a term that does not fit, keeping its end and the caret", () => {
+		const term = "0123456789".repeat(9);
+		const shown = `…${term.slice(term.length - 73)}`;
+		const frame = renderFrame(card({ filter: term, filtering: true }), plain, 78, 4, options());
+
+		assert.equal(frame.lines[3], ` /${shown}▏ `);
+	});
+
+	it("shortens a long term instead of dropping the offer to clear it", () => {
+		const term = "0123456789".repeat(5);
+		const frame = renderFrame(card({ filter: term, filtering: false }), plain, 78, 4, options());
+
+		assert.equal(frame.lines[1], fill(` no matches for "${term.slice(0, 45)}…" · esc clears`, 78));
+	});
+
+	it("neutralizes control characters in the term, as everywhere else", () => {
+		const frame = renderFrame(card({ filter: "a\u0007b", filtering: true }), plain, 90, 4, options());
+
+		assert.equal(frame.lines[3], filterRow("ab", 90));
+	});
+
+	it("paints the input on the accent role and the no-results row on muted", () => {
+		const input = renderFrame(card({ filter: "Blue", filtering: true }), marked, 90, 4, options());
+		const empty = renderFrame(card({ filter: "zzz", filtering: true }), marked, 90, 4, options());
+
+		assert.equal(input.lines[3], ` {accent}/{text}Blue{accent}▏{text}${" ".repeat(83)}`);
+		assert.equal(empty.lines[1], ` {muted}no matches for "zzz" · esc clears{text}${" ".repeat(56)}`);
+	});
+});
+
 describe("the click map (S17)", () => {
 	it("maps each rendered row to the entry it stands for", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options());
@@ -412,5 +533,15 @@ describe("the frame budget (S3, S9)", () => {
 		const frame = renderFrame(card({ cursor: 0 }), plain, 2, 3, options());
 
 		for (const line of frame.lines) assert.ok([...line].length <= 2, line);
+	});
+
+	it("keeps the filter rows inside the same budget at absurd widths", () => {
+		for (const width of [2, 4, 10]) {
+			for (const state of [card({ filter: "Blue", filtering: true }), card({ filter: "zzz", filtering: false })]) {
+				const frame = renderFrame(state, plain, width, 3, options());
+
+				for (const line of frame.lines) assert.equal([...line].length, width, `${width}: ${line}`);
+			}
+		}
 	});
 });

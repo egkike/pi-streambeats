@@ -60,10 +60,12 @@ export interface CardState {
 	/** The footer's message (S11, S14): "at home", "playlist ended", a failure, the shuffle state. */
 	readonly notice?: string;
 	/**
-	 * Reserved for S18 (the next unit): the active filter term, empty today. The listing is read
-	 * through `visibleEntries`, so narrowing it later is one function and not a new state shape.
+	 * The filter over the current folder (S18): the term the listing is narrowed by, empty when there
+	 * is none. The listing is read through `visibleEntries`, so the narrowing lives in one function.
 	 */
 	readonly filter: string;
+	/** True only while the card is taking the filter term (S18): keys are text, not transport. */
+	readonly filtering: boolean;
 }
 
 /** Everything the card needs to exist: where it starts and how far up it may go (S14). */
@@ -80,6 +82,7 @@ export type KeyAction =
 	| "folder-up"
 	| "hide"
 	| "toggle-size"
+	| "start-filter"
 	| "toggle-pause"
 	| "stop"
 	| "next"
@@ -122,6 +125,7 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
 	{ id: "u", label: "u", action: "folder-up", help: "up a folder", hint: true },
 	{ id: "backspace", label: "⌫", action: "folder-up", help: "up a folder", hint: false },
 	{ id: "l", label: "l", action: "toggle-size", help: "expand", hint: true },
+	{ id: "/", label: "/", action: "start-filter", help: "filter", hint: true },
 	{ id: "s", label: "s", action: "stop", help: "stop", hint: true },
 	{ id: "+", label: "+", action: "volume-up", help: "vol", hint: true },
 	{ id: "-", label: "-", action: "volume-down", help: "vol", hint: true },
@@ -199,15 +203,24 @@ export function initialState(config: CardConfig): CardState {
 		volume: DEFAULT_VOLUME,
 		shuffle: false,
 		filter: "",
+		filtering: false,
 	};
 }
 
 /**
- * The rows the card shows (S3). Today the whole listing; S18 narrows it with the filter, and both
- * the cursor and the view read it through here so that change stays in one function.
+ * The rows the card shows (S3): the folder's listing narrowed by the active filter term (S18). Both
+ * the cursor and the view read the listing through here, so there is one answer to "what is on
+ * screen" and no second copy to keep in sync.
  */
 export function visibleEntries(state: CardState): readonly LibraryEntry[] {
-	return state.entries;
+	const term = state.filter.toLowerCase();
+	if (term === "") return state.entries;
+	return state.entries.filter((entry) => rowName(entry).toLowerCase().includes(term));
+}
+
+/** What a row is called on screen, which is what the filter matches: never the path behind it. */
+function rowName(entry: LibraryEntry): string {
+	return entry.kind === "folder" ? entry.folder.name : entry.track.title;
 }
 
 /** The row under the cursor, if the listing has one. */
@@ -230,10 +243,23 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 				effects: [],
 			};
 		case "blur":
-			return { state: state.focused ? { ...state, focused: false } : state, effects: [] };
-		case "folder-loaded":
+			// An input nobody can type into is dead chrome: losing the keyboard ends the mode, not the term.
 			return {
-				state: { ...state, path: event.path, entries: event.entries, cursor: 0, notice: undefined },
+				state: state.focused || state.filtering ? { ...state, focused: false, filtering: false } : state,
+				effects: [],
+			};
+		case "folder-loaded":
+			// The filter is scoped to one folder (S18): another listing arrives unfiltered.
+			return {
+				state: {
+					...state,
+					path: event.path,
+					entries: event.entries,
+					cursor: 0,
+					filter: "",
+					filtering: false,
+					notice: undefined,
+				},
 				effects: [],
 			};
 		case "track-ended":
@@ -261,9 +287,9 @@ function unchanged(state: CardState): Reduction {
 	return { state, effects: [] };
 }
 
-/** Hiding forgets the size and the keyboard: a hidden card is in neither state (S15). */
+/** Hiding forgets the size, the keyboard and the filter: a hidden card is in none of those states (S15, S18). */
 function hidden(state: CardState): CardState {
-	return { ...state, presence: "hidden", size: "corner", focused: false };
+	return { ...state, presence: "hidden", size: "corner", focused: false, filter: "", filtering: false };
 }
 
 /** Showing always lands in the corner, even when the card was hidden expanded (S15). */
@@ -272,9 +298,13 @@ function shown(state: CardState, size: CardSize): CardState {
 }
 
 function pressKey(state: CardState, id: string, deps: ModelDeps): Reduction {
-	const action = actionFor(id);
 	// Keys only reach a card that is on screen; the host routes them, and this is the model's guard.
-	if (!action || state.presence !== "visible") return unchanged(state);
+	if (state.presence !== "visible") return unchanged(state);
+	// The innermost mode takes the keyboard first (S18): while filtering, keys are text, not transport.
+	if (state.filtering) return filterKey(state, id);
+
+	const action = actionFor(id);
+	if (!action) return unchanged(state);
 
 	switch (action) {
 		case "cursor-up":
@@ -286,10 +316,12 @@ function pressKey(state: CardState, id: string, deps: ModelDeps): Reduction {
 		case "folder-up":
 			return folderUp(state);
 		case "hide":
-			return { state: hidden(state), effects: [] };
+			return clearFilterOrHide(state);
 		case "toggle-size":
 			if (!state.focused) return unchanged(state);
 			return { state: { ...state, size: state.size === "expanded" ? "corner" : "expanded" }, effects: [] };
+		case "start-filter":
+			return startFilter(state);
 		case "toggle-pause":
 			return togglePause(state);
 		case "stop":
@@ -315,6 +347,73 @@ function moveCursor(state: CardState, delta: number): Reduction {
 	return cursor === state.cursor ? unchanged(state) : { state: { ...state, cursor }, effects: [] };
 }
 
+/* --- the filter over the current folder (S18) ------------------------------------------------ */
+
+/** `/` opens the filter over the folder on screen (S18). */
+function startFilter(state: CardState): Reduction {
+	return { state: { ...state, filtering: true }, effects: [] };
+}
+
+/**
+ * The keyboard belongs to the input while the mode is on (S18). `enter` confirms, `esc` resolves the
+ * innermost mode, `backspace` edits the term instead of navigating, and the arrows still walk the
+ * narrowed listing. Everything else that is a character is typed; the transport keys wait.
+ */
+function filterKey(state: CardState, id: string): Reduction {
+	switch (id) {
+		case "enter":
+			// Confirming keeps the term and puts the cursor on the first result (S18).
+			return { state: { ...state, filtering: false, cursor: 0 }, effects: [] };
+		case "escape":
+			return clearFilterOrHide(state);
+		case "backspace":
+			return setFilter(state, dropLastCharacter(state.filter));
+		case "space":
+			return setFilter(state, `${state.filter} `);
+		case "up":
+			return moveCursor(state, -1);
+		case "down":
+			return moveCursor(state, 1);
+		case "/":
+			// The key that opened the mode is the mode's own key: it never becomes part of the term.
+			return unchanged(state);
+	}
+
+	const typed = typedCharacter(id);
+	return typed === undefined ? unchanged(state) : setFilter(state, state.filter + typed);
+}
+
+/** One printable character, or undefined for a key name the terminal sends as a word (`home`, `f1`). */
+const UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+
+function typedCharacter(id: string): string | undefined {
+	const characters = [...id];
+	if (characters.length !== 1) return undefined;
+	return UNPRINTABLE.test(id) ? undefined : id;
+}
+
+/** Set the term and keep the cursor inside whatever the listing is now (S18). */
+function setFilter(state: CardState, filter: string): Reduction {
+	const rows = visibleEntries({ ...state, filter }).length;
+	const cursor = Math.min(state.cursor, Math.max(0, rows - 1));
+	return { state: { ...state, filter, cursor }, effects: [] };
+}
+
+/** Backspace edits code points, never half a surrogate pair. */
+function dropLastCharacter(text: string): string {
+	return [...text].slice(0, -1).join("");
+}
+
+/**
+ * `esc` resolves the innermost thing first (S13, S18): a filter term is cleared before the card
+ * hides, whether or not the mode is still open, and clearing ends the mode. With nothing to clear
+ * there is nothing left to resolve, so the card hides.
+ */
+function clearFilterOrHide(state: CardState): Reduction {
+	if (state.filter !== "") return { state: { ...state, filter: "", filtering: false }, effects: [] };
+	return { state: hidden(state), effects: [] };
+}
+
 function activate(state: CardState, deps: ModelDeps): Reduction {
 	const entry = selectedEntry(state);
 	if (!entry) return unchanged(state);
@@ -324,11 +423,12 @@ function activate(state: CardState, deps: ModelDeps): Reduction {
 
 /**
  * Ask for a folder and move the card there at once (S14): the rows arrive with the scan result, so
- * the breadcrumb follows the key instead of the round trip. Playback is untouched (S11).
+ * the breadcrumb follows the key instead of the round trip. Playback is untouched (S11), and the
+ * filter does not travel to a folder it was never typed in (S18).
  */
 function loadFolder(state: CardState, path: string): Reduction {
 	return {
-		state: { ...state, path, entries: [], cursor: 0, notice: undefined },
+		state: { ...state, path, entries: [], cursor: 0, filter: "", filtering: false, notice: undefined },
 		effects: [{ kind: "load-folder", path }],
 	};
 }
