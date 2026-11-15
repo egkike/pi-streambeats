@@ -152,7 +152,7 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 | T1 | S1 | Scaffolding: `package.json`, `tsconfig.json`, `README.md` | inline | hecho | `872d5c2`, `f6da358` |
 | T2 | S2, S10 | `lib/settings.ts`: defaults, lectura, escritura atómica, malformado | inline | hecho (PR #2) | `430a2da` |
 | T3 | S7 | `lib/types.ts` + interfaz de resolución | worker | hecho | `872d5c2` |
-| T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | abierta | — |
+| T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | hecho (PR #5) | `87be737` |
 | T5 | S3, S11, S13, S15, S18 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación, teclas y filtro | worker | abierta | — |
 | T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | abierta | — |
 | T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | abierta | — |
@@ -313,6 +313,19 @@ un job `lane` con `paths-filter` decide el carril con la lista de AGENTS.md, y `
 PR no toca código. Salteado y no verde: un verde afirmaría que verificó algo. `.github/**` pasó al carril de
 tracking (es gobierno, no código de producto), y el `tipo:*` y la vinculación siguen exigidos en el carril de
 código.
+
+L22 (T4 cerrado, y un gate que mentía): `lib/library/{scan,paths,names}.ts` + `tests/library/`, commit `87be737`,
+PR #5, issue #4. Una carpeta por vez, nueve extensiones, ocultos por prefijo, `realpath` antes de listar, techo puro
+sobre paths canónicos, y tres estados de falla como datos en vez de excepciones. Delegado a `gentle-ai-worker` con
+handoff acotado; el worker **se colgó** después de un `bash` y devolvió control por timeout, pero los archivos ya
+estaban escritos: 38 tests verdes y sólo formato pendiente. Lección de orquestación: el bloque fue en modo `task`
+(espera bloqueante) con la política de background encendida; en `background` habría seguido trabajando y la
+notificación me despertaba, en vez de quedarme cuatro minutos parado. Hallazgo propio, no del worker: `pnpm test`
+usaba `tests/*.test.ts`, que **no entra en subdirectorios**, así que el gate corría 16 tests de 54 y salía verde —
+la tercera aparición del mismo mal (L14 fue el glob de Windows). Arreglado a `tests/**/*.test.ts`; el número visible
+ahora es 54. Queda anotado que revertir ese glob no lo detecta ningún test: es fragilidad conocida, no resuelta.
+Assess nativo sobre el candidato: medium, `reviewDue: false`; 631 líneas autoradas, `size:exception` en el PR porque
+partirlo separaría los tests del código del mismo comportamiento.
 
 L23 (matriz de Node; pregunta del usuario): "Nosotros tenemos ubuntu 26.04... deberíamos actualizar algún CI?"
 Verificado contra el calendario oficial de Node y las releases de cada action, no de memoria: el runner ya es
