@@ -156,8 +156,8 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 | T5 | S3, S11, S13, S15 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación y teclas | worker | hecho (PR pendiente) | `c29a5e5` |
 | T5b | S18 | `lib/core/model.ts`: filtro sobre la carpeta actual (unidad 2 de T5) | worker | hecho (PR pendiente) | `4f961c1` |
 | T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | hecho (PR pendiente) | `b00943f` |
-| T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | abierta | — |
-| T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | abierta | — |
+| T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | hecho (PR #16) | `6f3b70d` |
+| T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | hecho (PR #17) | `5828bd5`, `a083366` |
 | T9 | S1, S4, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | abierta | — |
 | T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | abierta — frontera hecha, falta el host falso | `872d5c2` (parcial) |
 | T11 | S9 | Suite completa verde y reporte | inline | abierta — el gate está verde, la suite es de 4 tests | — |
@@ -394,3 +394,19 @@ texto) y el término se trunca por el **principio** con `…` para que el caret 
 input en el pie, el `notice` (por ejemplo `cannot open, skipping`) no se ve hasta salir del modo; `/` funciona en la
 esquina pero la línea de input sólo la dibuja el marco expandido, porque las dos filas de la esquina son de
 reproducción (S12/S15). Costo de anunciar `/`: el pie perdió 2 celdas de barra a 90 columnas y 4 a 78.
+
+L28 (T7 y T8 cerrados, y el CRITICAL que encontró la review): `lib/core/now-playing.ts` (PR #16, `6f3b70d`) y
+`lib/player/mpv.ts` (PR #17, `5828bd5` + corrección `a083366`). 243 tests en `main`. **T7**: la regla del título es
+`^\d+ - ` + extensión conocida y nada más — `2024-11-10 - live set.mp3` no se toca, y `folderLabel` usa el
+directorio del archivo que suena, no la carpeta que estás navegando. **T8**: correlación de `request_id`, `play`
+limpia `pause` porque la propiedad sobrevive a `loadfile`, sólo `eof` avanza y sólo `error` falla, target IPC puro
+por plataforma, reintento de conexión acotado, y tests contra un `net.Server` real. Lo importante del día: la review
+nativa sobre T8 encontró un **CRITICAL determinístico** que 32 tests no veían — si mpv no contestaba `loadfile`, el
+`Promise.all` descartaba las respuestas y el track no emitía ni `ended` ni `failed`: la cola se congelaba en silencio
+(R4-001). Corregido con un test que reproduce el caso. Asses nativo de los dos: `reviewDue: false`; la review de T8
+corrió por decisión explícita del dueño, y la de T7 también. Tres lecciones de proceso que ya están en `AGENTS.md`:
+se commitea **antes** de pedir assess (un rango commiteado no se puede evaluar con archivos sin commitear); el
+delivery sale **desde el worktree que tiene el candidato** (empujar una rama ajena desde `main` desactiva el guard en
+silencio, y así se entregó T7 sin assess); y revisar antes del push ahorra un run de CI (T8 corrió CI dos veces).
+Pendiente declarado de la review de T8, con dueño: `R1-001` (el default de macOS cae en el tmpdir con uid, path
+predecible) y `R4-004` (`quit()` durante el arranque filtra mpv), las dos a decidir en T9/T12.
