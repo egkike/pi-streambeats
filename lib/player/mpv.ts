@@ -229,6 +229,8 @@ class MpvPlayer implements Player {
 	/** The single reconnect in flight, if any: a `play` that lands inside it waits for it (R4-005). */
 	#recovering?: Promise<void>;
 	#closing = false;
+	/** The level this session last asked for; re-applied after a recovery (R4-002). */
+	#volume: number | undefined;
 	#gaveUp = false;
 	/** True once the one retry was spent: a second loss is terminal, not a loop (R4-005). */
 	#retried = false;
@@ -293,8 +295,12 @@ class MpvPlayer implements Player {
 		});
 	}
 
-	setVolume(level: number): Promise<void> {
-		return this.#serialize(() => this.#setProperty("volume", Math.trunc(level)));
+	async setVolume(level: number): Promise<void> {
+		const value = Math.trunc(level);
+		await this.#serialize(() => this.#setProperty("volume", value));
+		// Remembered only once it landed, so a recovery restores what the session actually asked for and
+		// a level set before connecting is not applied twice (R4-002).
+		this.#volume = value;
 	}
 
 	async quit(): Promise<void> {
@@ -305,7 +311,13 @@ class MpvPlayer implements Player {
 		this.#socket = undefined;
 		// Nothing is left to wait for: whatever was in flight would wait forever on a dying socket.
 		this.#settleAll({ error: "quit" });
-		if (!socket) return;
+		if (!socket) {
+			// No channel means the child is still connecting or already unreachable. Kill it HERE, not
+			// when the connect loop happens to notice: the caller may never come back to us, and an mpv
+			// that outlives the process holding its socket is the leak R4-004 was meant to close (R4-003).
+			this.#terminateChild();
+			return;
+		}
 
 		try {
 			socket.write(`${JSON.stringify({ command: ["quit"], request_id: this.#nextRequestId++ })}\n`);
@@ -361,6 +373,9 @@ class MpvPlayer implements Player {
 		if (!socket) return;
 
 		this.#attach(socket);
+		// A fresh mpv comes up at its own default level. Telling the host `ready` without restoring the
+		// session volume would reset it silently after a recovery (R4-002).
+		await this.#applyInitialVolume();
 		this.#emit({ kind: "ready" });
 	}
 
@@ -461,9 +476,13 @@ class MpvPlayer implements Player {
 			await delay(retryMs);
 		}
 
-		if (!this.#closing) {
-			this.#unavailable(`mpv is not listening on ${this.#target} (${attempts} attempts)`);
+		if (this.#closing) {
+			// A shutdown that landed while an attempt was in flight takes the child with it here, before
+			// the caller resumes: returning first would leave it alive for the rest of the budget (R4-003).
+			this.#terminateChild();
+			return undefined;
 		}
+		this.#unavailable(`mpv is not listening on ${this.#target} (${attempts} attempts)`);
 		return undefined;
 	}
 
@@ -482,9 +501,12 @@ class MpvPlayer implements Player {
 	}
 
 	async #applyInitialVolume(): Promise<void> {
-		const level = this.#deps.volume;
+		// The last level this session asked for wins over the session-start default, so a recovery puts
+		// the card back where the user left it instead of at mpv's own default (R4-002).
+		const level = this.#volume ?? this.#deps.volume;
 		if (level === undefined) return;
-		await this.#request(["set_property", "volume", Math.trunc(level)]);
+		this.#volume = Math.trunc(level);
+		await this.#request(["set_property", "volume", this.#volume]);
 	}
 
 	#onClose(): void {
@@ -729,6 +751,9 @@ function prepareSocketDir(platform: Platform, target: string): void {
 export function ensurePrivateDir(dir: string): void {
 	const existing = lstatSync(dir, { throwIfNoEntry: false });
 	if (!existing) {
+		// A first run on macOS may not have ~/Library/Caches yet. Create the ancestors without a
+		// recursive call on the leaf, which would hand this mode to every parent it invented (R1-001).
+		mkdirSync(posix.dirname(dir), { recursive: true });
 		mkdirSync(dir, { mode: PRIVATE_MODE });
 		const created = lstatSync(dir);
 		if (!created.isDirectory() || (created.mode & 0o777) !== PRIVATE_MODE) {

@@ -44,6 +44,16 @@ describe("the fallback directory (R1-001)", { skip: posixOnly }, () => {
 	});
 });
 
+describe("a first run may not have the parents yet (R1-001)", { skip: posixOnly }, () => {
+	it("creates the missing ancestors and keeps the leaf private", () => {
+		const nested = join(root, "Library", "Caches", "pi-streambeats");
+
+		ensurePrivateDir(nested);
+
+		assert.equal(statSync(nested).mode & 0o777, 0o700, "the leaf is ours and private");
+	});
+});
+
 describe("the socket directory guard (R1-001)", { skip: posixOnly }, () => {
 	it("creates the directory with mode 0700", () => {
 		const dir = join(root, "pi-streambeats");

@@ -626,6 +626,39 @@ describe("shutdown during startup (R4-004)", { skip: unixSockets }, () => {
 	});
 });
 
+describe("the lifecycle the review found half-closed (T9a)", { skip: unixSockets }, () => {
+	it("kills the child when the shutdown arrives, not when the connect budget ends (R4-003)", async () => {
+		// Nobody listens: the connect loop would keep trying for two seconds on its own.
+		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
+		const started = h.player.start();
+		await delay(20);
+		const child = h.children[0];
+		assert.ok(child);
+
+		const began = Date.now();
+		await h.player.quit();
+
+		assert.deepEqual(child.killSignals, ["SIGTERM"], "the child dies with the shutdown, not with the budget");
+		assert.ok(Date.now() - began < 1000, "and it does not wait for the remaining budget");
+		await started;
+		assert.deepEqual(h.reports, [], "a shutdown is not a lost connection");
+	});
+
+	it("restores the session volume on the replacement mpv (R4-002)", async () => {
+		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
+		await h.mpv.listen(h.target);
+		await h.player.start();
+		await h.player.setVolume(33);
+
+		await h.mpv.close();
+		await h.mpv.listen(h.target);
+		await waitFor(() => h.reports.length === 2);
+
+		const volumes = h.mpv.allCommands().filter((command) => command[0] === "set_property" && command[1] === "volume");
+		assert.deepEqual(volumes.at(-1), ["set_property", "volume", 33], "the replacement knows the level");
+	});
+});
+
 describe("a lost connection (R4-005)", { skip: unixSockets }, () => {
 	it("gets one retry: the player is usable again without a new player", async () => {
 		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
