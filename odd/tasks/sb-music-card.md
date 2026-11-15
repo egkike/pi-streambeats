@@ -162,6 +162,7 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 | T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | abierta — frontera hecha, falta el host falso | `872d5c2` (parcial) |
 | T11 | S9 | Suite completa verde y reporte | inline | abierta — el gate está verde, la suite es de 4 tests | — |
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
+| T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | abierta | — |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -372,3 +373,11 @@ tabla de wcwidth); a anchos muy angostos el pie trunca y puede perder `esc`. **C
 lista el mouse como fuera de alcance de v1, mientras S17 y T6 piden el mapa de `hits` y `L12` registra "Mouse completo"
 del usuario. Se entregó el mapa como dato y sin cableado; falta que el dueño decida cuál de los dos documentos manda y
 se corrija el otro.
+
+L26 (el mouse es de v1; contradicción resuelta por el dueño, verbatim): "Lo del mouse deberíamos hacer lo que dicen
+S17/T6/L12 que es la doc oficial." Queda escrito en los dos lados: `AGENTS.md` **saca** el mouse de "Fuera de alcance
+(v1)" y deja explícito que S17 lo pide, `L12` registró "Mouse completo" y T6 ya entrega el mapa de `hits`; lo que
+faltaba era cableado, no decisión de alcance. Se agrega **T13** (S17) con ese cableado pendiente — click sobre una
+fila la selecciona y activa, rueda recorre la lista, hover resalta — que necesita tres cosas: el evento de click en
+`lib/core/model.ts`, la traducción de coordenadas a fila en `lib/host/` y que el host entregue los eventos de mouse
+del overlay. El corte de S17 que T6 respetó sigue siendo válido: el render devuelve datos, no maneja el mouse.
