@@ -326,3 +326,14 @@ la tercera aparición del mismo mal (L14 fue el glob de Windows). Arreglado a `t
 ahora es 54. Queda anotado que revertir ese glob no lo detecta ningún test: es fragilidad conocida, no resuelta.
 Assess nativo sobre el candidato: medium, `reviewDue: false`; 631 líneas autoradas, `size:exception` en el PR porque
 partirlo separaría los tests del código del mismo comportamiento.
+
+L23 (matriz de Node; pregunta del usuario): "Nosotros tenemos ubuntu 26.04... deberíamos actualizar algún CI?"
+Verificado contra el calendario oficial de Node y las releases de cada action, no de memoria: el runner ya es
+`ubuntu-26.04` (coincide con la máquina, 26.04.1 LTS) y las cuatro actions están en su major actual —
+`actions/checkout@v7` (v7.0.1), `actions/setup-node@v7` (v7.1.0), `pnpm/action-setup@v6` (v6.1.1, que ya soporta
+pnpm v12), `dorny/paths-filter@v4` (v4.0.3). El agujero estaba en la matriz de Node: probábamos 22.19.0 (el piso
+declarado, hoy Maintenance LTS con EOL 2027-04-30) y 24 (Maintenance LTS desde el 2026-10-20, y lo que corre el
+dueño), pero **no 26**, que es Active LTS desde el 2026-10-28 (`Lithium`, hoy 26.13.1). Decisión del usuario:
+"Sumar 26 y conservar 24". La matriz queda en 22.19.0 y 24 y 26 sobre ubuntu-26.04, más macOS en 26, y el probe
+IPC pasa a 26. Ninguno de los dos pendientes reales se arregla con un bump: Windows necesita T12 (el mpv falso por
+named pipes) y `macos-26-intel` sigue sin hardware de referencia (L16).
