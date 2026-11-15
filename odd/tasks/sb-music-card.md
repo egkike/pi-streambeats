@@ -150,7 +150,7 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 | ID | S# | Tarea | Ruta | Estado | Commit |
 |----|----|-------|------|--------|--------|
 | T1 | S1 | Scaffolding: `package.json`, `tsconfig.json`, `README.md` | inline | hecho | `872d5c2`, `f6da358` |
-| T2 | S2, S10 | `lib/settings.ts`: defaults, lectura, escritura atómica, malformado | worker | **abierta — siguiente** | — |
+| T2 | S2, S10 | `lib/settings.ts`: defaults, lectura, escritura atómica, malformado | inline | hecho (PR #2) | `430a2da` |
 | T3 | S7 | `lib/types.ts` + interfaz de resolución | worker | hecho | `872d5c2` |
 | T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | abierta | — |
 | T5 | S3, S11, S13, S15, S18 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación, teclas y filtro | worker | abierta | — |
@@ -275,6 +275,19 @@ el header de este documento (decía «no hay commits»), la tabla de Tasks — q
 los commits reales — y el encabezado de Git Governance en `AGENTS.md`, que describía la política como objetivo
 futuro. Hallazgos al revisar: T1 y T3 estaban hechos sin marcarlo, y de T10 sólo existe el test de frontera. Nada
 de código de producto todavía. Con la política ya vigente, la próxima unidad de código abre issue antes de la rama.
+
+L19 (T2 cerrado, con la evidencia): `lib/settings.ts` + `tests/settings.test.ts` en la rama `feat/t2-settings`,
+commit `430a2da`, PR #2, issue #1. Rutas puras por `platform`/`env`/`home`, XDG con fallback a `~/.config`,
+`%APPDATA%` en Windows; archivo ausente → defaults escritos una vez (dir 0750, file 0600, tmp+rename); malformado
+→ defaults + advertencia **sin reescribir** el archivo; valores válidos ganan, los inutilizables vuelven a su
+default y se nombran, claves desconocidas se ignoran; `libraryRoot` = directorio de música XDG con fallback
+`~/Music`. Test-first: 12 tests escritos antes del módulo, RED observado; el segundo RED fue del test (esperaba
+separadores mezclados en el path de Windows), no del código. Hallazgo de toolchain: `tsc` rechazaba
+`import "…/settings.ts"`; faltaba `allowImportingTsExtensions` en `tsconfig.json` (`noEmit` ya estaba) — el hueco
+iba a morder en cada módulo nuevo. Local: `pnpm check` verde, 16/16 tests. CI del PR: `changes`, tres `check`
+(ubuntu 22.19 y 24, macos-26 24), `ipc probe (macOS, real mpv)` y `gate`, todos en verde — el contexto que el
+ruleset va a exigir ya reportó una vez. La ruta de T2 quedó `inline`, no `worker`: una sola unidad de
+comportamiento, más chica que el costo de arrancar un subagente.
 
 L20 (gobierno tomado del repo Go, decisión del usuario verbatim): "Habíamos quedado en tomar como ejemplo el
 repo de https://github.com/egkike/streambeats-player … verifica como tenemos ahí las rulesets y CI para veri si
