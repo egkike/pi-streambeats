@@ -275,3 +275,20 @@ el header de este documento (decía «no hay commits»), la tabla de Tasks — q
 los commits reales — y el encabezado de Git Governance en `AGENTS.md`, que describía la política como objetivo
 futuro. Hallazgos al revisar: T1 y T3 estaban hechos sin marcarlo, y de T10 sólo existe el test de frontera. Nada
 de código de producto todavía. Con la política ya vigente, la próxima unidad de código abre issue antes de la rama.
+
+L20 (gobierno tomado del repo Go, decisión del usuario verbatim): "Habíamos quedado en tomar como ejemplo el
+repo de https://github.com/egkike/streambeats-player … verifica como tenemos ahí las rulesets y CI para veri si
+sirven para este proyecto", y ante la comparación: "Todo como la referencia". Verificado en la referencia: el
+ruleset `main-ci-gate` tiene `deletion`, `non_fast_forward` y `required_status_checks` con **un solo contexto**
+(`strict: false`), `bypass_actors: []` y `current_user_can_bypass: "never"`; **no lleva regla `pull_request`**,
+porque un check requerido también se aplica a los pushes directos y uno salteado se rechaza (GH013), así que toda
+escritura en `main` pasa por un PR de todos modos. Su `ci.yml` filtra a nivel de job y el job requerido siempre
+corre ("a SKIPPED check does not satisfy it"); el nuestro llega al mismo objetivo con el agregador `gate`
+(`if: always()`, acepta `skipped`), que ya reportó verde dos veces en el PR #2 — se conserva, es el contexto
+estable que evita reeditar el ruleset al sumar runners. Transferido: `required_status_checks: gate` al ruleset
+`main-gate` sin bypass (y por lo tanto la línea de `AGENTS.md` que permitía mergear sobre un rojo se reescribe:
+ahora dice la verdad del ruleset); `pr-gate.yml` adaptado, que exige `Closes #N` con la issue en
+`status:approved` y exactamente un `type:*`, como **señal y no candado** porque el único check requerido es
+`gate`; y las etiquetas `status:approved`, los cinco `type:*` y `size:exception`. Descartado a propósito:
+`close-unsolicited-prs.yml` (implementa una política de ingreso sólo por issues que este repo todavía no
+declaró) y `release.yml` (publica binarios; acá no hay artefacto compilado).

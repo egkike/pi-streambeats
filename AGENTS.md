@@ -133,23 +133,33 @@ abierta, o si se agregó una dependencia de runtime sin decisión explícita.
 - Nunca se commitea sin pedido explícito del dueño. `node_modules/`, binarios y sockets nunca entran.
 - Los cambios de comportamiento actualizan `odd/tasks/<feature>.md`: `L<n>` nuevo y `S<n>` afectados.
 
-## Git Governance (vigente desde que el repo existe)
+## Git Governance (issue-first, owner merge)
 
-El repositorio existe y es público: `github.com/egkike/pi-streambeats`, rama `main`. El ruleset `main-gate` está
-activo sobre `refs/heads/main` con `deletion` y `non_fast_forward`; los `required_status_checks` y el PR
-obligatorio todavía no están configurados (`gate` es el nombre único que los llevará, para que sumar un runner no
-trabe `main`). Con repositorio, esto **ya no es intención declarada sino política que se aplica**:
+El repositorio es público: `github.com/egkike/pi-streambeats`, rama `main`. El ruleset `main-gate` sobre
+`refs/heads/main` tiene `deletion`, `non_fast_forward` y `required_status_checks: gate` (`strict: false`), **sin
+bypass**: ni el dueño puede mergear sobre un rojo. Un check requerido se aplica también a los pushes directos, así
+que **toda escritura en `main` llega por un PR** — no hace falta una regla `pull_request` aparte. `gate` es el
+contexto único y estable (agrega `check` e `ipc`, y acepta `skipped` cuando un filtro decidió que no había nada
+que verificar), para que sumar un runner no trabe `main`.
 
-- **El dueño mergea. Los agentes no.** Abren PR, corren checks, y esperan.
-- **Issue-first para código**: la issue (con su alcance) existe antes de la rama. Docs y `odd/` pueden
-  viajar sin issue cuando no llevan código.
+- **El dueño mergea. Los agentes no.** Abren PR, corren checks y esperan.
+- **Carriles**:
+  - **Código** (`extensions/**`, `lib/**`, `tests/**`, `scripts/**`, `package.json`, `tsconfig.json`, `biome.json`,
+    `.github/workflows/ci.yml`): issue con `status:approved` **antes** de la rama → PR con `Closes #N` → checks
+    verdes → merge del dueño.
+  - **Docs y tracking** (`docs/**`, `design/**`, `README.md`, `AGENTS.md`, `odd/**`): PR, sin issue cuando no
+    viaja código.
+  `status:approved` lo pone el dueño. El agente puede pre-marcarlo **sólo** cuando el dueño ya autorizó ese ciclo
+  en la conversación: la autorización de ciclo no se auto-autoriza y no se extiende al ciclo siguiente.
+- **`pr-gate` es señal, no candado**: exige `Closes #N` con la issue aprobada y exactamente un `type:*`. El único
+  check requerido es `gate`, así que el carril de docs puede mergear con `issue-gate` en rojo — eso es el carril
+  funcionando como está declarado, no una falla del gate.
 - **Review nativa (RDD) sobre el candidato ya commiteado**, no sobre el árbol sucio.
-- **La puerta de CI es señal, no candado**: el dueño puede mergear sobre un check rojo a propósito, y
-  eso se documenta en el PR.
-- **Descubrimiento de vulnerabilidades** por el canal privado del repo (advisory), nunca en una issue
-  pública.
-- **Etiquetas y superficies**: si se adopta el ingreso sólo por issues, la política y su workflow se
-  mueven juntos en la misma unidad de trabajo.
+- **Descubrimiento de vulnerabilidades** por el canal privado del repo (advisory), nunca en una issue pública.
+- **Etiquetas**: `status:approved`, exactamente un `type:feature|bug|docs|refactor|chore` por PR, y
+  `size:exception` cuando un PR pasa la heurística de ~400 líneas autoradas (guarda de carga de review, advisory).
+- **Ingreso sólo por issues**: todavía no está adoptado. Cuando se adopte, el `CONTRIBUTING.md` y el workflow que
+  lo hace cumplir se mueven juntos en la misma unidad de trabajo.
 
 ## Riesgos aceptados
 

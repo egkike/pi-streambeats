@@ -1,0 +1,80 @@
+# PR governance gate — issue-first workflow (owner-approved issues only).
+#
+# Enforcement of AGENTS.md "Git Governance": every pull request must
+#   1. close or resolve at least one issue of THIS repository via a body
+#      keyword (`Closes #N`, `Fixes #N`, `Resolves #N` — case-insensitive),
+#   2. that issue must carry the `status:approved` label (owner approval),
+#   3. carry EXACTLY ONE `type:*` label for the PR-type summary.
+#
+# This check is a REVIEW SIGNAL, NOT A MERGE LOCK: the only required context on
+# `main` is `gate` from ci.yml. The docs/tracking lane (docs/**, README.md,
+# AGENTS.md, odd/**, design/**) travels without an issue when no code comes with
+# it, so a docs-only PR may be merged with this check red — that is the lane
+# working as declared, not a failure of the gate.
+#
+# Runners ship `gh` preinstalled; nothing here needs jq or a checkout.
+
+name: pr-gate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, labeled, unlabeled]
+
+# The group is keyed on the event ACTION, never on the ref alone. A single
+# `gh pr create --label` emits `opened` and `labeled` about a second apart, and a
+# ref-only group makes those two runs cancel each other: the survivor reports
+# success while the cancelled check-run stays attached to the head SHA, so the PR
+# shows red and mergeStateStatus reports UNSTABLE — the gate passing and looking
+# failed at the same time. Cancellation is only meaningful for repeats of the SAME
+# event (several pushes on one PR), which this still does.
+concurrency:
+  group: pr-gate-${{ github.workflow }}-${{ github.ref }}-${{ github.event.action }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  issue-gate:
+    name: issue-gate
+    # Pinned, never ubuntu-latest: an image migration stays a visible workflow edit.
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate issue linkage, approval, and type label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+
+          fail() { echo "::error::$*" >&2; exit 1; }
+
+          body="$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json body -q '.body // ""')"
+          [ -n "$body" ] || fail "PR body is empty: link an approved issue with 'Closes #N'."
+
+          # 1) at least one closing keyword with an issue number
+          issues="$(printf '%s\n' "$body" \
+            | grep -ioE '\b(closes|fixes|resolves)\b[^[:alnum:]]*#[0-9]+' \
+            | grep -oE '#[0-9]+' | tr -d '#' | sort -u)" || true
+          [ -n "$issues" ] || \
+            fail "no issue linkage: the body must contain 'Closes #N' referencing an issue of this repository."
+
+          # 2) every linked issue exists HERE and carries status:approved
+          for n in $issues; do
+            gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json number,labels >/dev/null 2>&1 \
+              || fail "Closes #$n: issue #$n does not exist in $GITHUB_REPOSITORY."
+            gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json labels \
+              -q '.labels[].name' | grep -qx 'status:approved' \
+              || fail "issue #$n is linked but lacks the owner-granted 'status:approved' label."
+          done
+
+          # 3) exactly one type:* label
+          types="$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name | select(startswith("type:"))] | join("\n")')"
+          count="$(printf '%s' "$types" | grep -c '^type:' || true)"
+          [ "$count" -eq 1 ] || \
+            fail "PR must carry EXACTLY ONE 'type:*' label (found $count: $(printf '%s' "$types" | tr '\n' ' '))"
+
+          echo "pr-gate: OK — linked issues: $(printf '%s' "$issues" | tr '\n' ' '); labels ok."
