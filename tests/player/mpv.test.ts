@@ -420,6 +420,26 @@ describe("end-file (S11)", { skip: unixSockets }, () => {
 		assert.deepEqual(h.mpv.commandArgs(3), ["loadfile", next.id, "replace"]);
 	});
 
+	it("reports the skip when mpv never answers the loadfile", async () => {
+		const h = createHarness({ replyTimeoutMs: 50 });
+		await h.mpv.listen(h.target);
+		// mpv goes quiet on exactly the command that loads the file, and nothing else will report:
+		// without a failure the queue would stop silently (R4-001).
+		h.mpv.handle = (received, socket) => {
+			if (received.command[0] === "loadfile") return;
+			send(socket, { error: "success", request_id: received.request_id });
+		};
+
+		await h.player.play(track);
+		await waitFor(() => h.reports.length === 2);
+
+		assert.deepEqual(h.reports[1], {
+			kind: "failed",
+			trackId: track.id,
+			message: `${track.title}: cannot open, skipping`,
+		});
+	});
+
 	it("treats a failing last track as the end of the queue instead of hanging", async () => {
 		const h = createHarness();
 		await h.mpv.listen(h.target);

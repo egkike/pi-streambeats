@@ -464,12 +464,23 @@ class MpvPlayer implements Player {
 		this.#trackName = track.title;
 		// The three commands of one play are written back to back, so a queued play can never land
 		// between them; only then do we wait for the answers.
-		await Promise.all([
+		const [load] = await Promise.all([
 			this.#request(["loadfile", result.target.uri, "replace"]),
 			this.#request(["set_property", "force-media-title", track.title]),
 			// A new track plays: the card has already told the user it is not paused (S11).
 			this.#request(["set_property", "pause", false]),
 		]);
+
+		// mpv answers `loadfile` before the file is decodable, so a real load failure arrives later as
+		// `end-file`. A reply that never came is the other case, and it is the dangerous one: with no
+		// report the track produces neither `ended` nor `failed`, the queue stops silently and the card
+		// simply freezes (S11, R4-001). A dead socket already reported `unavailable`, so only an answer
+		// that is about this track is turned into a failure.
+		if (load.error !== "success" && load.error !== "unavailable" && this.#trackId === track.id) {
+			this.#trackId = undefined;
+			this.#trackName = undefined;
+			this.#emit({ kind: "failed", trackId: track.id, message: cannotOpen(track.title) });
+		}
 	}
 
 	async #setProperty(name: string, value: MpvValue): Promise<void> {
