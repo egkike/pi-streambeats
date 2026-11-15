@@ -161,6 +161,32 @@ que verificar), para que sumar un runner no trabe `main`.
 - **Ingreso sólo por issues**: todavía no está adoptado. Cuando se adopte, el `CONTRIBUTING.md` y el workflow que
   lo hace cumplir se mueven juntos en la misma unidad de trabajo.
 
+## Review nativa (RDD)
+
+El interruptor lo posee el dueño. Cuando está encendido, el candidato se evalúa **antes** del delivery y el orden
+nunca se improvisa.
+
+**Delivery, siempre igual y siempre desde el worktree que tiene el candidato:**
+
+```
+commit → assess → review nativa si está debida (las correcciones van como commits del mismo candidato)
+       → git push → gh pr create
+```
+
+- Los comandos de delivery van **solos** y con `cd` literal. Mezclar cambio y entrega en un mismo comando se
+  rechaza a propósito, y en pipes el guard no puede atribuir el directorio.
+- **Nunca se empuja una rama que no es la chequeada en el directorio actual.** El guard evalúa el candidato del
+  worktree donde estás parado: desde otro lado queda desactivado en silencio. Los worktrees vinculados se registran
+  antes de usarlos.
+- **`reviewDue: true`** → la review corre **antes** del push, y las correcciones entran en el mismo candidato. El
+  guard bloquea el push de todos modos.
+- **`reviewDue: false` no se resuelve solo:** se le informa al dueño el veredicto del assess y se espera su
+  decisión — dejarlo pasar con auto-verificación, o correr la review igual. La auto-verificación (gate verde más
+  lectura del código riesgoso) es la obligación mínima en cualquiera de los dos casos.
+- Revisar **antes** del push tiene un costo concreto: una corrección posterior obliga a un segundo run de CI sobre
+  el mismo PR.
+- Una review aprobada no autoriza el delivery: commit, push, PR y release siguen la política ordinaria del repo.
+
 ## Riesgos aceptados
 
 Un riesgo aceptado se escribe acá con **el disparador que lo reabre**. Si no tiene disparador, no está
