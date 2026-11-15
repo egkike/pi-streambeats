@@ -175,4 +175,8 @@ aceptado: está olvidado.
 ## Fuera de alcance (v1)
 
 Catálogo Bandcamp en streaming, `sync`/descargas, temas propios, pantalla de settings dentro de la
-card, mouse. Cada uno es una decisión pendiente, no una omisión.
+card. Cada uno es una decisión pendiente, no una omisión.
+
+El **mouse no está acá**: S17 lo pide (click sobre una fila la selecciona y activa, rueda recorre la
+lista, hover resalta), `L12` registró la decisión del dueño ("Mouse completo") y `T6` ya entrega el
+mapa de `hits` del render. Lo que falta es el cableado en el host, no una decisión de alcance.
