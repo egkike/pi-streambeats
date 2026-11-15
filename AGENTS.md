@@ -183,9 +183,12 @@ commit → assess → review nativa si está debida (las correcciones van como c
   antes de usarlos.
 - **`reviewDue: true`** → la review corre **antes** del push, y las correcciones entran en el mismo candidato. El
   guard bloquea el push de todos modos.
-- **`reviewDue: false` no se resuelve solo:** se le informa al dueño el veredicto del assess y se espera su
-  decisión — dejarlo pasar con auto-verificación, o correr la review igual. La auto-verificación (gate verde más
-  lectura del código riesgoso) es la obligación mínima en cualquiera de los dos casos.
+- **`reviewDue: false` en el carril de CÓDIGO no se resuelve solo:** se le informa al dueño el veredicto del assess y
+  se espera su decisión — dejarlo pasar con auto-verificación, o correr la review igual. "Código" son los paths del
+  carril de código de arriba, **no** el motivo que devuelva el proveedor: `AGENTS.md` también vuelve como
+  `executable_change`, y usar ese motivo como señal haría que todo cambio de documentos pida permiso.
+- **Carril de docs/tracking con `reviewDue: false`: se procede sin aviso.** La auto-verificación (gate verde más
+  lectura del cambio) sigue siendo obligatoria en los dos casos; lo que cambia es quién decide entregar.
 - Revisar **antes** del push tiene un costo concreto: una corrección posterior obliga a un segundo run de CI sobre
   el mismo PR.
 - Una review aprobada no autoriza el delivery: commit, push, PR y release siguen la política ordinaria del repo.
