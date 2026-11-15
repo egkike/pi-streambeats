@@ -9,8 +9,11 @@
  */
 import { type Dirent, readdirSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { Folder, Track } from "../types.ts";
+import type { Folder, LibraryEntry, Track } from "../types.ts";
 import { AUDIO_EXTENSIONS, isAudioFile, neutralizeName } from "./names.ts";
+
+/** Shared vocabulary (see lib/types.ts): the card holds these rows in its state. */
+export type { LibraryEntry };
 
 /** What the caller knows about the configured library (S2, S14), echoed in the no-audio state. */
 export interface LibraryContext {
@@ -19,14 +22,6 @@ export interface LibraryContext {
 	/** The settings file the root came from; the no-audio message names it. */
 	readonly settingsPath: string;
 }
-
-/**
- * One row of the list. A folder can be entered, a track can be played; the two never share a shape,
- * so the card cannot confuse them.
- */
-export type LibraryEntry =
-	| { readonly kind: "folder"; readonly folder: Folder }
-	| { readonly kind: "track"; readonly track: Track };
 
 /** Why the current folder cannot be shown at all (S5). Both carry the path the user asked for. */
 export type ScanFailure =

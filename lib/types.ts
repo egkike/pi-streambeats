@@ -30,6 +30,16 @@ export interface Folder {
 }
 
 /**
+ * One row of a listing: a folder can be entered, a track can be played, and the two never share a
+ * shape, so a consumer cannot confuse them. It lives here because both `lib/library` (which produces
+ * it) and `lib/core` (which holds it in state) speak it, and the dependency direction only allows
+ * types.ts to be shared from below.
+ */
+export type LibraryEntry =
+	| { readonly kind: "folder"; readonly folder: Folder }
+	| { readonly kind: "track"; readonly track: Track };
+
+/**
  * What mpv actually loads. Ephemeral by design: a catalog target carries a token that expires,
  * so it is resolved immediately before playing and never persisted.
  */
