@@ -1,0 +1,471 @@
+/**
+ * The card's state machine (S3, S11, S13, S15). Pure and synchronous: it reads nothing from the
+ * world, never awaits, and never mutates the state it is handed. Everything it wants done comes back
+ * as data (S8) — the shell loads folders, drives mpv and renders the footer — so this module is
+ * testable without a terminal, a socket or a music library.
+ *
+ * Two facts are deliberately kept apart: the listing the user is browsing and the queue that is
+ * playing. Changing folders swaps the first and leaves the second alone (S11).
+ */
+import { posix, win32 } from "node:path";
+import type { LibraryEntry, Track } from "../types.ts";
+
+/** Volume range, step and starting point (S11). The card owns it for the session and never persists it. */
+export const MIN_VOLUME = 0;
+export const MAX_VOLUME = 100;
+export const DEFAULT_VOLUME = 70;
+export const VOLUME_STEP = 5;
+
+/**
+ * Presence and size are separate on purpose (S15): the overlay shortcut flips presence without
+ * needing the card's focus, while `l` changes size only when the card has it.
+ */
+export type Presence = "hidden" | "visible";
+export type CardSize = "corner" | "expanded";
+
+/**
+ * The queue (S11). It holds every track of the folder the playback started in plus the order they
+ * will be played in, because shuffle permutes only what is left and turning it off has to be able
+ * to put the rest back. It lives in the state, not in the listing: browsing away never stops music.
+ */
+export interface Queue {
+	/** All tracks of the folder, in folder order. Never permuted. */
+	readonly tracks: readonly Track[];
+	/** The order they play in: `tracks` until shuffle permutes the part that has not played yet. */
+	readonly playOrder: readonly Track[];
+	/** Index in `playOrder` of the track that is playing. */
+	readonly position: number;
+}
+
+export interface CardState {
+	/** The configured root (S14): the card starts here and the breadcrumb is relative to it. */
+	readonly libraryRoot: string;
+	/** The highest folder navigation may reach (S14). An input, never derived from HOME in here. */
+	readonly ceiling: string;
+	/** The folder on screen (S14). */
+	readonly path: string;
+	readonly entries: readonly LibraryEntry[];
+	readonly cursor: number;
+	readonly presence: Presence;
+	readonly size: CardSize;
+	/** True only while the card owns the keyboard: `l` requires it (S15). */
+	readonly focused: boolean;
+	/** The track mpv has loaded, if any (S12): the status bar and the footer speak about it. */
+	readonly playing?: Track;
+	readonly paused: boolean;
+	/** Present while a queue exists (S11); gone after stop and after the playlist ended. */
+	readonly queue?: Queue;
+	readonly volume: number;
+	readonly shuffle: boolean;
+	/** The footer's message (S11, S14): "at home", "playlist ended", a failure, the shuffle state. */
+	readonly notice?: string;
+	/**
+	 * Reserved for S18 (the next unit): the active filter term, empty today. The listing is read
+	 * through `visibleEntries`, so narrowing it later is one function and not a new state shape.
+	 */
+	readonly filter: string;
+}
+
+/** Everything the card needs to exist: where it starts and how far up it may go (S14). */
+export interface CardConfig {
+	readonly libraryRoot: string;
+	readonly ceiling: string;
+}
+
+/** What a key does, independent of the physical key that carries it (S13). */
+export type KeyAction =
+	| "cursor-up"
+	| "cursor-down"
+	| "activate"
+	| "folder-up"
+	| "hide"
+	| "toggle-size"
+	| "toggle-pause"
+	| "stop"
+	| "next"
+	| "previous"
+	| "volume-up"
+	| "volume-down"
+	| "toggle-shuffle";
+
+export interface KeyBinding {
+	/** Identifier the host adapter maps a physical key to (S13). */
+	readonly id: string;
+	/** How the key prints in the footer: `escape` shows as `esc`, `backspace` as `⌫`. */
+	readonly label: string;
+	readonly action: KeyAction;
+	/** Help text the footer prints next to the label (S13). */
+	readonly help: string;
+	/** One binding per action is the hint the footer prints; the rest are only dispatchable. */
+	readonly hint: boolean;
+}
+
+/** A footer hint derived from the same table as the input handling, so the two cannot drift (S13). */
+export interface FooterHint {
+	readonly key: string;
+	readonly help: string;
+	readonly action: KeyAction;
+}
+
+/** The only key table (S13): the footer renders from it and the reducer dispatches from it. */
+export const KEY_BINDINGS: readonly KeyBinding[] = [
+	{ id: "up", label: "↑", action: "cursor-up", help: "move", hint: true },
+	{ id: "k", label: "k", action: "cursor-up", help: "move", hint: false },
+	{ id: "down", label: "↓", action: "cursor-down", help: "move", hint: false },
+	{ id: "j", label: "j", action: "cursor-down", help: "move", hint: false },
+	{ id: "enter", label: "enter", action: "activate", help: "open", hint: true },
+	{ id: "space", label: "space", action: "toggle-pause", help: "pause", hint: true },
+	{ id: "n", label: "n", action: "next", help: "next", hint: true },
+	{ id: ">", label: ">", action: "next", help: "next", hint: false },
+	{ id: "p", label: "p", action: "previous", help: "prev", hint: true },
+	{ id: "<", label: "<", action: "previous", help: "prev", hint: false },
+	{ id: "u", label: "u", action: "folder-up", help: "up a folder", hint: true },
+	{ id: "backspace", label: "⌫", action: "folder-up", help: "up a folder", hint: false },
+	{ id: "l", label: "l", action: "toggle-size", help: "expand", hint: true },
+	{ id: "s", label: "s", action: "stop", help: "stop", hint: true },
+	{ id: "+", label: "+", action: "volume-up", help: "vol", hint: true },
+	{ id: "-", label: "-", action: "volume-down", help: "vol", hint: true },
+	{ id: "z", label: "z", action: "toggle-shuffle", help: "shuffle", hint: true },
+	{ id: "escape", label: "esc", action: "hide", help: "hide", hint: true },
+];
+
+/** The action a key identifier carries, or undefined when the card does not bind it. */
+export function actionFor(id: string): KeyAction | undefined {
+	return KEY_BINDINGS.find((binding) => binding.id === id)?.action;
+}
+
+/** The footer's hints (S13), one per action, in table order. */
+export function footerHints(): readonly FooterHint[] {
+	return KEY_BINDINGS.filter((binding) => binding.hint).map((binding) => ({
+		key: binding.label,
+		help: binding.help,
+		action: binding.action,
+	}));
+}
+
+/** What the shell must do (S8). Data only: the reducer asks, the shell acts. */
+export type Effect =
+	| { readonly kind: "load-folder"; readonly path: string }
+	| { readonly kind: "play"; readonly trackId: string }
+	| { readonly kind: "pause" }
+	| { readonly kind: "resume" }
+	| { readonly kind: "stop" }
+	| { readonly kind: "volume"; readonly level: number }
+	| { readonly kind: "quit" };
+
+/**
+ * Inputs: keys the card received, presence and focus changes owned by the host, and the facts the
+ * I/O layer brings back. A result names the track it is about so a late report about a track that
+ * already gave way cannot skip the wrong one.
+ */
+export type CardEvent =
+	| { readonly kind: "key"; readonly id: string }
+	/** The overlay shortcut (S15): toggles presence and works without the card's focus. */
+	| { readonly kind: "overlay" }
+	/** `/sb-music` (S15): opens the card expanded. */
+	| { readonly kind: "open" }
+	| { readonly kind: "focus" }
+	| { readonly kind: "blur" }
+	| { readonly kind: "folder-loaded"; readonly path: string; readonly entries: readonly LibraryEntry[] }
+	| { readonly kind: "track-ended"; readonly trackId: string }
+	| { readonly kind: "track-failed"; readonly trackId: string }
+	/** The session is shutting down (S6): the shell sends `quit` to mpv. */
+	| { readonly kind: "quit" };
+
+export interface ModelDeps {
+	/**
+	 * Randomness for shuffle (S11), injected so the reducer stays a function: same state, same event,
+	 * same answer. The shell omits it and gets `Math.random`.
+	 */
+	readonly random?: () => number;
+}
+
+export interface Reduction {
+	readonly state: CardState;
+	readonly effects: readonly Effect[];
+}
+
+export function initialState(config: CardConfig): CardState {
+	return {
+		libraryRoot: config.libraryRoot,
+		ceiling: config.ceiling,
+		path: config.libraryRoot,
+		entries: [],
+		cursor: 0,
+		presence: "hidden",
+		size: "corner",
+		focused: false,
+		paused: false,
+		volume: DEFAULT_VOLUME,
+		shuffle: false,
+		filter: "",
+	};
+}
+
+/**
+ * The rows the card shows (S3). Today the whole listing; S18 narrows it with the filter, and both
+ * the cursor and the view read it through here so that change stays in one function.
+ */
+export function visibleEntries(state: CardState): readonly LibraryEntry[] {
+	return state.entries;
+}
+
+/** The row under the cursor, if the listing has one. */
+export function selectedEntry(state: CardState): LibraryEntry | undefined {
+	return visibleEntries(state)[state.cursor];
+}
+
+export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {}): Reduction {
+	switch (event.kind) {
+		case "key":
+			return pressKey(state, event.id, deps);
+		case "overlay":
+			return { state: state.presence === "visible" ? hidden(state) : shown(state, "corner"), effects: [] };
+		case "open":
+			return { state: shown(state, "expanded"), effects: [] };
+		case "focus":
+			// A hidden card cannot hold the keyboard, so focus on nothing is not a state.
+			return {
+				state: state.presence === "visible" && !state.focused ? { ...state, focused: true } : state,
+				effects: [],
+			};
+		case "blur":
+			return { state: state.focused ? { ...state, focused: false } : state, effects: [] };
+		case "folder-loaded":
+			return {
+				state: { ...state, path: event.path, entries: event.entries, cursor: 0, notice: undefined },
+				effects: [],
+			};
+		case "track-ended":
+			if (state.playing?.id !== event.trackId) return unchanged(state);
+			return advance(state);
+		case "track-failed":
+			if (state.playing?.id !== event.trackId) return unchanged(state);
+			return advance(state, cannotOpen(state.playing.title));
+		case "quit":
+			return { state, effects: [{ kind: "quit" }] };
+	}
+}
+
+/** Notices the card prints in its footer (S11, S14). Copy lives here so it cannot drift per view. */
+const AT_HOME = "at home";
+const PLAYLIST_ENDED = "playlist ended";
+const SHUFFLE_ON = "shuffle on";
+const SHUFFLE_OFF = "shuffle off";
+
+function cannotOpen(title: string): string {
+	return `${title}: cannot open, skipping`;
+}
+
+function unchanged(state: CardState): Reduction {
+	return { state, effects: [] };
+}
+
+/** Hiding forgets the size and the keyboard: a hidden card is in neither state (S15). */
+function hidden(state: CardState): CardState {
+	return { ...state, presence: "hidden", size: "corner", focused: false };
+}
+
+/** Showing always lands in the corner, even when the card was hidden expanded (S15). */
+function shown(state: CardState, size: CardSize): CardState {
+	return { ...state, presence: "visible", size };
+}
+
+function pressKey(state: CardState, id: string, deps: ModelDeps): Reduction {
+	const action = actionFor(id);
+	// Keys only reach a card that is on screen; the host routes them, and this is the model's guard.
+	if (!action || state.presence !== "visible") return unchanged(state);
+
+	switch (action) {
+		case "cursor-up":
+			return moveCursor(state, -1);
+		case "cursor-down":
+			return moveCursor(state, 1);
+		case "activate":
+			return activate(state, deps);
+		case "folder-up":
+			return folderUp(state);
+		case "hide":
+			return { state: hidden(state), effects: [] };
+		case "toggle-size":
+			if (!state.focused) return unchanged(state);
+			return { state: { ...state, size: state.size === "expanded" ? "corner" : "expanded" }, effects: [] };
+		case "toggle-pause":
+			return togglePause(state);
+		case "stop":
+			return stop(state);
+		case "next":
+			return advance(state);
+		case "previous":
+			return previous(state);
+		case "volume-up":
+			return setVolume(state, state.volume + VOLUME_STEP);
+		case "volume-down":
+			return setVolume(state, state.volume - VOLUME_STEP);
+		case "toggle-shuffle":
+			return toggleShuffle(state, deps);
+	}
+}
+
+function moveCursor(state: CardState, delta: number): Reduction {
+	const rows = visibleEntries(state);
+	if (rows.length === 0) return unchanged(state);
+
+	const cursor = Math.min(rows.length - 1, Math.max(0, state.cursor + delta));
+	return cursor === state.cursor ? unchanged(state) : { state: { ...state, cursor }, effects: [] };
+}
+
+function activate(state: CardState, deps: ModelDeps): Reduction {
+	const entry = selectedEntry(state);
+	if (!entry) return unchanged(state);
+	if (entry.kind === "folder") return loadFolder(state, entry.folder.path);
+	return playFrom(state, entry.track, deps);
+}
+
+/**
+ * Ask for a folder and move the card there at once (S14): the rows arrive with the scan result, so
+ * the breadcrumb follows the key instead of the round trip. Playback is untouched (S11).
+ */
+function loadFolder(state: CardState, path: string): Reduction {
+	return {
+		state: { ...state, path, entries: [], cursor: 0, notice: undefined },
+		effects: [{ kind: "load-folder", path }],
+	};
+}
+
+/** `enter` on a track (S11): the whole folder becomes the queue, in folder order, from this track. */
+function playFrom(state: CardState, track: Track, deps: ModelDeps): Reduction {
+	const tracks = state.entries.flatMap((entry) => (entry.kind === "track" ? [entry.track] : []));
+	const position = tracks.findIndex((candidate) => candidate.id === track.id);
+	if (position < 0) return unchanged(state);
+
+	const playOrder = state.shuffle ? shuffleFrom(tracks, position, deps) : tracks;
+	return {
+		state: { ...state, playing: track, paused: false, queue: { tracks, playOrder, position }, notice: undefined },
+		effects: [{ kind: "play", trackId: track.id }],
+	};
+}
+
+/**
+ * The one way a track gives way to the next (S11): auto-advance, `n` and a file that cannot be
+ * opened all come through here, so a broken file cannot cut the album and the last track cannot
+ * loop. `notice` replaces the footer's message, which is how a failure survives the skip.
+ */
+function advance(state: CardState, notice?: string): Reduction {
+	const queue = state.queue;
+	if (!queue) return unchanged(state);
+
+	const position = queue.position + 1;
+	const track = queue.playOrder[position];
+	if (!track) {
+		return {
+			state: { ...state, playing: undefined, paused: false, queue: undefined, notice: notice ?? PLAYLIST_ENDED },
+			effects: [{ kind: "stop" }],
+		};
+	}
+
+	return {
+		state: { ...state, playing: track, paused: false, queue: { ...queue, position }, notice },
+		effects: [{ kind: "play", trackId: track.id }],
+	};
+}
+
+function previous(state: CardState): Reduction {
+	const queue = state.queue;
+	if (!queue || !state.playing) return unchanged(state);
+
+	const position = queue.position - 1;
+	const track = queue.playOrder[position];
+	if (!track) return unchanged(state);
+
+	return {
+		state: { ...state, playing: track, paused: false, queue: { ...queue, position }, notice: undefined },
+		effects: [{ kind: "play", trackId: track.id }],
+	};
+}
+
+function togglePause(state: CardState): Reduction {
+	if (!state.playing) return unchanged(state);
+	if (state.paused) return { state: { ...state, paused: false, notice: undefined }, effects: [{ kind: "resume" }] };
+	return { state: { ...state, paused: true, notice: undefined }, effects: [{ kind: "pause" }] };
+}
+
+/** Stop cuts the sound and empties the queue (S11): there is nothing left to advance into. */
+function stop(state: CardState): Reduction {
+	if (!state.playing && !state.queue) return unchanged(state);
+	return {
+		state: { ...state, playing: undefined, paused: false, queue: undefined, notice: undefined },
+		effects: [{ kind: "stop" }],
+	};
+}
+
+function setVolume(state: CardState, level: number): Reduction {
+	const volume = Math.min(MAX_VOLUME, Math.max(MIN_VOLUME, level));
+	if (volume === state.volume) return unchanged(state);
+	return { state: { ...state, volume }, effects: [{ kind: "volume", level: volume }] };
+}
+
+/**
+ * Shuffle over the remaining queue only (S11): the track that is playing keeps playing and the
+ * cursor stays where the user left it. Turning it off puts the part that has not played yet back
+ * into folder order.
+ */
+function toggleShuffle(state: CardState, deps: ModelDeps): Reduction {
+	const shuffle = !state.shuffle;
+	const notice = shuffle ? SHUFFLE_ON : SHUFFLE_OFF;
+	const queue = state.queue;
+	if (!queue) return { state: { ...state, shuffle, notice }, effects: [] };
+
+	const playOrder = shuffle ? shuffleFrom(queue.playOrder, queue.position, deps) : inFolderOrder(queue);
+	return { state: { ...state, shuffle, queue: { ...queue, playOrder }, notice }, effects: [] };
+}
+
+/** Fisher–Yates over what has not played yet (S11): the prefix and the position never move. */
+function shuffleFrom(order: readonly Track[], position: number, deps: ModelDeps): readonly Track[] {
+	const random = deps.random ?? Math.random;
+	const shuffled = [...order];
+
+	for (let index = shuffled.length - 1; index > position; index--) {
+		const target = position + 1 + Math.floor(random() * (index - position));
+		swapTracks(shuffled, index, target);
+	}
+	return shuffled;
+}
+
+/** Undo shuffle (S11): what has not played yet returns to the order the folder gave it. */
+function inFolderOrder(queue: Queue): readonly Track[] {
+	const rank = new Map(queue.tracks.map((track, index) => [track.id, index]));
+	const played = queue.playOrder.slice(0, queue.position + 1);
+	const left = queue.playOrder
+		.slice(queue.position + 1)
+		.toSorted((first, second) => (rank.get(first.id) ?? 0) - (rank.get(second.id) ?? 0));
+	return [...played, ...left];
+}
+
+function swapTracks(tracks: Track[], left: number, right: number): void {
+	const leftTrack = tracks[left];
+	const rightTrack = tracks[right];
+	if (!leftTrack || !rightTrack) return;
+	tracks[left] = rightTrack;
+	tracks[right] = leftTrack;
+}
+
+/** `u` and backspace (S14): up one folder, never above the ceiling, which arrived as an input. */
+function folderUp(state: CardState): Reduction {
+	if (state.path === state.ceiling) return { state: { ...state, notice: AT_HOME }, effects: [] };
+
+	const parent = parentOf(state.path);
+	if (!parent) return { state: { ...state, notice: AT_HOME }, effects: [] };
+	return loadFolder(state, parent);
+}
+
+/**
+ * The folder above this one, in the flavour the path already speaks (S19): every path the card
+ * holds is canonical and absolute, so `/…` is POSIX and a drive or UNC path is Win32. Pure string
+ * arithmetic from `node:path`; no filesystem, and both flavours are testable from one host.
+ */
+function parentOf(path: string): string | undefined {
+	const flavour = posix.isAbsolute(path) ? posix : win32;
+	const parent = flavour.dirname(path);
+	return parent === path ? undefined : parent;
+}
