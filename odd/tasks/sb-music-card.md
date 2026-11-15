@@ -155,7 +155,7 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 | T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | hecho (PR #5) | `87be737` |
 | T5 | S3, S11, S13, S15 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación y teclas | worker | hecho (PR pendiente) | `c29a5e5` |
 | T5b | S18 | `lib/core/model.ts`: filtro sobre la carpeta actual (unidad 2 de T5) | worker | abierta | — |
-| T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | abierta | — |
+| T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | hecho (PR pendiente) | `b00943f` |
 | T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | abierta | — |
 | T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | abierta | — |
 | T9 | S1, S4, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | abierta | — |
@@ -353,3 +353,22 @@ un último tema roto conserva `cannot open, skipping`; cargas de carpeta optimis
 (anunciar una tecla que no hace nada viola "sin chrome muerto"). Pendiente declarado: `focus` lo maneja el host, así
 que T9 debe cablear `focus`/`blur` o `l` no responde después de `/sb-music`; y las fallas de scan de S5 todavía no
 tienen evento — llegan con T6/T9. Gate local: 113/113.
+
+L25 (T6 cerrado, y una contradicción abierta): `lib/core/view.ts` (467 líneas) + `tests/core/view.test.ts` (416),
+commit `b00943f`, issue #9. 38 tests, **151/151** en el gate. Todas las aserciones son arrays de líneas exactas a 90 y
+78 columnas con un tema falso que no imprime escapes, más un segundo tema que imprime el rol (`{success}`) para probar
+quién pintó cada tramo: una línea que entra por casualidad no es una línea que entra. Decisiones del worker donde la
+spec callaba: duración desconocida → `--:--` y el header omite el total en vez de mostrar una suma parcial como si
+fuera total; esquina de 46 celdas (artboard 03) clampeada al ancho, sin título (S12); progreso desde
+`options.elapsedMs`/`totalMs`, y sin total conocido la barra **no se dibuja** en vez de inventarse; marco de altura
+exacta con el pie fijo en la última línea y ventana centrada en el cursor cuando el listado desborda; fila angosta
+pierde la columna de duración antes que el último carácter del nombre, y bajo 2 celdas el cursor gana sobre la
+reproducción; carpetas con `/` y celda de duración vacía; breadcrumb en el root muestra el basename (un breadcrumb
+vacío no se lee) y un path absoluto está prohibido; los `hits` incluyen sólo filas de entrada (el header y el pie no
+tienen acción, así no hay zonas muertas). Riesgos declarados: `ViewTheme` sólo tiene `fg`, así que la fila del cursor
+pide el rol `surface` como **fondo** y T9 debe mapearlo a background o el resaltado sale mal; los anchos se cuentan en
+code points y no en celdas East Asian, así que un nombre CJK o emoji puede exceder el presupuesto visual (necesitaría
+tabla de wcwidth); a anchos muy angostos el pie trunca y puede perder `esc`. **Contradicción sin resolver**: `AGENTS.md`
+lista el mouse como fuera de alcance de v1, mientras S17 y T6 piden el mapa de `hits` y `L12` registra "Mouse completo"
+del usuario. Se entregó el mapa como dato y sin cableado; falta que el dueño decida cuál de los dos documentos manda y
+se corrija el otro.
