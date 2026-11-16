@@ -30,6 +30,10 @@ export interface CardComponentDeps {
 	 * keyboard (that is exactly what the first smoke produced).
 	 */
 	readonly dismiss?: () => void;
+	/** Whether this chunk is the configured overlay shortcut; the card owns the keys while it is open. */
+	readonly isOverlayKey?: (data: string) => boolean;
+	/** Show or hide the card, the same thing the host's own shortcut handler does. */
+	readonly togglePresence?: () => void;
 }
 
 /** The rows an expanded card asks for, leaving room for the editor and the footer. */
@@ -77,6 +81,11 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			// closes, whatever the model decides to do with them.
 			if (data === "\u0003" || data === "\u001b") {
 				deps.dismiss?.();
+				return;
+			}
+			// A focused overlay swallows the global shortcut, so the card answers it here.
+			if (deps.isOverlayKey?.(data)) {
+				deps.togglePresence?.();
 				return;
 			}
 			for (const id of translateKeys(data)) deps.onKey(id);

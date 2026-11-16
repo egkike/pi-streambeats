@@ -18,6 +18,7 @@ import type { Player, PlayerReport } from "../player/mpv.ts";
 import type { Settings } from "../settings.ts";
 import type { Track } from "../types.ts";
 import { createCardComponent, overlayHeight } from "./component.ts";
+import { matchesOverlayKey } from "./keys.ts";
 import { toViewTheme } from "./theme.ts";
 
 /** The single status key. Pi sorts statuses by key, so a stable one keeps the line in place. */
@@ -263,6 +264,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 					// A last-resort exit: if the model ever mishandles the key, the overlay still
 					// closes instead of holding a terminal hostage.
 					dismiss: () => hideOverlay(),
+					// A focused overlay swallows the global shortcut, so the card answers it too.
+					isOverlayKey: (data) => matchesOverlayKey(data, deps.settings.shortcuts.overlay),
+					togglePresence: () => togglePresence(),
 				});
 				return component;
 			},
