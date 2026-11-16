@@ -14,11 +14,13 @@ const ROOT = `${HOME}/Music`;
 const ALBUM = `${ROOT}/StreamBeats/Chillhop`;
 
 /** A theme that prints nothing: for layout assertions, where roles would only add noise. */
-const plain: ViewTheme = { fg: () => "", bold: (text) => text, dim: (text) => text };
+const plain: ViewTheme = { fg: () => "", bg: () => "", bgEnd: () => "", bold: (text) => text, dim: (text) => text };
 
 /** A theme that prints the role it was asked for, so an exact line proves which role painted it. */
 const marked: ViewTheme = {
 	fg: (role) => `{${role}}`,
+	bg: (role) => `{bg:${role}}`,
+	bgEnd: (role) => `{/bg:${role}}`,
 	bold: (text) => `[b]${text}[/b]`,
 	dim: (text) => `[d]${text}[/d]`,
 };
@@ -213,13 +215,24 @@ describe("roles (S3, S16)", () => {
 		);
 	});
 
-	it("paints the cursor row on the surface role and gives the default role back at the end", () => {
+	it("paints the cursor row's background on the surface role", () => {
 		const frame = renderFrame(card({ cursor: 0, playing: B }), marked, 90, 8, options());
 
-		assert.equal(
-			frame.lines[1],
-			`{surface} {accent}▸{surface}  {text}Extras/{surface}${" ".repeat(73)} ${"    "} {text}`,
-		);
+		assert.equal(frame.lines[1], `{bg:surface} {accent}▸{text}  Extras/${" ".repeat(73)} ${"    "} {/bg:surface}`);
+	});
+
+	it("closes the background it opened, so it cannot leak into the next row (R4-004)", () => {
+		const frame = renderFrame(card({ cursor: 0, playing: B }), marked, 90, 8, options());
+
+		const line = frame.lines[1] ?? "";
+		assert.ok(line.startsWith("{bg:surface}"), "the row opens the elevated surface");
+		assert.ok(line.endsWith("{/bg:surface}"), "and closes it before the next line starts");
+	});
+
+	it("asks for no background on the rows that are not under the cursor", () => {
+		const frame = renderFrame(card({ cursor: 0, playing: B }), marked, 90, 8, options());
+
+		assert.equal((frame.lines[2] ?? "").includes("{bg:"), false);
 	});
 
 	it("distinguishes paused by the hollow glyph, not by dropping the success role", () => {
@@ -290,10 +303,14 @@ describe("the corner card (S15, S16)", () => {
 		assert.deepEqual(frame.lines, [between(" ○", "0:47 / 4:05 ", 46), fill(` ${bar(44, 47_000, 245_000)} `, 46)]);
 	});
 
-	it("renders nothing when no track is loaded", () => {
+	it("still says something with no track loaded, so the shortcut does not look dead", () => {
+		// An empty frame is indistinguishable from a card that never opened, which is how the real
+		// smoke read three times in a row (S15).
 		const frame = renderFrame(card({ size: "corner" }), plain, 46, 7, options());
 
-		assert.deepEqual(frame.lines, []);
+		assert.equal(frame.lines.length, 1);
+		assert.match(frame.lines[0] ?? "", /nothing playing/);
+		assert.equal((frame.lines[0] ?? "").length, 46, "and it still fills its own width");
 	});
 
 	it("shrinks to the available width but never past the artboard's 46 cells", () => {

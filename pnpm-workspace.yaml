@@ -1,0 +1,8 @@
+# The host packages are peer dependencies (S1) and are also installed as real devDependencies so
+# `tsc` compiles against Pi's own declarations instead of a hand-written stub. pnpm would otherwise
+# fail the install on the host's transitive build scripts (`@google/genai` and `protobufjs`, neither
+# of which this extension uses), so they are explicitly ignored instead of being built.
+strictDepBuilds: false
+ignoredBuiltDependencies:
+  - "@google/genai"
+  - protobufjs
