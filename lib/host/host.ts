@@ -233,7 +233,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 
 	/** The keyboard goes back to the component that had it before the overlay existed (S4). */
 	function hideOverlay(): void {
-		debug("hide", "overlay=", Boolean(overlay));
+		debug("hide", "overlay=", Boolean(overlay), "presence=", state.presence, "size=", state.size);
 		if (!overlay) return;
 		const gone = overlay;
 		overlay = undefined;
@@ -243,6 +243,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		// never came back in the real smoke, and it kept a dead surface around: every show now builds a
 		// fresh overlay instead of reviving a stale one.
 		gone.finish();
+		debug("hid", "finished size=", gone.size, "editor=", Boolean(gone.editor));
 	}
 
 	function applyFocus(): void {
