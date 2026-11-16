@@ -9,6 +9,7 @@
  * which is why it works from the editor (S15). A track starting releases the keyboard again, so the
  * card stays visible while the user keeps typing.
  */
+import { appendFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, KeyId, OverlayHandle, OverlayOptions, TUI } from "@earendil-works/pi-tui";
 import { type CardEvent, type CardSize, type CardState, type Effect, initialState, reduce } from "../core/model.ts";
@@ -218,6 +219,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	function hideOverlay(): void {
+		debug("hide", "overlay=", Boolean(overlay));
 		if (!overlay) return;
 		const gone = overlay;
 		overlay = undefined;
@@ -230,6 +232,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	function applyFocus(): void {
+		debug("applyFocus", "overlay=", Boolean(overlay), "wantsFocus=", wantsFocus);
 		if (!overlay || !wantsFocus) return;
 		wantsFocus = false;
 		overlay.handle.focus();
@@ -238,6 +241,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 
 	function createOverlay(): void {
 		const sessionCtx = ctx;
+		debug("create", "ctx=", Boolean(sessionCtx), "size=", state.size);
 		if (!sessionCtx) return;
 		const size = state.size;
 
@@ -256,6 +260,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 						// `TUI` (the exported interface) has no `getFocusedComponent`; the concrete renderer
 						// does, so the runtime probe is the only typed-honest way to ask for it.
 						capturedEditor = focusedComponent(tui);
+						debug("factory", "editor=", Boolean(capturedEditor), "rows=", tui.terminal.rows);
 						capturedTui = tui;
 						finish = () => done(undefined);
 						component = createCardComponent({
@@ -296,6 +301,18 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	function show(size: CardSize, focus: boolean): void {
+		debug(
+			"show",
+			size,
+			"focus=",
+			focus,
+			"ctx=",
+			Boolean(ctx),
+			"overlay=",
+			Boolean(overlay),
+			"presence=",
+			state.presence,
+		);
 		if (!ctx) return;
 		state = reduce(state, { kind: size === "expanded" ? "open" : "overlay" }).state;
 		wantsFocus ||= focus;
@@ -321,6 +338,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	function togglePresence(): void {
+		debug("toggle", "presence=", state.presence, "ctx=", Boolean(ctx), "overlay=", Boolean(overlay));
 		if (!ctx) return;
 		if (state.presence === "visible") {
 			dispatch({ kind: "overlay" });
@@ -413,6 +431,21 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	pi.on("session_shutdown", async (_event, _sessionCtx) => {
 		await stopSession();
 	});
+}
+
+/**
+ * Opt-in trace for the one thing tests cannot reach: what the real host does with our overlay.
+ * `SB_MUSIC_DEBUG=/tmp/sb-music.log` makes every decision append a line there; unset, this is a
+ * no-op and nothing is written.
+ */
+function debug(...parts: readonly unknown[]): void {
+	const path = process.env.SB_MUSIC_DEBUG;
+	if (!path) return;
+	try {
+		appendFileSync(path, `${new Date().toISOString()} ${parts.map(String).join(" ")}\n`);
+	} catch {
+		// A trace that breaks the host would be worse than no trace.
+	}
 }
 
 /**
