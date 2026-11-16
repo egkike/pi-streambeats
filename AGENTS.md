@@ -15,6 +15,11 @@ propia: se monta sobre la UI del host.
 - Tests: `node --test` sobre TypeScript directo.
 - **Cero dependencias de runtime.** Si una tarea parece necesitar un paquete, primero es una decisión
   que se discute, no un `pnpm add`.
+- **El host no es una dependencia de runtime.** `@earendil-works/pi-coding-agent` y `@earendil-works/pi-tui` van en
+  `peerDependencies` (`"*"`) y en `devDependencies` con la versión que corre el host, para compilar contra las
+  declaraciones reales; `lib/host/` los importa **sólo como tipos**. `pnpm-workspace.yaml` existe por eso: pnpm
+  exige decidir de forma explícita sobre dos transitivos del host (`@google/genai`, `protobufjs`) cuyos scripts de
+  build no necesitamos. No borrar esas claves sin leer este párrafo.
 
 ## Source of Truth
 
@@ -88,6 +93,11 @@ extensions → host → {library, player} → core → types
   falla. La CI lo corre en macOS contra un mpv instalado con Homebrew.
 
 ## Feedback Loop (antes de decir "listo")
+
+Una integración con el host **no está lista cuando el gate está verde**: está lista cuando abre en Pi. La card se
+prueba con `pi -e ./extensions/sb-music.ts`, y el ciclo del overlay deja traza con `SB_MUSIC_DEBUG=/tmp/sb-music.log`
+(`show`, `toggle`, `create`, `factory`, `applyFocus`, `hide`, y un `custom` que falla). Sin la variable no escribe nada.
+
 
 ```sh
 pnpm check             # lint + typecheck + test, en ese orden
