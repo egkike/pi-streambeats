@@ -146,6 +146,11 @@ function fakeHandle(): OverlayHandle & { calls: HandleCalls } {
 	};
 }
 
+/** Overlay creation is serialized behind a promise: let the chain run before asserting. */
+async function flush(): Promise<void> {
+	await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 function harness(editor: Component | null = EDITOR): Harness {
 	const commands = new Map<
 		string,
@@ -190,8 +195,15 @@ function harness(editor: Component | null = EDITOR): Harness {
 				onHandle?: (handle: OverlayHandle) => void;
 			},
 		) => {
-			const component = factory(tui, THEME, {}, () => {
+			// The real `custom` returns a promise that settles when `done()` is called; a fake that
+			// never settles would make every later overlay wait forever.
+			let finishOverlay!: (value: unknown) => void;
+			const settled = new Promise<unknown>((resolve) => {
+				finishOverlay = resolve;
+			});
+			const component = factory(tui, THEME, {}, (value) => {
 				closedCount += 1;
+				finishOverlay(value);
 			});
 			const overlayOptions =
 				typeof options?.overlayOptions === "function" ? options.overlayOptions() : options?.overlayOptions;
@@ -204,7 +216,7 @@ function harness(editor: Component | null = EDITOR): Harness {
 				overlayOptions,
 			});
 			options?.onHandle?.(handle);
-			return new Promise(() => {});
+			return settled;
 		},
 	} as unknown as ExtensionUIContext;
 
@@ -391,14 +403,17 @@ describe("the overlay shortcut (S4, S15)", () => {
 		await start(h);
 
 		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
 		assert.equal(h.overlays.length, 1);
 		assert.equal(h.overlays[0]?.handle.calls.focus, 0, "the shortcut shows without grabbing the keys");
 
-		// Hiding now finishes the overlay instead of parking it hidden: a parked handle never came
-		// back in the real smoke, and finishing is the documented exit from `custom`.
+		// Hiding finishes the overlay instead of parking it hidden: a parked handle never came back
+		// in the real smoke, and finishing is the documented exit from `custom`.
 		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
 
 		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
 		assert.equal(h.overlays.length, 2, "showing again builds a fresh overlay");
 		assert.equal(h.overlays[1]?.handle.calls.focus, 0);
 	});

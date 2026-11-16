@@ -54,6 +54,8 @@ interface Overlay {
 	readonly editor: Component | null;
 	/** Finishes the `ctx.ui.custom` interaction. Never `handle.hide()`. */
 	readonly finish: () => void;
+	/** The geometry it was built for: corner and expanded are different overlays (S15). */
+	readonly size: CardSize;
 }
 
 interface PlaybackClock {
@@ -74,6 +76,8 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	let player: Player | undefined;
 	let stopTick: (() => void) | undefined;
 	let overlay: Overlay | undefined;
+	/** One `custom` at a time: a new screen is only requested once the previous one finished. */
+	let overlayChain: Promise<unknown> = Promise.resolve();
 	let playback: PlaybackClock | undefined;
 	let loaded = false;
 	let wantsFocus = false;
@@ -235,54 +239,59 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	function createOverlay(): void {
 		const sessionCtx = ctx;
 		if (!sessionCtx) return;
+		const size = state.size;
 
 		let capturedEditor: Component | null = null;
 		let capturedTui: TUI | undefined;
 		let component: Component | undefined;
 		let finish: (() => void) | undefined;
 
-		void sessionCtx.ui.custom<void>(
-			(tui, theme, _keybindings, done) => {
-				// Captured BEFORE the overlay is shown: this is the editor the handle releases to when
-				// the card has to leave the way it came. `TUI.getFocusedComponent` is part of the
-				// installed interface, so no runtime probe is needed.
-				// `TUI` (the exported interface) has no `getFocusedComponent`; the concrete renderer
-				// does, so the runtime probe is the only typed-honest way to ask for it.
-				capturedEditor = focusedComponent(tui);
-				capturedTui = tui;
-				finish = () => done(undefined);
-				component = createCardComponent({
-					state: () => state,
-					theme: () => toViewTheme(theme),
-					options: () => ({
-						libraryRoot: deps.settings.libraryRoot,
-						asciiGlyphs: deps.settings.asciiGlyphs,
-						elapsedMs: elapsedMs(),
-					}),
-					height: () => overlayHeight(state.size, tui.terminal.rows),
-					onKey: (id) => dispatch({ kind: "key", id }),
-					// A last-resort exit: if the model ever mishandles the key, the overlay still
-					// closes instead of holding a terminal hostage.
-					dismiss: () => hideOverlay(),
-					// A focused overlay swallows the global shortcut, so the card answers it too.
-					isOverlayKey: (data) => matchesOverlayKey(data, deps.settings.shortcuts.overlay),
-					togglePresence: () => togglePresence(),
-				});
-				return component;
-			},
-			{
-				overlay: true,
-				overlayOptions: () => overlayOptions(state.size),
-				onHandle: (handle) => {
-					if (!component || !capturedTui || !finish) return;
-					overlay = { handle, component, tui: capturedTui, editor: capturedEditor, finish };
-					// Nothing was captured from the editor, so there is nothing to hand back: asking to
-					// focus `null` is what left a terminal with no keyboard at all.
-					if (capturedEditor) handle.unfocus({ target: capturedEditor });
-					applyFocus();
-					refresh();
-				},
-			},
+		overlayChain = overlayChain.then(() =>
+			sessionCtx.ui
+				.custom<void>(
+					(tui, theme, _keybindings, done) => {
+						// Captured BEFORE the overlay is shown: this is the editor the handle releases to when
+						// the card has to leave the way it came. `TUI.getFocusedComponent` is part of the
+						// installed interface, so no runtime probe is needed.
+						// `TUI` (the exported interface) has no `getFocusedComponent`; the concrete renderer
+						// does, so the runtime probe is the only typed-honest way to ask for it.
+						capturedEditor = focusedComponent(tui);
+						capturedTui = tui;
+						finish = () => done(undefined);
+						component = createCardComponent({
+							state: () => state,
+							theme: () => toViewTheme(theme),
+							options: () => ({
+								libraryRoot: deps.settings.libraryRoot,
+								asciiGlyphs: deps.settings.asciiGlyphs,
+								elapsedMs: elapsedMs(),
+							}),
+							height: () => overlayHeight(state.size, tui.terminal.rows),
+							onKey: (id) => dispatch({ kind: "key", id }),
+							// A last-resort exit: if the model ever mishandles the key, the overlay still
+							// closes instead of holding a terminal hostage.
+							dismiss: () => hideOverlay(),
+							// A focused overlay swallows the global shortcut, so the card answers it too.
+							isOverlayKey: (data) => matchesOverlayKey(data, deps.settings.shortcuts.overlay),
+							togglePresence: () => togglePresence(),
+						});
+						return component;
+					},
+					{
+						overlay: true,
+						overlayOptions: () => overlayOptions(state.size),
+						onHandle: (handle) => {
+							if (!component || !capturedTui || !finish) return;
+							overlay = { handle, component, tui: capturedTui, editor: capturedEditor, finish, size };
+							// Nothing was captured from the editor, so there is nothing to hand back: asking to
+							// focus `null` is what left a terminal with no keyboard at all.
+							if (capturedEditor) handle.unfocus({ target: capturedEditor });
+							applyFocus();
+							refresh();
+						},
+					},
+				)
+				.catch(() => undefined),
 		);
 	}
 
@@ -293,6 +302,11 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		if (!loaded) {
 			loaded = true;
 			loadFolder(state.path);
+		}
+
+		if (overlay && overlay.size !== state.size) {
+			// Geometry is fixed when the overlay is created, so corner -> expanded is a new overlay.
+			hideOverlay();
 		}
 
 		if (overlay) {
