@@ -428,3 +428,19 @@ instrumentó con `SB_MUSIC_DEBUG=<path>` (traza opt-in de show/toggle/create/fac
 corrida lo que cuatro hipótesis seguidas no. **Lección**: una integración con el host no está lista cuando el gate está
 verde, está lista cuando abre en el host; el handoff decía "el smoke lo corre el dueño" y era cierto, lo que estuvo mal
 fue entregar tres veces antes de que ese smoke ocurriera.
+
+L31 (los cinco fixes que salieron de la primera reproducción real): PR #28, issue #27, commits `bc9317f` … `053e656`.
+La card reproduce, y ese primer uso con sonido destapó tres defectos que ningún test veía porque todos viven en el
+comportamiento del host con un tema sonando: (1) cada efecto `play` liberaba el teclado, así que después del primer
+`enter` `space`/`n`/`p` escribían en el editor y la única vuelta era cerrar y reabrir perdiendo cursor y carpeta — S4
+pide que la card **no sea modal**, no que suelte el teclado en cada acción, así que ahora lo conserva mientras está
+enfocada y el editor lo recupera al ocultarla o cerrarla; (2) la barra de estado recibía el segmento correcto cada
+segundo y no se pintaba, porque `requestRender()` no marca el pie como sucio y sólo lo forzaba algo externo (ocultar
+la card) — ahora se pide un frame completo; (3) el segmento se dimensionaba al ancho de la terminal y el pie del host
+**envuelve** lo que no entra, así que el título salía partido en dos líneas — presupuesto de 44 celdas, el ancho del
+panel. De paso: la esquina ya no imprime `1:20 / --:--` cuando el total es desconocido (se lee como error y la barra
+de progreso igual no se puede dibujar), y murió el booleano `releaseKeyboard` que quedó sin callers — código muerto
+con un contrato que ya nadie cumple. Detectado a mano, no por la suite: **295/295 seguía verde con los tres bugs
+dentro**, y el único test que "cubría" la liberación de teclado pasaba por un `unfocus` que el overlay hace igual al
+abrirse. Pendiente declarado y con decisión propia: la duración total, que mpv conoce apenas carga el archivo y que
+daría barra de progreso en la esquina, `m:ss/m:ss` completo en la barra y el total en el header.
