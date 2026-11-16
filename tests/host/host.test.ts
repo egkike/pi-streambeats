@@ -349,7 +349,7 @@ describe("the /sb-music command (S1, S4)", () => {
 		assert.deepEqual(h.overlays, []);
 	});
 
-	it("opens the card expanded and non-capturing, leaving the keyboard with the editor", async () => {
+	it("opens the card expanded, focused, and releasable to the editor", async () => {
 		const h = harness();
 		register(h);
 		await start(h);
@@ -360,9 +360,9 @@ describe("the /sb-music command (S1, S4)", () => {
 		assert.equal(call?.overlay, true);
 		assert.equal(call?.overlayOptions?.nonCapturing, true);
 		assert.equal(call?.handle.calls.unfocus[0], EDITOR);
-		// The command opens the card; it does not take the keyboard. Taking it is what made the first
-		// smoke unusable once the release went to a `null` target.
-		assert.equal(call?.handle.calls.focus, 0);
+		// The command focuses the card so its keys reach it; `esc` then closes it and `done()` hands
+		// the keyboard back to Pi's own pre-focus.
+		assert.ok((call?.handle.calls.focus ?? 0) >= 1);
 		assert.deepEqual(h.scanCalls, [ROOT]);
 		assert.match(call?.component.render(90)[0] ?? "", /sb-music/);
 	});
@@ -377,27 +377,30 @@ describe("the /sb-music command (S1, S4)", () => {
 
 		const call = h.overlays[0];
 		assert.equal(call?.overlayOptions?.nonCapturing, true);
-		assert.equal(call?.handle.calls.focus, 0);
-		assert.deepEqual(call?.handle.calls.unfocus, [], "nothing was taken, so nothing is handed back");
+		// It still focuses, because a card that cannot receive `esc` is a card you cannot close; the
+		// difference is that nothing is released to `null`: `done()` restores Pi's own pre-focus.
+		assert.ok((call?.handle.calls.focus ?? 0) >= 1);
+		assert.deepEqual(call?.handle.calls.unfocus, [], "nothing known was taken, so nothing is handed back");
 	});
 });
 
 describe("the overlay shortcut (S4, S15)", () => {
-	it("shows and hides with the same key without taking the keyboard", async () => {
+	it("shows, hides and shows again without taking the keyboard", async () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
-
-		const call = h.overlays[0];
-		assert.equal(call?.handle.calls.focus, 0);
 
 		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
-		assert.equal(call?.handle.calls.hidden.at(-1), true);
+		assert.equal(h.overlays.length, 1);
+		assert.equal(h.overlays[0]?.handle.calls.focus, 0, "the shortcut shows without grabbing the keys");
+
+		// Hiding now finishes the overlay instead of parking it hidden: a parked handle never came
+		// back in the real smoke, and finishing is the documented exit from `custom`.
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
 
 		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
-		assert.equal(call?.handle.calls.hidden.at(-1), false);
-		assert.equal(call?.handle.calls.focus, 0);
+		assert.equal(h.overlays.length, 2, "showing again builds a fresh overlay");
+		assert.equal(h.overlays[1]?.handle.calls.focus, 0);
 	});
 });
 

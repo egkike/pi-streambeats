@@ -214,9 +214,14 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 
 	function hideOverlay(): void {
 		if (!overlay) return;
-		if (overlay.editor) overlay.handle.unfocus({ target: overlay.editor });
-		overlay.handle.setHidden(true);
-		overlay.tui.requestRender();
+		const gone = overlay;
+		overlay = undefined;
+		wantsFocus = false;
+		if (gone.editor) gone.handle.unfocus({ target: gone.editor });
+		// `done()` is the documented way out of `ctx.ui.custom`. A handle that is only `setHidden(true)`
+		// never came back in the real smoke, and it kept a dead surface around: every show now builds a
+		// fresh overlay instead of reviving a stale one.
+		gone.finish();
 	}
 
 	function applyFocus(): void {
@@ -368,9 +373,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 				return;
 			}
 			startSession(commandCtx);
-			// Expanded, but the keyboard stays where it was: S4 says the editor keeps typing while
-			// the card is on screen, and the first smoke proved what a focus grab costs.
-			show("expanded", false);
+			// Focused, because a card that never takes input cannot answer a single key — the smoke
+			// proved it: with `nonCapturing` the overlay received nothing, `esc` included.
+			show("expanded", true);
 		},
 	});
 
