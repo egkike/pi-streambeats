@@ -1,0 +1,508 @@
+/**
+ * The host adapter (S1, S4, S8, S12). Pi is faked at the `ExtensionAPI` seam: the test drives the
+ * registered command and shortcut, the overlay factory, the component's input and the player's
+ * reports, and observes only what the adapter hands back to the host. No terminal, no mpv, no disk.
+ */
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+	ExtensionUIContext,
+	Theme,
+} from "@earendil-works/pi-coding-agent";
+import type { Component, OverlayHandle, TUI } from "@earendil-works/pi-tui";
+import { registerSbMusic, STATUS_KEY } from "../../lib/host/host.ts";
+import type { ScanResult } from "../../lib/library/scan.ts";
+import type { Player, PlayerReport } from "../../lib/player/mpv.ts";
+import type { Settings } from "../../lib/settings.ts";
+import type { LibraryEntry } from "../../lib/types.ts";
+
+const HOME = "/home/kike";
+const ROOT = `${HOME}/Music`;
+const ALBUM = `${ROOT}/StreamBeats/Chillhop`;
+
+const ENTRIES: readonly LibraryEntry[] = [
+	{ kind: "folder", folder: { path: `${ALBUM}/Extras`, name: "Extras" } },
+	{
+		kind: "track",
+		track: {
+			id: `${ALBUM}/01 - Arcade Dreams.mp3`,
+			title: "01 - Arcade Dreams.mp3",
+			origin: "local",
+			durationMs: 222_000,
+		},
+	},
+	{
+		kind: "track",
+		track: { id: `${ALBUM}/02 - Blue Hour.mp3`, title: "02 - Blue Hour.mp3", origin: "local", durationMs: 245_000 },
+	},
+];
+
+const SETTINGS: Settings = {
+	libraryRoot: ROOT,
+	shortcuts: { overlay: "ctrl+alt+m", playPause: "ctrl+alt+space", next: "ctrl+alt+n", prev: "ctrl+alt+p" },
+	asciiGlyphs: false,
+};
+
+const EDITOR: Component = { render: () => [], invalidate: () => {} };
+
+const THEME = {
+	fg: (_token: string, text: string) => text,
+	bg: (_token: string, text: string) => text,
+	getFgAnsi: () => "",
+	getBgAnsi: () => "",
+	bold: (text: string) => text,
+} as unknown as Theme;
+
+interface HandleCalls {
+	readonly hidden: boolean[];
+	readonly unfocus: (Component | null | undefined)[];
+	focus: number;
+	hide: number;
+}
+
+interface OverlayCall {
+	readonly component: Component;
+	readonly handle: OverlayHandle & { calls: HandleCalls };
+	readonly editor: Component | null;
+	readonly overlay: boolean | undefined;
+	readonly overlayOptions: { nonCapturing?: boolean } | undefined;
+}
+
+interface Harness {
+	readonly pi: ExtensionAPI;
+	readonly ctx: ExtensionCommandContext;
+	readonly commands: Map<
+		string,
+		{ description?: string; handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }
+	>;
+	readonly shortcuts: Map<string, { description?: string; handler: (ctx: ExtensionContext) => Promise<void> | void }>;
+	readonly handlers: Map<string, (event: unknown, ctx: ExtensionContext) => Promise<void> | void>;
+	readonly statuses: [string, string | undefined][];
+	readonly notices: [string, string | undefined][];
+	readonly overlays: OverlayCall[];
+	readonly player: Player;
+	readonly playerCalls: string[];
+	readonly scanCalls: string[];
+	readonly report: (report: PlayerReport) => void;
+	readonly tick: () => void;
+	readonly closed: () => number;
+	readonly renders: () => number;
+	readonly now: { value: number };
+}
+
+function fakePlayer(): { player: Player; calls: string[] } {
+	const calls: string[] = [];
+	return {
+		calls,
+		player: {
+			start: async () => {},
+			command: async () => ({ error: "success" }),
+			play: async (track) => {
+				calls.push(`play:${track.id}`);
+			},
+			pause: async () => {
+				calls.push("pause");
+			},
+			resume: async () => {
+				calls.push("resume");
+			},
+			stop: async () => {
+				calls.push("stop");
+			},
+			setVolume: async (level) => {
+				calls.push(`volume:${level}`);
+			},
+			quit: async () => {
+				calls.push("quit");
+			},
+		},
+	};
+}
+
+function fakeHandle(): OverlayHandle & { calls: HandleCalls } {
+	const calls: HandleCalls = { hidden: [], unfocus: [], focus: 0, hide: 0 };
+	let hidden = false;
+	return {
+		calls,
+		hide: () => {
+			calls.hide += 1;
+		},
+		setHidden: (value) => {
+			hidden = value;
+			calls.hidden.push(value);
+		},
+		isHidden: () => hidden,
+		focus: () => {
+			calls.focus += 1;
+		},
+		unfocus: (options) => {
+			calls.unfocus.push(options?.target);
+		},
+		isFocused: () => calls.focus > 0,
+		getBounds: () => undefined,
+	};
+}
+
+function harness(editor: Component | null = EDITOR): Harness {
+	const commands = new Map<
+		string,
+		{ description?: string; handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }
+	>();
+	const shortcuts = new Map<
+		string,
+		{ description?: string; handler: (ctx: ExtensionContext) => Promise<void> | void }
+	>();
+	const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => Promise<void> | void>();
+	const statuses: [string, string | undefined][] = [];
+	const notices: [string, string | undefined][] = [];
+	const overlays: OverlayCall[] = [];
+	const scanCalls: string[] = [];
+	const now = { value: 1_000 };
+	const reportHandler: (report: PlayerReport) => void = () => {};
+	let tickFn: (() => void) | undefined;
+	let closedCount = 0;
+	let renderCount = 0;
+
+	const tui = {
+		getFocusedComponent: () => editor,
+		requestRender: () => {
+			renderCount += 1;
+		},
+		terminal: { rows: 24, columns: 120 },
+	} as unknown as TUI;
+
+	const ui = {
+		theme: THEME,
+		setStatus: (key: string, text: string | undefined) => {
+			statuses.push([key, text]);
+		},
+		notify: (message: string, type?: string) => {
+			notices.push([message, type]);
+		},
+		custom: (
+			factory: (tui: TUI, theme: Theme, keybindings: unknown, done: (result: unknown) => void) => Component,
+			options?: {
+				overlay?: boolean;
+				overlayOptions?: { nonCapturing?: boolean } | (() => { nonCapturing?: boolean });
+				onHandle?: (handle: OverlayHandle) => void;
+			},
+		) => {
+			const component = factory(tui, THEME, {}, () => {
+				closedCount += 1;
+			});
+			const overlayOptions =
+				typeof options?.overlayOptions === "function" ? options.overlayOptions() : options?.overlayOptions;
+			const handle = fakeHandle();
+			overlays.push({
+				component,
+				handle,
+				editor,
+				overlay: options?.overlay,
+				overlayOptions,
+			});
+			options?.onHandle?.(handle);
+			return new Promise(() => {});
+		},
+	} as unknown as ExtensionUIContext;
+
+	const ctx = {
+		ui,
+		mode: "tui",
+		hasUI: true,
+		cwd: "/tmp",
+		shutdown: () => {},
+	} as ExtensionCommandContext;
+
+	const { player, calls: playerCalls } = fakePlayer();
+
+	const pi = {
+		on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void) => {
+			handlers.set(event, handler);
+			return () => {};
+		},
+		registerCommand: (
+			name: string,
+			options: { description?: string; handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+		) => {
+			commands.set(name, options);
+		},
+		registerShortcut: (
+			key: string,
+			options: { description?: string; handler: (ctx: ExtensionContext) => Promise<void> | void },
+		) => {
+			shortcuts.set(key, options);
+		},
+	} as unknown as ExtensionAPI;
+
+	return {
+		pi,
+		ctx,
+		commands,
+		shortcuts,
+		handlers,
+		statuses,
+		notices,
+		overlays,
+		player,
+		playerCalls,
+		scanCalls,
+		report: (report) => reportHandler(report),
+		tick: () => tickFn?.(),
+		closed: () => closedCount,
+		renders: () => renderCount,
+		now,
+	};
+}
+
+function register(
+	h: Harness,
+	scan: (path: string) => ScanResult = (path) => ({ ok: true, path, entries: ENTRIES }),
+): void {
+	registerSbMusic(h.pi, {
+		settings: SETTINGS,
+		ceiling: HOME,
+		scan: (path) => {
+			h.scanCalls.push(path);
+			return scan(path);
+		},
+		createPlayer: (report) => {
+			// The harness needs the callback, so it is captured here and used by `report`.
+			Object.assign(h, { report });
+			return h.player;
+		},
+		now: () => h.now.value,
+		tick: (fn) => {
+			// The adapter starts one ticker per session; the harness invokes it by hand.
+			Object.assign(h, { tick: () => fn() });
+			return () => {};
+		},
+		statusWidth: 80,
+	});
+}
+
+/** The adapter registers the report callback through `createPlayer`; wire it into the harness. */
+function playerReport(h: Harness, report: PlayerReport): void {
+	h.report(report);
+}
+
+async function start(h: Harness): Promise<void> {
+	await h.handlers.get("session_start")?.(undefined, h.ctx);
+}
+
+async function open(h: Harness): Promise<void> {
+	await h.commands.get("sb-music")?.handler("", h.ctx);
+}
+
+function lastStatus(h: Harness): string | undefined {
+	return h.statuses.at(-1)?.[1];
+}
+
+describe("extension registration (S1)", () => {
+	it("registers /sb-music and the overlay shortcut from settings", () => {
+		const h = harness();
+		register(h);
+
+		assert.ok(h.commands.has("sb-music"));
+		assert.ok(h.shortcuts.has("ctrl+alt+m"));
+		assert.ok(h.handlers.has("session_start"));
+		assert.ok(h.handlers.has("session_shutdown"));
+	});
+});
+
+describe("the session life cycle (S4, S8)", () => {
+	it("creates the player only on session_start and opens nothing by itself", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+
+		assert.deepEqual(h.statuses.at(-1), [STATUS_KEY, undefined]);
+		assert.deepEqual(h.overlays, []);
+	});
+
+	it("shuts the player down, closes the overlay and clears the status", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+
+		await h.handlers.get("session_shutdown")?.(undefined, h.ctx);
+
+		assert.ok(h.playerCalls.includes("quit"));
+		assert.equal(h.closed(), 1);
+		assert.deepEqual(h.statuses.at(-1), [STATUS_KEY, undefined]);
+	});
+});
+
+describe("the /sb-music command (S1, S4)", () => {
+	it("answers clearly in a mode that cannot host an overlay", async () => {
+		const h = harness();
+		register(h);
+		const printCtx = { ...h.ctx, mode: "print", hasUI: false } as ExtensionCommandContext;
+
+		await h.commands.get("sb-music")?.handler("", printCtx);
+
+		assert.equal(h.notices.length, 1);
+		assert.match(h.notices[0]?.[0] ?? "", /interactive/i);
+		assert.deepEqual(h.overlays, []);
+	});
+
+	it("opens the card expanded, non-capturing, and gives the keyboard back to the editor", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+
+		const call = h.overlays[0];
+		assert.equal(h.overlays.length, 1);
+		assert.equal(call?.overlay, true);
+		assert.equal(call?.overlayOptions?.nonCapturing, true);
+		assert.equal(call?.handle.calls.unfocus[0], EDITOR);
+		assert.ok((call?.handle.calls.focus ?? 0) >= 1);
+		assert.deepEqual(h.scanCalls, [ROOT]);
+		assert.match(call?.component.render(90)[0] ?? "", /sb-music/);
+	});
+
+	it("falls back to a focused modal and reports it when no editor can be captured (S4)", async () => {
+		const h = harness(null);
+		register(h);
+		await start(h);
+		await open(h);
+
+		const call = h.overlays[0];
+		assert.equal(call?.overlayOptions?.nonCapturing, false);
+		assert.ok((call?.handle.calls.focus ?? 0) >= 1);
+		assert.match(h.notices.at(-1)?.[0] ?? "", /modal/);
+	});
+});
+
+describe("the overlay shortcut (S4, S15)", () => {
+	it("shows and hides with the same key without taking the keyboard", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+
+		const call = h.overlays[0];
+		assert.equal(call?.handle.calls.focus, 0);
+
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		assert.equal(call?.handle.calls.hidden.at(-1), true);
+
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		assert.equal(call?.handle.calls.hidden.at(-1), false);
+		assert.equal(call?.handle.calls.focus, 0);
+	});
+});
+
+describe("key routing and the status line (S12, S13)", () => {
+	it("plays the selected track, releases the keyboard and names the track in the status line", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("j");
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+
+		assert.ok(h.playerCalls.includes(`play:${ALBUM}/02 - Blue Hour.mp3`));
+		assert.equal(h.overlays[0]?.handle.calls.unfocus.at(-1), EDITOR);
+		assert.equal(lastStatus(h), "● Blue Hour · Chillhop 0:00/4:05");
+	});
+
+	it("freezes the time while paused and keeps the hollow glyph", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+		h.now.value = 5_000;
+		component?.handleInput?.(" ");
+		const paused = lastStatus(h);
+
+		h.now.value = 9_000;
+		h.tick();
+
+		assert.equal(paused, "○ Arcade Dreams · Chillhop 0:04/3:42");
+		assert.equal(lastStatus(h), paused);
+	});
+
+	it("clears the music segment on stop", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+		component?.handleInput?.("s");
+
+		assert.ok(h.playerCalls.includes("stop"));
+		assert.deepEqual(h.statuses.at(-1), [STATUS_KEY, undefined]);
+	});
+});
+
+describe("player reports (S11, S12)", () => {
+	it("advances the queue and updates the title when a track ends", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+		playerReport(h, { kind: "ended", trackId: `${ALBUM}/01 - Arcade Dreams.mp3` });
+
+		assert.ok(h.playerCalls.includes(`play:${ALBUM}/02 - Blue Hour.mp3`));
+		assert.equal(lastStatus(h), "● Blue Hour · Chillhop 0:00/4:05");
+	});
+
+	it("drops the segment when the last track of the queue ends", async () => {
+		const h = harness();
+		const single = ENTRIES.slice(1, 2);
+		register(h, (path) => ({ ok: true, path, entries: single }));
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("\r");
+		playerReport(h, { kind: "ended", trackId: `${ALBUM}/01 - Arcade Dreams.mp3` });
+
+		assert.deepEqual(h.statuses.at(-1), [STATUS_KEY, undefined]);
+		assert.equal(component?.render(90).join("\n").includes("playlist ended"), true);
+	});
+});
+
+describe("the card's state is owned by the model (S8)", () => {
+	it("loads the current folder through the injected scanner when the card opens", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+
+		// The scanner received the configured root, not the process's working directory.
+		assert.deepEqual(h.scanCalls, [ROOT]);
+	});
+
+	it("turns an activate effect on a folder into a scan and a folder-loaded event", async () => {
+		const h = harness();
+		register(h, (path) =>
+			path.endsWith("Extras") ? { ok: true, path, entries: [] } : { ok: true, path, entries: ENTRIES },
+		);
+		await start(h);
+		await open(h);
+
+		h.overlays[0]?.component.handleInput?.("\r");
+
+		assert.deepEqual(h.scanCalls, [ROOT, `${ALBUM}/Extras`]);
+	});
+});

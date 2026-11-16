@@ -70,9 +70,14 @@ export interface TrackResolver {
  */
 export type Role = "text" | "dim" | "muted" | "accent" | "success" | "warning" | "error" | "border" | "surface";
 
-/** What the renderer is allowed to know about the host theme. */
+/**
+ * What the renderer is allowed to know about the host theme. `fg` and `bg` return the opening
+ * escape for a role, so the renderer can paint spans and restore the default role afterwards; the
+ * host adapter owns which token each role means (S3, S8).
+ */
 export interface ViewTheme {
 	fg(role: Role): string;
+	bg(role: Role): string;
 	bold(text: string): string;
 	dim(text: string): string;
 }

@@ -231,26 +231,23 @@ function entryLine(
 
 	const gap = rest >= 2 ? COLUMN_GAP : 0;
 	const nameWidth = Math.max(0, rest - gap - (durationWidthHere > 0 ? COLUMN_GAP + durationWidthHere : 0));
-	// The host maps the `surface` role to its elevated background: the core names the job, not a colour.
-	const base: Role = state.cursor === index ? "surface" : "text";
 	const playingHere = entry.kind === "track" && state.playing?.id === entry.track.id;
 	const cursorHere = state.cursor === index;
 
-	const marker = markerCells(cursorHere, playingHere, state.paused, theme, glyphs, markerWidth, base);
+	const marker = markerCells(cursorHere, playingHere, state.paused, theme, glyphs, markerWidth);
 	const name = entryName(entry, nameWidth);
 	// The name owns a fixed field, so the duration column never drifts row to row (S3).
-	const nameText =
-		paint(theme, playingHere ? "success" : "text", name, base) + spaces(nameWidth - printableLength(name));
+	const nameText = paint(theme, playingHere ? "success" : "text", name) + spaces(nameWidth - printableLength(name));
 	const durationText = durationOf(entry);
 	const duration =
 		durationWidthHere > 0
-			? `${spaces(COLUMN_GAP)}${durationText ? paint(theme, "muted", durationText, base) : spaces(durationWidthHere)}`
+			? `${spaces(COLUMN_GAP)}${durationText ? paint(theme, "muted", durationText) : spaces(durationWidthHere)}`
 			: "";
 
 	const line = spaces(pad) + marker + spaces(gap) + nameText + duration + spaces(pad);
 
-	if (base === "surface") return `${theme.fg("surface")}${line}${theme.fg("text")}`;
-	return line;
+	// The host maps the `surface` role to its elevated background: the core names the job, not a colour.
+	return cursorHere ? `${theme.bg("surface")}${line}` : line;
 }
 
 /**
@@ -264,14 +261,13 @@ function markerCells(
 	theme: ViewTheme,
 	glyphs: Glyphs,
 	width: number,
-	base: Role,
 ): string {
-	const cursorCell = () => (cursor ? paint(theme, "accent", glyphs.cursor, base) : " ");
-	const playingCell = () => (playing ? paint(theme, "success", paused ? glyphs.paused : glyphs.playing, base) : " ");
+	const cursorCell = () => (cursor ? paint(theme, "accent", glyphs.cursor) : " ");
+	const playingCell = () => (playing ? paint(theme, "success", paused ? glyphs.paused : glyphs.playing) : " ");
 
 	if (width >= 2) return cursorCell() + playingCell();
 	// One cell left: the cursor wins, otherwise the row would lose its selection.
-	if (width === 1) return cursor ? paint(theme, "accent", glyphs.cursor, base) : playingCell();
+	if (width === 1) return cursor ? paint(theme, "accent", glyphs.cursor) : playingCell();
 	return "";
 }
 
@@ -440,11 +436,11 @@ function cornerStateLine(theme: ViewTheme, glyph: string, time: string, inner: n
 
 /* --- shared helpers -------------------------------------------------------------------------- */
 
-/** The role prefix theory: `fg(role)` paints the cells that follow it; the view restores the base. */
-function paint(theme: ViewTheme, role: Role, text: string, base: Role = "text"): string {
+/** The role prefix theory: `fg(role)` paints the cells that follow it; the view restores the text role. */
+function paint(theme: ViewTheme, role: Role, text: string): string {
 	if (text === "") return "";
-	if (role === base) return text;
-	return `${theme.fg(role)}${text}${theme.fg(base)}`;
+	if (role === "text") return text;
+	return `${theme.fg(role)}${text}${theme.fg("text")}`;
 }
 
 function totalOf(track: Track | undefined, options: ViewOptions): number | undefined {
