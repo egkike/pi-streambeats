@@ -43,8 +43,14 @@
 		"format": "biome format --write",
 		"check": "pnpm lint && pnpm typecheck && pnpm test"
 	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.6.6",
+		"@earendil-works/pi-coding-agent": "1.5.2",
+		"@earendil-works/pi-tui": "1.5.2",
 		"@types/node": "^22",
 		"typescript": "^7.0.2"
 	}
