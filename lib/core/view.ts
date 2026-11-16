@@ -419,7 +419,9 @@ function cornerFrame(
 	const total = totalOf(playing, options);
 	const elapsed = Math.max(0, options.elapsedMs ?? 0);
 	const glyph = state.paused ? glyphs.paused : glyphs.playing;
-	const time = `${clock(elapsed)} / ${total === undefined ? "--:--" : clock(total)}`;
+	// Only the elapsed time when the total is unknown: `1:20 / --:--` reads like a broken card, and
+	// the bar it belongs to cannot be drawn either (S15).
+	const time = total === undefined ? clock(elapsed) : `${clock(elapsed)} / ${clock(total)}`;
 	const lines = [cornerStateLine(theme, glyph, time, inner, pad)];
 
 	if (total !== undefined && height >= 2 && inner > 0) {
