@@ -315,7 +315,8 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		);
 		if (!ctx) return;
 		state = reduce(state, { kind: size === "expanded" ? "open" : "overlay" }).state;
-		wantsFocus ||= focus;
+		// The focus intent is recorded after any rebuild below: `hideOverlay` clears `wantsFocus`, and
+		// it used to wipe the request that the caller had just made (the card opened unfocused).
 		if (!loaded) {
 			loaded = true;
 			loadFolder(state.path);
@@ -325,6 +326,8 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			// Geometry is fixed when the overlay is created, so corner -> expanded is a new overlay.
 			hideOverlay();
 		}
+
+		wantsFocus ||= focus;
 
 		if (overlay) {
 			overlay.handle.setHidden(false);

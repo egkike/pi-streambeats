@@ -398,7 +398,20 @@ function cornerFrame(
 	glyphs: Glyphs,
 ): Frame {
 	const playing = state.playing;
-	if (!playing) return { lines: [], hits: new Map() };
+	if (!playing) {
+		// An idle corner still has to be visible: an empty frame is indistinguishable from a
+		// shortcut that did nothing, which is exactly how the first real smokes read (S15).
+		const idleWidth = Math.min(width, CORNER_WIDTH);
+		const idlePad = idleWidth >= 4 ? HORIZONTAL_PADDING : 0;
+		const idleInner = idleWidth - idlePad * 2;
+		if (idleInner <= 0) return { lines: [], hits: new Map() };
+		const label = truncate("nothing playing", Math.max(0, idleInner - printableLength(glyphs.paused) - 1));
+		const content = paint(theme, "muted", glyphs.paused) + (label ? ` ${label}` : "");
+		return {
+			lines: [spaces(idlePad) + content + spaces(idleInner - printableLength(content)) + spaces(idlePad)],
+			hits: new Map(),
+		};
+	}
 
 	const cardWidth = Math.min(width, CORNER_WIDTH);
 	const pad = cardWidth >= 4 ? HORIZONTAL_PADDING : 0;

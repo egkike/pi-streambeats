@@ -303,10 +303,14 @@ describe("the corner card (S15, S16)", () => {
 		assert.deepEqual(frame.lines, [between(" ○", "0:47 / 4:05 ", 46), fill(` ${bar(44, 47_000, 245_000)} `, 46)]);
 	});
 
-	it("renders nothing when no track is loaded", () => {
+	it("still says something with no track loaded, so the shortcut does not look dead", () => {
+		// An empty frame is indistinguishable from a card that never opened, which is how the real
+		// smoke read three times in a row (S15).
 		const frame = renderFrame(card({ size: "corner" }), plain, 46, 7, options());
 
-		assert.deepEqual(frame.lines, []);
+		assert.equal(frame.lines.length, 1);
+		assert.match(frame.lines[0] ?? "", /nothing playing/);
+		assert.equal((frame.lines[0] ?? "").length, 46, "and it still fills its own width");
 	});
 
 	it("shrinks to the available width but never past the artboard's 46 cells", () => {
