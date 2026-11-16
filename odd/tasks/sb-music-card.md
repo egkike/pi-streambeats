@@ -158,7 +158,7 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 | T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | hecho (PR pendiente) | `b00943f` |
 | T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | hecho (PR #16) | `6f3b70d` |
 | T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | hecho (PR #17) | `5828bd5`, `a083366` |
-| T9 | S1, S4, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | abierta | — |
+| T9 | S1, S4, S8, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | hecho (PR #25) | `bf2ebf3` … `c259e87` |
 | T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | abierta — frontera hecha, falta el host falso | `872d5c2` (parcial) |
 | T11 | S9 | Suite completa verde y reporte | inline | abierta — el gate está verde, la suite es de 4 tests | — |
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
@@ -410,3 +410,21 @@ delivery sale **desde el worktree que tiene el candidato** (empujar una rama aje
 silencio, y así se entregó T7 sin assess); y revisar antes del push ahorra un run de CI (T8 corrió CI dos veces).
 Pendiente declarado de la review de T8, con dueño: `R1-001` (el default de macOS cae en el tmpdir con uid, path
 predecible) y `R4-004` (`quit()` durante el arranque filtra mpv), las dos a decidir en T9/T12.
+
+L30 (T9/T9b cerrado: la extensión montada, y seis bugs que sólo el smoke vio): `lib/host/{host,component,keys,theme}.ts`
++ `extensions/sb-music.ts`, 13 commits (`bf2ebf3` … `c259e87`), PR #25, issue #24. **295 tests**, `tsc` limpio, install
+congelado verde, review nativa `high` cerrada con corrección acotada y validador dirigido. Los tipos del host se
+instalan de verdad (`devDependencies` 1.5.2 + `peerDependencies` `"*"`), como hace `heohlee/pi-yt`: el bloqueo era
+`ERR_PNPM_IGNORED_BUILDS` de pnpm, resuelto con `strictDepBuilds: false` + `ignoredBuiltDependencies` en
+`pnpm-workspace.yaml` — el mismo intento que `L11` había puesto en `.npmrc`, donde pnpm 12 no lo lee. El smoke real
+(en Gentle Shell, cinco rondas) destapó seis bugs que la suite no podía ver: (1) el camino modal liberaba el foco a
+`null` y dejaba el terminal sin teclado; (2) la card parseaba teclas con una tabla ANSI propia mientras Pi exporta
+`matchesKey` — `j`/`k` andaban y `esc`/flechas no; (3) `ctx.ui.custom` se resuelve con `done()` y Pi maneja una
+pantalla por vez, así que pedir otra sin esperar descartaba el pedido en silencio; (4) la geometría se fija al crear
+el overlay, así que cambiar de tamaño exige reconstruirlo; (5) `cornerFrame` devolvía cero líneas sin tema sonando y
+un overlay vacío es indistinguible de una tecla muerta; (6) `esc` cerraba el overlay sin bajar `presence`, y el primer
+`ctrl+alt+z` siguiente era un no-op — el CRITICAL que encontró la review, no el smoke. Método que faltaba: se
+instrumentó con `SB_MUSIC_DEBUG=<path>` (traza opt-in de show/toggle/create/factory/focus/hide) y eso resolvió en una
+corrida lo que cuatro hipótesis seguidas no. **Lección**: una integración con el host no está lista cuando el gate está
+verde, está lista cuando abre en el host; el handoff decía "el smoke lo corre el dueño" y era cierto, lo que estuvo mal
+fue entregar tres veces antes de que ese smoke ocurriera.
