@@ -460,7 +460,7 @@ describe("the overlay shortcut (S4, S15)", () => {
 });
 
 describe("key routing and the status line (S12, S13)", () => {
-	it("plays the selected track, releases the keyboard and names the track in the status line", async () => {
+	it("plays the selected track and names it in the status line", async () => {
 		const h = harness();
 		register(h);
 		await start(h);
