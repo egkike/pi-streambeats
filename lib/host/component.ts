@@ -37,20 +37,32 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 	let cachedState: CardState | undefined;
 	let cachedWidth = -1;
 	let cachedHeight = -1;
+	let cachedElapsed = Number.NaN;
 	let cachedLines: string[] | undefined;
 
 	return {
 		render(width: number): string[] {
 			const state = deps.state();
 			const height = deps.height();
-			if (cachedLines && cachedState === state && cachedWidth === width && cachedHeight === height) {
+			const options = deps.options();
+			// The clock is part of the frame: a tick that leaves the state untouched still changes
+			// elapsedMs, and reusing the cached lines froze the time while a track played (R4-001).
+			const elapsed = options.elapsedMs ?? 0;
+			if (
+				cachedLines &&
+				cachedState === state &&
+				cachedWidth === width &&
+				cachedHeight === height &&
+				cachedElapsed === elapsed
+			) {
 				return cachedLines;
 			}
 
-			const frame = renderFrame(state, deps.theme(), width, height, deps.options());
+			const frame = renderFrame(state, deps.theme(), width, height, options);
 			cachedState = state;
 			cachedWidth = width;
 			cachedHeight = height;
+			cachedElapsed = elapsed;
 			cachedLines = [...frame.lines];
 			return cachedLines;
 		},
@@ -61,6 +73,7 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			cachedState = undefined;
 			cachedWidth = -1;
 			cachedHeight = -1;
+			cachedElapsed = Number.NaN;
 			cachedLines = undefined;
 		},
 	};

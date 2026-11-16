@@ -106,6 +106,23 @@ describe("the frame height the host gives the component (S15)", () => {
 		assert.equal(overlayHeight("expanded", 5), 4);
 		assert.equal(overlayHeight("expanded", 100), 30);
 	});
+	it("misses the cache when only the clock moved (R4-001)", () => {
+		let elapsed = 0;
+		const state = card();
+		const component = createCardComponent({
+			state: () => state,
+			theme: () => plain,
+			options: () => ({ ...options, elapsedMs: elapsed }),
+			height: () => 8,
+			onKey: () => {},
+		});
+
+		const first = component.render(90);
+		assert.strictEqual(component.render(90), first, "same state and same clock reuse the cached lines");
+
+		elapsed = 5_000;
+		assert.notStrictEqual(component.render(90), first, "a tick that only advances the clock re-renders");
+	});
 });
 
 describe("the overlay component's cache (S3, S8)", () => {
