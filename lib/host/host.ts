@@ -79,6 +79,8 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	let overlay: Overlay | undefined;
 	/** One `custom` at a time: a new screen is only requested once the previous one finished. */
 	let overlayChain: Promise<unknown> = Promise.resolve();
+	/** The session's TUI, kept so the status line can force a repaint with no card on screen. */
+	let sessionTui: TUI | undefined;
 	let playback: PlaybackClock | undefined;
 	let loaded = false;
 	let wantsFocus = false;
@@ -117,7 +119,10 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		});
 		debug("status", "segment=", segment === undefined ? "undefined" : JSON.stringify(segment), "width=", statusWidth());
 		ctx.ui.setStatus(STATUS_KEY, segment === undefined ? undefined : paintStatus(segment, state.paused, ctx.ui.theme));
-		overlay?.tui.requestRender();
+		// A plain requestRender only repaints what is dirty, and the footer does not consider itself
+		// dirty when a status segment changes: the title and the clock stayed invisible until
+		// something else forced a full frame (hiding the card did). Force it.
+		sessionTui?.requestRender(true);
 	}
 
 	/* --- the model's effects (S8) ------------------------------------------------------------- */
@@ -275,6 +280,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 						capturedEditor = focusedComponent(tui);
 						debug("factory", "editor=", Boolean(capturedEditor), "rows=", tui.terminal.rows);
 						capturedTui = tui;
+						sessionTui = tui;
 						finish = () => done(undefined);
 						component = createCardComponent({
 							state: () => state,
