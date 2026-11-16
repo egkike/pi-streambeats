@@ -77,7 +77,9 @@ export type Role = "text" | "dim" | "muted" | "accent" | "success" | "warning" |
  */
 export interface ViewTheme {
 	fg(role: Role): string;
+	/** The opening sequence of a background; pair it with `bgEnd` or the colour leaks into the next row. */
 	bg(role: Role): string;
+	bgEnd(role: Role): string;
 	bold(text: string): string;
 	dim(text: string): string;
 }

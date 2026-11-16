@@ -247,7 +247,7 @@ function entryLine(
 	const line = spaces(pad) + marker + spaces(gap) + nameText + duration + spaces(pad);
 
 	// The host maps the `surface` role to its elevated background: the core names the job, not a colour.
-	return cursorHere ? `${theme.bg("surface")}${line}` : line;
+	return cursorHere ? `${theme.bg("surface")}${line}${theme.bgEnd("surface")}` : line;
 }
 
 /**

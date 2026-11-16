@@ -13,7 +13,7 @@ import type { LibraryEntry, ViewTheme } from "../../lib/types.ts";
 const ROOT = "/home/kike/Music";
 const ALBUM = `${ROOT}/StreamBeats/Chillhop`;
 
-const plain: ViewTheme = { fg: () => "", bg: () => "", bold: (text) => text, dim: (text) => text };
+const plain: ViewTheme = { fg: () => "", bg: () => "", bgEnd: () => "", bold: (text) => text, dim: (text) => text };
 
 const entries: readonly LibraryEntry[] = [
 	{ kind: "folder", folder: { path: `${ALBUM}/Extras`, name: "Extras" } },

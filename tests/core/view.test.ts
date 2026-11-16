@@ -14,12 +14,13 @@ const ROOT = `${HOME}/Music`;
 const ALBUM = `${ROOT}/StreamBeats/Chillhop`;
 
 /** A theme that prints nothing: for layout assertions, where roles would only add noise. */
-const plain: ViewTheme = { fg: () => "", bg: () => "", bold: (text) => text, dim: (text) => text };
+const plain: ViewTheme = { fg: () => "", bg: () => "", bgEnd: () => "", bold: (text) => text, dim: (text) => text };
 
 /** A theme that prints the role it was asked for, so an exact line proves which role painted it. */
 const marked: ViewTheme = {
 	fg: (role) => `{${role}}`,
 	bg: (role) => `{bg:${role}}`,
+	bgEnd: (role) => `{/bg:${role}}`,
 	bold: (text) => `[b]${text}[/b]`,
 	dim: (text) => `[d]${text}[/d]`,
 };
@@ -217,7 +218,15 @@ describe("roles (S3, S16)", () => {
 	it("paints the cursor row's background on the surface role", () => {
 		const frame = renderFrame(card({ cursor: 0, playing: B }), marked, 90, 8, options());
 
-		assert.equal(frame.lines[1], `{bg:surface} {accent}▸{text}  Extras/${" ".repeat(73)} ${"    "} `);
+		assert.equal(frame.lines[1], `{bg:surface} {accent}▸{text}  Extras/${" ".repeat(73)} ${"    "} {/bg:surface}`);
+	});
+
+	it("closes the background it opened, so it cannot leak into the next row (R4-004)", () => {
+		const frame = renderFrame(card({ cursor: 0, playing: B }), marked, 90, 8, options());
+
+		const line = frame.lines[1] ?? "";
+		assert.ok(line.startsWith("{bg:surface}"), "the row opens the elevated surface");
+		assert.ok(line.endsWith("{/bg:surface}"), "and closes it before the next line starts");
 	});
 
 	it("asks for no background on the rows that are not under the cursor", () => {

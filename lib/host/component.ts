@@ -11,7 +11,7 @@ import type { Component } from "@earendil-works/pi-tui";
 import type { CardSize, CardState } from "../core/model.ts";
 import { renderFrame, type ViewOptions } from "../core/view.ts";
 import type { ViewTheme } from "../types.ts";
-import { translateKey } from "./keys.ts";
+import { translateKeys } from "./keys.ts";
 
 export interface CardComponentDeps {
 	/** The current model state. Read on every render so the component never holds a stale copy. */
@@ -55,8 +55,7 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			return cachedLines;
 		},
 		handleInput(data: string): void {
-			const id = translateKey(data);
-			if (id !== undefined) deps.onKey(id);
+			for (const id of translateKeys(data)) deps.onKey(id);
 		},
 		invalidate(): void {
 			cachedState = undefined;

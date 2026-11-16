@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { translateKey } from "../../lib/host/keys.ts";
+import { translateKey, translateKeys } from "../../lib/host/keys.ts";
 
 describe("key translation (S13)", () => {
 	it("translates the arrow keys in both terminal modes", () => {
@@ -37,5 +37,20 @@ describe("key translation (S13)", () => {
 		assert.equal(translateKey("\x1b[Z"), undefined);
 		assert.equal(translateKey("\x1bx"), undefined);
 		assert.equal(translateKey(""), undefined);
+	});
+});
+
+describe("a chunk that carries more than one key (R4-003)", () => {
+	it("types every printable character instead of dropping the chunk", () => {
+		assert.deepEqual(translateKeys("ab"), ["a", "b"]);
+		assert.deepEqual(translateKeys("midnight"), [..."midnight"]);
+	});
+
+	it("keeps a known sequence intact beside a typed character", () => {
+		assert.deepEqual(translateKeys("a\u001b[B"), ["a", "down"]);
+	});
+
+	it("does not type garbage out of an escape sequence it does not know", () => {
+		assert.deepEqual(translateKeys("\u001b[99~"), []);
 	});
 });

@@ -55,6 +55,9 @@ export function toViewTheme(theme: HostTheme): ViewTheme {
 	return {
 		fg: (role) => theme.getFgAnsi(FOREGROUND[role]),
 		bg: (role) => theme.getBgAnsi(BACKGROUND[role]),
+		// `getBgAnsi` only opens: the host exposes no default-background token, so the close is the
+		// standard reset. Without it the cursor row paints everything after it (R4-004).
+		bgEnd: () => "\u001b[49m",
 		bold: (text) => theme.bold(text),
 		dim: (text) => theme.fg("dim", text),
 	};
