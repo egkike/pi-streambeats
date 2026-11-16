@@ -123,6 +123,29 @@ describe("the frame height the host gives the component (S15)", () => {
 		elapsed = 5_000;
 		assert.notStrictEqual(component.render(90), first, "a tick that only advances the clock re-renders");
 	});
+	it("closes itself on escape and ctrl-c, whatever the model does with them", () => {
+		let dismissed = 0;
+		let keys = 0;
+		const component = createCardComponent({
+			state: () => card(),
+			theme: () => plain,
+			options: () => options,
+			height: () => 8,
+			onKey: () => {
+				keys += 1;
+			},
+			dismiss: () => {
+				dismissed += 1;
+			},
+		});
+
+		component.handleInput?.("\u001b");
+		assert.equal(dismissed, 1, "a lone escape always closes");
+		assert.equal(keys, 0, "and the model is not asked to interpret it");
+
+		component.handleInput?.("\u0003");
+		assert.equal(dismissed, 2, "ctrl-c is the terminal's panic button and also closes");
+	});
 });
 
 describe("the overlay component's cache (S3, S8)", () => {

@@ -189,7 +189,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 
 	/* --- the overlay (S4, S15) ---------------------------------------------------------------- */
 
-	function overlayOptions(size: CardSize, nonCapturing: boolean): OverlayOptions {
+	function overlayOptions(size: CardSize): OverlayOptions {
 		const corner = size === "corner";
 		return {
 			anchor: corner ? "bottom-right" : "center",
@@ -197,7 +197,10 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			minWidth: corner ? CORNER_WIDTH : 60,
 			maxHeight: corner ? 2 : "80%",
 			margin: 1,
-			nonCapturing,
+			// Never capture the keyboard: S4 wants the editor to keep typing while the card is
+			// visible, and a capture we cannot release to a known component leaves the terminal
+			// with no focus at all (that is the dead keyboard the first smoke produced).
+			nonCapturing: true,
 		};
 	}
 
@@ -211,7 +214,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 
 	function hideOverlay(): void {
 		if (!overlay) return;
-		overlay.handle.unfocus({ target: overlay.editor });
+		if (overlay.editor) overlay.handle.unfocus({ target: overlay.editor });
 		overlay.handle.setHidden(true);
 		overlay.tui.requestRender();
 	}
@@ -231,16 +234,15 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		let capturedTui: TUI | undefined;
 		let component: Component | undefined;
 		let finish: (() => void) | undefined;
-		let nonCapturing = true;
 
 		void sessionCtx.ui.custom<void>(
 			(tui, theme, _keybindings, done) => {
-				// Captured BEFORE the overlay is shown: this is the editor the handle will release to.
-				// Pi's runtime TUI exposes `getFocusedComponent`, but the exported `TUI` interface does
-				// not; the optional probe keeps this working if that method ever disappears.
+				// Captured BEFORE the overlay is shown: this is the editor the handle releases to when
+				// the card has to leave the way it came. `TUI.getFocusedComponent` is part of the
+				// installed interface, so no runtime probe is needed.
+				// `TUI` (the exported interface) has no `getFocusedComponent`; the concrete renderer
+				// does, so the runtime probe is the only typed-honest way to ask for it.
 				capturedEditor = focusedComponent(tui);
-				// Without an editor there is nothing to release to: fall back to a modal card (S4).
-				nonCapturing = capturedEditor !== null;
 				capturedTui = tui;
 				finish = () => done(undefined);
 				component = createCardComponent({
@@ -253,21 +255,21 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 					}),
 					height: () => overlayHeight(state.size, tui.terminal.rows),
 					onKey: (id) => dispatch({ kind: "key", id }),
+					// A last-resort exit: if the model ever mishandles the key, the overlay still
+					// closes instead of holding a terminal hostage.
+					dismiss: () => hideOverlay(),
 				});
 				return component;
 			},
 			{
 				overlay: true,
-				overlayOptions: () => overlayOptions(state.size, nonCapturing),
+				overlayOptions: () => overlayOptions(state.size),
 				onHandle: (handle) => {
 					if (!component || !capturedTui || !finish) return;
 					overlay = { handle, component, tui: capturedTui, editor: capturedEditor, finish };
-					handle.unfocus({ target: capturedEditor });
-					if (capturedEditor === null) {
-						// Reported explicitly, as S4 requires, and the card is focusable so `esc` can close it.
-						sessionCtx.ui.notify("the editor could not be captured; the card is modal", "warning");
-						wantsFocus = true;
-					}
+					// Nothing was captured from the editor, so there is nothing to hand back: asking to
+					// focus `null` is what left a terminal with no keyboard at all.
+					if (capturedEditor) handle.unfocus({ target: capturedEditor });
 					applyFocus();
 					refresh();
 				},
@@ -279,8 +281,6 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		if (!ctx) return;
 		state = reduce(state, { kind: size === "expanded" ? "open" : "overlay" }).state;
 		wantsFocus ||= focus;
-		// A fallback overlay is modal: it must own the keyboard to be closable with `esc` (S4).
-		if (overlay?.editor === null) wantsFocus = true;
 		if (!loaded) {
 			loaded = true;
 			loadFolder(state.path);
@@ -368,7 +368,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 				return;
 			}
 			startSession(commandCtx);
-			show("expanded", true);
+			// Expanded, but the keyboard stays where it was: S4 says the editor keeps typing while
+			// the card is on screen, and the first smoke proved what a focus grab costs.
+			show("expanded", false);
 		},
 	});
 
@@ -391,11 +393,12 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 }
 
 /**
- * The component that owns the keyboard, captured before the overlay is shown (S4).
+ * The component that had the keyboard before the overlay existed (S4).
  *
- * `TUI` (pi-tui/dist/tui.d.ts:222-249) declares focus setters but not the getter; the concrete
- * renderer (`TuiBase`) has `getFocusedComponent()`. The optional probe uses it when present and
- * answers null otherwise, which is exactly the S4 fallback: a modal card closed with `esc`.
+ * `TUI` declares focus setters but not the getter (pi-tui/dist/tui.d.ts:223-249); the concrete
+ * renderer has `getFocusedComponent()` (same file, line 315). The probe asks for it when present
+ * and answers null otherwise, and the host then releases nothing instead of asking for focus of
+ * `null`, which is what left the terminal with no keyboard at all.
  */
 function focusedComponent(tui: TUI): Component | null {
 	const focused = (tui as TUI & { getFocusedComponent?: () => Component | null }).getFocusedComponent;

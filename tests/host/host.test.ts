@@ -349,7 +349,7 @@ describe("the /sb-music command (S1, S4)", () => {
 		assert.deepEqual(h.overlays, []);
 	});
 
-	it("opens the card expanded, non-capturing, and gives the keyboard back to the editor", async () => {
+	it("opens the card expanded and non-capturing, leaving the keyboard with the editor", async () => {
 		const h = harness();
 		register(h);
 		await start(h);
@@ -360,21 +360,25 @@ describe("the /sb-music command (S1, S4)", () => {
 		assert.equal(call?.overlay, true);
 		assert.equal(call?.overlayOptions?.nonCapturing, true);
 		assert.equal(call?.handle.calls.unfocus[0], EDITOR);
-		assert.ok((call?.handle.calls.focus ?? 0) >= 1);
+		// The command opens the card; it does not take the keyboard. Taking it is what made the first
+		// smoke unusable once the release went to a `null` target.
+		assert.equal(call?.handle.calls.focus, 0);
 		assert.deepEqual(h.scanCalls, [ROOT]);
 		assert.match(call?.component.render(90)[0] ?? "", /sb-music/);
 	});
 
-	it("falls back to a focused modal and reports it when no editor can be captured (S4)", async () => {
+	it("never takes the keyboard even when no editor can be captured (S4)", async () => {
+		// The first smoke showed the cost of the old fallback: a modal card that released focus to
+		// `null` left the terminal with no keyboard at all. Non-capturing is unconditional now.
 		const h = harness(null);
 		register(h);
 		await start(h);
 		await open(h);
 
 		const call = h.overlays[0];
-		assert.equal(call?.overlayOptions?.nonCapturing, false);
-		assert.ok((call?.handle.calls.focus ?? 0) >= 1);
-		assert.match(h.notices.at(-1)?.[0] ?? "", /modal/);
+		assert.equal(call?.overlayOptions?.nonCapturing, true);
+		assert.equal(call?.handle.calls.focus, 0);
+		assert.deepEqual(call?.handle.calls.unfocus, [], "nothing was taken, so nothing is handed back");
 	});
 });
 

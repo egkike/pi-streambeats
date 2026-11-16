@@ -24,6 +24,12 @@ export interface CardComponentDeps {
 	readonly height: () => number;
 	/** A translated key identifier; the host reduces it into the model. */
 	readonly onKey: (id: string) => void;
+	/**
+	 * Close the surface without going through the model. Pi hands the component raw input, so this
+	 * is the guaranteed exit: a key that the model mishandles must not leave a terminal with no
+	 * keyboard (that is exactly what the first smoke produced).
+	 */
+	readonly dismiss?: () => void;
 }
 
 /** The rows an expanded card asks for, leaving room for the editor and the footer. */
@@ -67,6 +73,12 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			return cachedLines;
 		},
 		handleInput(data: string): void {
+			// Ctrl-C is the terminal's own panic button and ESC is the card's: either one always
+			// closes, whatever the model decides to do with them.
+			if (data === "\u0003" || data === "\u001b") {
+				deps.dismiss?.();
+				return;
+			}
 			for (const id of translateKeys(data)) deps.onKey(id);
 		},
 		invalidate(): void {
