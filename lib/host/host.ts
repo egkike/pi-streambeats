@@ -115,6 +115,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			elapsedMs: elapsedMs(),
 			asciiGlyphs: deps.settings.asciiGlyphs,
 		});
+		debug("status", "segment=", segment === undefined ? "undefined" : JSON.stringify(segment), "width=", statusWidth());
 		ctx.ui.setStatus(STATUS_KEY, segment === undefined ? undefined : paintStatus(segment, state.paused, ctx.ui.theme));
 		overlay?.tui.requestRender();
 	}
