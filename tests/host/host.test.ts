@@ -417,6 +417,25 @@ it("rebuilds the overlay when a card key changes the size (S15)", async () => {
 	);
 });
 
+it("dismissing with escape leaves the model hidden, so the shortcut can show it again (R4-001)", async () => {
+	// Closing the overlay behind the model's back left `presence` on "visible": the next shortcut
+	// press then "hid" nothing and the card looked dead.
+	const h = harness();
+	register(h);
+	await start(h);
+	await open(h);
+	await flush();
+	assert.equal(h.overlays.length, 1);
+
+	h.overlays[0]?.component.handleInput?.("\u001b");
+	await flush();
+
+	await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+	await flush();
+
+	assert.equal(h.overlays.length, 2, "the first press after an escape shows the card again");
+});
+
 describe("the overlay shortcut (S4, S15)", () => {
 	it("shows, hides and shows again without taking the keyboard", async () => {
 		const h = harness();

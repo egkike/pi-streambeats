@@ -285,9 +285,10 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 							}),
 							height: () => overlayHeight(state.size, tui.terminal.rows),
 							onKey: (id) => dispatch({ kind: "key", id }),
-							// A last-resort exit: if the model ever mishandles the key, the overlay still
-							// closes instead of holding a terminal hostage.
-							dismiss: () => hideOverlay(),
+							// The exit goes through the model, not around it: closing the overlay without
+							// reducing `presence` left the model saying "visible", so the next overlay
+							// shortcut hid nothing and the card looked dead (R4-001).
+							dismiss: () => dispatch({ kind: "key", id: "escape" }),
 							// A focused overlay swallows the global shortcut, so the card answers it too.
 							isOverlayKey: (data) => matchesOverlayKey(data, deps.settings.shortcuts.overlay),
 							togglePresence: () => togglePresence(),
