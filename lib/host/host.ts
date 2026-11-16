@@ -195,7 +195,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			// A card key changed the size: geometry is fixed at creation, so the overlay is rebuilt.
 			// Doing this only in `show()` left `l` with an expanded frame asked to draw a corner.
 			debug("rebuild after key", overlay.size, "->", state.size);
-			const hadFocus = wantsFocus || overlay.handle.isFocused();
+			// Only the expanded card owns the keyboard: the corner is a passive readout (S15), so
+			// collapsing to it hands the keys back to the editor instead of holding them hostage.
+			const hadFocus = state.size === "expanded" && (wantsFocus || overlay.handle.isFocused());
 			hideOverlay();
 			wantsFocus = hadFocus;
 			createOverlay();
