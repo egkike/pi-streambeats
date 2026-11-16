@@ -25,6 +25,9 @@ import { toViewTheme } from "./theme.ts";
 /** The single status key. Pi sorts statuses by key, so a stable one keeps the line in place. */
 export const STATUS_KEY = "sb-music";
 
+/** The widest a status segment may be: the host's footer panel is narrower than the terminal. */
+const STATUS_MAX_WIDTH = 44;
+
 /** The artboard's corner card is 46 cells wide (S15). */
 const CORNER_WIDTH = 46;
 
@@ -91,7 +94,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	function statusWidth(): number {
 		if (deps.statusWidth !== undefined) return deps.statusWidth;
 		const columns = overlay?.tui.terminal.columns ?? 120;
-		return Math.max(20, Math.floor(columns) - 2);
+		// The host draws statuses in its own footer panel and wraps what does not fit, so the budget
+		// is the narrow panel and not the terminal: a full-width segment became a two-line bullet.
+		return Math.max(20, Math.min(STATUS_MAX_WIDTH, Math.floor(columns) - 2));
 	}
 
 	function elapsedMs(): number {
@@ -145,10 +150,8 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		dispatch({ kind: "folder-loaded", path: result.path, entries: result.entries });
 	}
 
-	/** Execute the model's requests. Returns true when the keyboard must go back to the editor. */
-	function applyEffects(effects: readonly Effect[]): boolean {
-		let releaseKeyboard = false;
-
+	/** Execute the model's requests. The keyboard is handed back only when the card is dismissed. */
+	function applyEffects(effects: readonly Effect[]): void {
 		for (const effect of effects) {
 			switch (effect.kind) {
 				case "load-folder":
@@ -159,8 +162,10 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 					if (!track) break;
 					playback = { trackId: effect.trackId, startedAt: clock() };
 					void player?.play(track);
-					// The user picked a track: the editor gets the keyboard back (S4, README).
-					releaseKeyboard = true;
+					// The card keeps the keyboard while it is being driven. Releasing it on every play
+					// left the card undriveable after the first `enter` (space, n and p went to the
+					// editor). S4 asks that the card not be MODAL: the editor gets the keys back when
+					// the card is dismissed or hidden, not on every action.
 					break;
 				}
 				case "pause":
@@ -186,15 +191,13 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 					break;
 			}
 		}
-		return releaseKeyboard;
 	}
 
 	/** One reduction, its effects, and one refresh. Nested loads are safe: they emit no effects. */
 	function dispatch(event: CardEvent): void {
 		const reduction = reduce(state, event);
 		state = reduction.state;
-		const release = applyEffects(reduction.effects);
-		if (release) releaseToEditor();
+		applyEffects(reduction.effects);
 		if (state.presence === "hidden") {
 			hideOverlay();
 		} else if (overlay && overlay.size !== state.size) {
@@ -229,13 +232,6 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	/** The keyboard goes back to the component that had it before the overlay existed (S4). */
-	function releaseToEditor(): void {
-		if (!overlay) return;
-		if (!overlay.editor) return;
-		overlay.handle.unfocus({ target: overlay.editor });
-		state = reduce(state, { kind: "blur" }).state;
-	}
-
 	function hideOverlay(): void {
 		debug("hide", "overlay=", Boolean(overlay));
 		if (!overlay) return;
