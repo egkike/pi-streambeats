@@ -396,6 +396,27 @@ describe("the /sb-music command (S1, S4)", () => {
 	});
 });
 
+it("rebuilds the overlay when a card key changes the size (S15)", async () => {
+	// `l` goes through the reducer, not through `show`, and an overlay keeps the geometry it was
+	// created with: without the rebuild the corner was asked to draw in an expanded frame.
+	const h = harness();
+	register(h);
+	await start(h);
+	await open(h);
+	await flush();
+	assert.equal(h.overlays.length, 1);
+
+	h.overlays[0]?.component.handleInput?.("l");
+	await flush();
+
+	assert.equal(h.overlays.length, 2, "a new overlay was built for the other size");
+	assert.equal(
+		h.overlays[1]?.overlayOptions?.nonCapturing,
+		true,
+		"the rebuilt corner does not grab the keyboard either",
+	);
+});
+
 describe("the overlay shortcut (S4, S15)", () => {
 	it("shows, hides and shows again without taking the keyboard", async () => {
 		const h = harness();

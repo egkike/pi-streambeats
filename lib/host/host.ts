@@ -189,7 +189,17 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		state = reduction.state;
 		const release = applyEffects(reduction.effects);
 		if (release) releaseToEditor();
-		if (state.presence === "hidden") hideOverlay();
+		if (state.presence === "hidden") {
+			hideOverlay();
+		} else if (overlay && overlay.size !== state.size) {
+			// A card key changed the size: geometry is fixed at creation, so the overlay is rebuilt.
+			// Doing this only in `show()` left `l` with an expanded frame asked to draw a corner.
+			debug("rebuild after key", overlay.size, "->", state.size);
+			const hadFocus = wantsFocus || overlay.handle.isFocused();
+			hideOverlay();
+			wantsFocus = hadFocus;
+			createOverlay();
+		}
 		refresh();
 	}
 
