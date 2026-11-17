@@ -68,6 +68,8 @@ interface PlaybackClock {
 	readonly startedAt: number;
 	/** Elapsed milliseconds frozen at pause; undefined while playing. */
 	readonly frozen?: number;
+	/** Total reported by the player (S12, S15); undefined until mpv answers, or when it cannot. */
+	readonly durationMs?: number;
 }
 
 /** Register the command, the overlay shortcut and the session life cycle. */
@@ -106,6 +108,28 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	/**
+	 * S12, S15: the total is the player's fact, not the file's. The scanner reads names, not tags, so
+	 * `Track.durationMs` is almost always undefined and the card could never draw the bar. mpv only
+	 * knows `duration` once something is loaded, so it is asked after `loadfile` and asked again on
+	 * every play, because the total belongs to the track. A player that cannot answer (no mpv, a
+	 * timeout, a property it does not expose) leaves the total unknown: every surface keeps the
+	 * fallback it already has and nothing is invented.
+	 */
+	function readDuration(trackId: string): void {
+		const active = player;
+		if (!active) return;
+		void active.command(["get_property", "duration"]).then((reply) => {
+			if (reply.error !== "success") return;
+			const seconds = reply.data;
+			if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return;
+			// A late answer must not rewrite the clock of the track that took over meanwhile.
+			if (playback === undefined || playback.trackId !== trackId) return;
+			playback = { ...playback, durationMs: Math.round(seconds * 1000) };
+			refresh();
+		});
+	}
+
+	/**
 	 * Pi's status line is a finished string, not a render callback (types.d.ts:95). The formatter
 	 * already truncates the title; the glyph is the one part this adapter colours, because the host
 	 * theme owns the palette and S12 forbids colour as the only signal.
@@ -120,6 +144,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		if (!ctx || closing) return;
 		const segment = statusSegment(state, statusWidth(), {
 			elapsedMs: elapsedMs(),
+			totalMs: playback?.durationMs,
 			asciiGlyphs: deps.settings.asciiGlyphs,
 		});
 		debug("status", "segment=", segment === undefined ? "undefined" : JSON.stringify(segment), "width=", statusWidth());
@@ -161,7 +186,10 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 					const track = trackById(effect.trackId);
 					if (!track) break;
 					playback = { trackId: effect.trackId, startedAt: clock() };
-					void player?.play(track);
+					const started = player?.play(track);
+					// The total is asked once the load has been acknowledged, never before: under
+					// `--idle` mpv has no `duration` property until something is loaded.
+					void started?.then(() => readDuration(effect.trackId));
 					// The card keeps the keyboard while it is being driven. Releasing it on every play
 					// left the card undriveable after the first `enter` (space, n and p went to the
 					// editor). S4 asks that the card not be MODAL: the editor gets the keys back when
@@ -174,7 +202,12 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 					break;
 				case "resume":
 					if (playback) {
-						playback = { trackId: playback.trackId, startedAt: clock() - (playback.frozen ?? 0) };
+						// The total survives pause and resume: it describes the track, not the stretch.
+						playback = {
+							trackId: playback.trackId,
+							startedAt: clock() - (playback.frozen ?? 0),
+							durationMs: playback.durationMs,
+						};
 					}
 					void player?.resume();
 					break;
@@ -286,6 +319,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 								libraryRoot: deps.settings.libraryRoot,
 								asciiGlyphs: deps.settings.asciiGlyphs,
 								elapsedMs: elapsedMs(),
+								totalMs: playback?.durationMs,
 							}),
 							height: () => overlayHeight(state.size, tui.terminal.rows),
 							onKey: (id) => dispatch({ kind: "key", id }),

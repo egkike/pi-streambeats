@@ -85,6 +85,8 @@ interface Harness {
 	readonly overlays: OverlayCall[];
 	readonly player: Player;
 	readonly playerCalls: string[];
+	/** What the player answers to queries, one entry per `command` call (S12 duration). */
+	readonly playerControl: { commandCalls: (readonly unknown[])[]; answers: (number | "error")[] };
 	readonly scanCalls: string[];
 	readonly report: (report: PlayerReport) => void;
 	readonly tick: () => void;
@@ -93,13 +95,26 @@ interface Harness {
 	readonly now: { value: number };
 }
 
-function fakePlayer(): { player: Player; calls: string[] } {
+function fakePlayer(): {
+	player: Player;
+	calls: string[];
+	control: { commandCalls: (readonly unknown[])[]; answers: (number | "error")[] };
+} {
 	const calls: string[] = [];
+	const control = { commandCalls: [] as (readonly unknown[])[], answers: [] as (number | "error")[] };
 	return {
 		calls,
+		control,
 		player: {
 			start: async () => {},
-			command: async () => ({ error: "success" }),
+			command: async (values) => {
+				control.commandCalls.push(values);
+				// One scripted answer per query, consumed in call order: the queue lets a test make two
+				// queries answer differently without reaching into the adapter.
+				const answer = control.answers.shift();
+				if (answer === "error") return { error: "property unavailable" };
+				return answer === undefined ? { error: "success" } : { error: "success", data: answer };
+			},
 			play: async (track) => {
 				calls.push(`play:${track.id}`);
 			},
@@ -228,7 +243,7 @@ function harness(editor: Component | null = EDITOR): Harness {
 		shutdown: () => {},
 	} as ExtensionCommandContext;
 
-	const { player, calls: playerCalls } = fakePlayer();
+	const { player, calls: playerCalls, control: playerControl } = fakePlayer();
 
 	const pi = {
 		on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void) => {
@@ -260,6 +275,7 @@ function harness(editor: Component | null = EDITOR): Harness {
 		overlays,
 		player,
 		playerCalls,
+		playerControl,
 		scanCalls,
 		report: (report) => reportHandler(report),
 		tick: () => tickFn?.(),
@@ -509,6 +525,109 @@ describe("key routing and the status line (S12, S13)", () => {
 
 		assert.ok(h.playerCalls.includes("stop"));
 		assert.deepEqual(h.statuses.at(-1), [STATUS_KEY, undefined]);
+	});
+});
+
+/**
+ * The total belongs to the player: `Track.durationMs` is metadata the scanner never produces (S5 reads
+ * names, not tags), so without asking mpv the card cannot draw the progress S15 asks for nor the
+ * `m:ss/m:ss` S12 asks for. These entries deliberately carry no duration.
+ */
+const NO_METADATA: readonly LibraryEntry[] = [
+	{ kind: "folder", folder: { path: `${ALBUM}/Extras`, name: "Extras" } },
+	{ kind: "track", track: { id: `${ALBUM}/01 - Arcade Dreams.mp3`, title: "01 - Arcade Dreams.mp3", origin: "local" } },
+	{ kind: "track", track: { id: `${ALBUM}/02 - Blue Hour.mp3`, title: "02 - Blue Hour.mp3", origin: "local" } },
+];
+
+describe("the total duration comes from the player (S12, S15)", () => {
+	it("asks mpv for the duration after loading and prints it in the status line", async () => {
+		const h = harness();
+		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
+		h.playerControl.answers.push(245.4);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("j");
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+		await flush();
+
+		assert.deepEqual(h.playerControl.commandCalls[0], ["get_property", "duration"]);
+		assert.equal(lastStatus(h), "● Blue Hour · Chillhop 0:00/4:05");
+	});
+
+	it("draws the progress bar in the corner once the total is known", async () => {
+		const h = harness();
+		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
+		h.playerControl.answers.push(245);
+		await start(h);
+		await open(h);
+		h.overlays[0]?.component.handleInput?.("j");
+		h.overlays[0]?.component.handleInput?.("j");
+		h.overlays[0]?.component.handleInput?.("\r");
+		await flush();
+		h.overlays[0]?.component.handleInput?.("l");
+		await flush();
+
+		const frame = h.overlays.at(-1)?.component.render(46).join("\n") ?? "";
+
+		assert.match(frame, /0:00 \/ 4:05/);
+		// The bar's head and track (S16): the corner draws it only when the total is known.
+		assert.match(frame, /╸─/);
+	});
+
+	it("keeps the unknown-total fallback when the player cannot answer", async () => {
+		const h = harness();
+		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
+		h.playerControl.answers.push("error");
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("j");
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+		await flush();
+
+		assert.equal(lastStatus(h), "● Blue Hour · Chillhop 0:00/--:--");
+	});
+
+	it("ignores an answer that arrives after another track took over", async () => {
+		const h = harness();
+		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
+		// The first play's answer is a duration for a track that is no longer playing; the second play
+		// gets no answer at all, so a stale write would be the only total on screen.
+		h.playerControl.answers.push(222, "error");
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+		component?.handleInput?.("n");
+		await flush();
+
+		assert.equal(lastStatus(h), "● Blue Hour · Chillhop 0:00/--:--");
+	});
+
+	it("keeps the total across pause and resume", async () => {
+		const h = harness();
+		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
+		h.playerControl.answers.push(245);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("j");
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+		await flush();
+		component?.handleInput?.(" ");
+		component?.handleInput?.(" ");
+		await flush();
+
+		assert.equal(lastStatus(h), "● Blue Hour · Chillhop 0:00/4:05");
 	});
 });
 

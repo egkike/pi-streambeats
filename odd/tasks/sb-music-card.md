@@ -188,6 +188,32 @@ Riesgo declarado: las dos regexes son acoplamiento al HTML de Bandcamp y pueden 
 obligatoria: fixtures que fijan el contrato, error explícito `no albums found` en vez de lista vacía, y el caso
 "el catálogo no está disponible" como estado humano en la card — nunca un crash ni una card vacía sin explicación.
 
+S21 — Endurecimiento. Cinco defectos distintos, verificados en código, que no se juntan en una sola unidad
+revisable porque tienen respaldo y costo desiguales. Nada de esto es una feature: son incumplimientos y bordes.
+
+1. **Latch del primer scan** (`lib/host/host.ts`): `show()` marca `loaded = true` antes de escanear y
+   `loadFolder` en fallo sólo avisa; `loaded` nunca vuelve a `false`. Con `libraryRoot` inexistente o sin permiso
+   al abrir, la card queda **vacía toda la sesión** con un toast efímero. **Incumple S5**, que pide el estado con
+   su ruta, y no hay tecla de recarga en `KeyAction`.
+2. **Rechazos del player** (`applyEffects`): `play`, `pause`, `resume`, `stop`, `setVolume`, `quit` se invocan con
+   `void` y sin `.catch`. `#request` resuelve siempre (no rechaza), pero un `socket.write` que tira escapa como
+   rechazo no observado y la política de Node decide, no la card. El reloj además arranca antes de que la promesa
+   resuelva.
+3. **`ctrl+c`** (`lib/host/component.ts:79-90`): la card consume `\u0003` y lo convierte en un `escape`, así que
+   con la card enfocada **Pi no puede interrumpirse**. Decisión del dueño (L34): **`ctrl+c` pasa al host**; `esc`
+   sigue siendo la tecla que oculta la card. El test `tests/host/component.test.ts:126` pina la intención vieja y
+   se invierte junto con el código.
+4. **Tick permanente** (`host.ts`, `defaultTick`): el `setInterval` de 1 s se agenda siempre y `refresh()` no
+   filtra nada salvo `!ctx || closing`, así que fuerza `requestRender(true)` **cada segundo durante toda la
+   sesión**, incluso sin música y sin overlay. Defecto de costo, no de correctitud: no tiene `S#` que lo respalde.
+5. **Scanner sincrónico** (`scan` es "synchronous by contract" y usa `realpathSync`/`readdirSync`/`statSync`):
+   se ejecuta dentro de `onKey` y de `show()`, en el camino de input del host. Una carpeta grande o un mount de
+   red congelan el editor. Arreglarlo **cambia el contrato** del dep y rompe dos tests que pinan la sincronía
+   (`tests/host/host.test.ts`): es una unidad propia, no un ítem de bolsa.
+
+Orden decidido (L34): este ciclo es **sólo T15**. Endurecimiento es T16, en su propio ciclo y con su propio
+recorte; (1), (2) y (3) son los que tienen respaldo directo.
+
 ## Tasks
 
 | ID | S# | Tarea | Ruta | Estado | Commit |
@@ -207,6 +233,8 @@ obligatoria: fixtures que fijan el contrato, error explícito `no albums found` 
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | abierta | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
+| T15 | S12, S15 | Duración total desde el player: `get_property duration` tras el `loadfile` y transporte a las tres superficies | inline | hecho — 5 tests nuevos, `pnpm check` verde | sin commit (AGENTS.md) |
+| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -532,3 +560,45 @@ Diferencia deliberada: el proyecto de referencia usa `http.Client` dentro del pa
 `fetch` se **inyecta** por contrato, los dos HTML de `testdata/` se copian como fixtures y los tests no tocan red.
 Riesgo declarado en S20: las regexes acoplan al HTML de Bandcamp y pueden romperse en silencio; se mitiga con
 fixtures y con el fallo como estado humano en la card.
+
+L34 (recorte del ciclo, decisiones del dueño, verbatim): "1. ¿Qué entra en este ciclo? — Sólo A: la duración";
+"2. ¿Qué hace ctrl+c con la card enfocada? — Pasa al host: Pi manda, la card no lo consume".
+
+Se registran cinco defectos de endurecimiento que **sólo vivían en un resumen de sesión**: mismo defecto de
+proceso que el catálogo (L32). Ahora son S21 + T16, con su recorte y su ciclo.
+
+Verificación de los cinco antes de decidir, con `path:line`: el latch está en `show()` (`loaded = true` antes de
+escanear) y en la rama de fallo de `loadFolder`; los seis `void player?.…` están en `applyEffects`; `ctrl+c` se
+consume en `component.ts:79-90` y su test lo pina; el tick es un `setInterval` incondicional en `startSession` y
+`refresh()` fuerza un frame completo cada segundo; el scanner es sincrónico por contrato del dep y corre dentro de
+`onKey`.
+
+Corrección de una afirmación previa mía: dije que el tick "estaba atado a la reproducción" y era al revés — está
+siempre agendado y repinta de más. Sólo B1 cambia de naturaleza (costo, no correctitud); B2 tampoco era "un ítem
+más": cambia el contrato del dep `scan` y rompe dos tests que pinan la sincronía, por eso va a T16 y no a este
+ciclo.
+
+**T15 implementado** (S12, S15). El renderer ya sabía dibujar el total y la barra (`view.ts` `totalOf`, corner y
+pie expandido, `SegmentOptions.totalMs`); lo que faltaba era el productor. `Track.durationMs` viene del scanner, que
+lee nombres y no tags, así que en producción siempre era `undefined` y las cinco superficies decían `--:--`.
+
+Cambio, en dos módulos y **sin tocar `lib/core/`**:
+- `lib/host/host.ts`: `PlaybackClock.durationMs`; `readDuration()` consulta `["get_property", "duration"]` por el
+  `command()` que ya existía con correlación de `request_id` (sin tocar `#handleEvent`), **después** de que el
+  `loadfile` se confirma — bajo `--idle` mpv no tiene la propiedad antes de cargar nada; se pide en cada play
+  porque el total es del tema; una respuesta tardía para un tema que ya no suena se descarta; y `resume` conserva el
+  total en vez de reconstruir el reloj sin él. El dato llega al segmento de estado y a las opciones de la vista.
+- Fallback intacto: player sin mpv, timeout o propiedad no expuesta dejan el total desconocido y las superficies
+  siguen imprimiendo lo que ya imprimían.
+
+**Prueba contra mpv real** (la que los tests unitarios no pueden dar, y que valida las dos premisas del cambio):
+con `--idle` y un WAV de 2.000 s generado al efecto, `get_property duration` **antes** del `loadfile` responde
+`{"error":"property unavailable"}` y **después** responde `{"data":2.0,"error":"success"}`. Es decir: la consulta
+tiene que ir después del load, y el `error` no-success del fallback es el caso real, no una precaución teórica.
+
+Cinco tests nuevos en `tests/host/host.test.ts` (uno por regla): la consulta se emite y el segmento dice
+`0:00/4:05`; la esquina dibuja `0:00 / 4:05` con su barra; una respuesta de error conserva `--:--`; una respuesta
+tardía de otro tema se ignora; el total sobrevive pausa y resume. `pnpm check` verde: 300 tests (eran 295), 71
+suites, `biome` 33 archivos, `tsc` limpio.
+
+Sin commit: AGENTS.md pide pedido explícito del dueño, y el carril de código exige issue aprobada antes de la rama.
