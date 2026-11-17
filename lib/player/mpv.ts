@@ -155,12 +155,14 @@ export interface MpvReply {
 /**
  * What the player tells the caller (S11), each fact naming the track it is about so a late report
  * cannot advance the wrong one. `unavailable` is the S6 guided state: mpv is missing, gave up on the
- * socket or lost it — a state to show, never an exception to catch.
+ * socket or lost it — a state to show, never an exception to catch. `duration` is the total mpv only
+ * knows once a file is loaded (S12, S15): it travels here so the fact carries the track it describes.
  */
 export type PlayerReport =
 	| { readonly kind: "ready" }
 	| { readonly kind: "ended"; readonly trackId: string }
 	| { readonly kind: "failed"; readonly trackId: string; readonly message: string }
+	| { readonly kind: "duration"; readonly trackId: string; readonly durationMs: number }
 	| { readonly kind: "unavailable"; readonly message: string };
 
 export interface PlayerDeps {
@@ -557,6 +559,12 @@ class MpvPlayer implements Player {
 	}
 
 	#handleEvent(event: string, payload: Readonly<Record<string, unknown>>): void {
+		// The only two events that are facts about our track. `file-loaded` says the file is decodable
+		// (so `duration` finally answers); `end-file` says how it left.
+		if (event === "file-loaded") {
+			this.#onFileLoaded();
+			return;
+		}
 		if (event !== "end-file") return;
 
 		const trackId = this.#trackId;
@@ -575,6 +583,27 @@ class MpvPlayer implements Player {
 			return;
 		}
 		this.#emit({ kind: "failed", trackId, message: cannotOpen(name) });
+	}
+
+	/**
+	 * The total duration, asked for when mpv says the file is loaded (S12, S15). The `loadfile` reply is
+	 * NOT a load fact: on a real mpv it lands at ~2 ms and `get_property duration` then answers
+	 * `property unavailable`; `file-loaded` is the event that means it is decodable, and only after it
+	 * does the query answer. A player with no track of ours loaded has nothing to attribute the total
+	 * to, and an answer that arrives after the track was replaced or stopped is dropped.
+	 */
+	#onFileLoaded(): void {
+		const trackId = this.#trackId;
+		if (trackId === undefined) return;
+
+		void this.#request(["get_property", "duration"]).then((reply) => {
+			if (reply.error !== "success") return;
+			const seconds = reply.data;
+			if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return;
+			// The total belongs to the track that is still loaded, not to the one that asked.
+			if (this.#trackId !== trackId) return;
+			this.#emit({ kind: "duration", trackId, durationMs: Math.round(seconds * 1000) });
+		});
 	}
 
 	#request(values: readonly MpvValue[]): Promise<MpvReply> {

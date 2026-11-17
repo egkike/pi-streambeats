@@ -233,7 +233,7 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | abierta | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
-| T15 | S12, S15 | Duración total desde el player: `get_property duration` tras el `loadfile` y transporte a las tres superficies | inline | hecho — 5 tests nuevos, `pnpm check` verde | sin commit (AGENTS.md) |
+| T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
@@ -602,3 +602,57 @@ tardía de otro tema se ignora; el total sobrevive pausa y resume. `pnpm check` 
 suites, `biome` 33 archivos, `tsc` limpio.
 
 Sin commit: AGENTS.md pide pedido explícito del dueño, y el carril de código exige issue aprobada antes de la rama.
+
+L35 (prueba en el host real, verbatim del dueño): "Hice una prueba con /sb-music y veo lo siguiente: 1-en la card de
+Integratios el tiempo muestra así 1:15/--:--, en la esquina de abajo a la derecha sale en punto y el tiempo pero no
+sale el nombre de la musica o barra de avance... hay un espacio entre el punto y el tiempo".
+
+**T15 no cumplía: el total seguía desconocido en el host.** Causa raíz medida con mpv real, sin el `sleep` que mi
+prueba anterior tenía: el `reply` del `loadfile` llega a los **2 ms** —antes de que el archivo esté cargado— y la
+consulta inmediata devuelve `{"error":"property unavailable"}`. mpv avisa cuándo **está** cargado con el evento
+`file-loaded` (35 ms en la medición), y recién entonces `get_property duration` responde `{"data":2.0}`.
+
+Mi verificación anterior tenía un `time.sleep(0.4)` entre el `loadfile` y la consulta: ese sleep hacía el trabajo y
+escondía el error. Lección: una prueba de integración que **espera** está probando otra cosa que la que corre en
+producción. El `loadfile` acuse no es un hecho de carga; `file-loaded` sí.
+
+Diseño corregido: el jugador es quien conoce los hechos de mpv, así que la duración entra por el canal de reportes
+que ya existe y ya atribuye cada hecho a su `trackId` — `{ kind: "duration", trackId, durationMs }` — emitido cuando
+llega `file-loaded` y la consulta responde. El host deja de consultar y sólo aplica el reporte si el `trackId`
+sigue siendo el que suena. Revertir la consulta del host es parte de la corrección, no un extra.
+
+Las otras dos observaciones: el **nombre** del tema no va en la esquina por diseño (S12: el título lo posee la barra
+de estado; la esquina muestra sólo glifo, tiempo y progreso) — no es un defecto. La **barra de avance** tampoco
+aparece porque depende del total, o sea que cae con esta misma corrección. El **espacio entre el glifo y el tiempo**
+sí es real: `cornerStateLine` alinea el tiempo a la derecha, así que con un tiempo corto el hueco del medio queda
+grande. Se corrige junto con esto y se pina con un test de línea exacta.
+
+L36 (corrección de T15 verificada por el padre, no por el reporte del worker): la duración se dispara con el evento
+`file-loaded` y viaja como `PlayerReport { kind: "duration", trackId, durationMs }`. `lib/player/mpv.ts`: `#handleEvent`
+conserva `end-file` sin cambios y suma `file-loaded` → `#onFileLoaded()`, que no consulta si no hay `#trackId`, usa
+el `#request` de siempre y descarta la respuesta si el tema cambió mientras tanto. `lib/host/host.ts`: muere
+`readDuration()` y la consulta del adaptador — **el host ya no interroga a mpv** — y `onReport` aplica el total sólo
+si ese `trackId` sigue sonando. `Player.command()` queda sin llamador de producción: se conserva como escape hatch
+documentado, retirarlo cambiaría la interfaz pública y es otra decisión.
+
+Tests: tres nuevos en `tests/player/mpv.test.ts` sobre el servidor unix falso (la consulta se emite **después** de
+`file-loaded` y nunca antes; un `file-loaded` sin tema propio no reporta; una respuesta para un tema reemplazado se
+descarta) y los cinco de `tests/host/host.test.ts` reescritos para entrar por `playerReport`, con el andamiaje
+`playerControl` que yo había agregado retirado por muerto. `pnpm check` verificado por el padre: **303 tests / 72
+suites, 0 fallos**, `biome` 33 archivos, `tsc` limpio.
+
+Queda pendiente lo único que decide si esto está listo (`AGENTS.md`, Feedback Loop): **la prueba en el host** con
+`pi -e ./extensions/sb-music.ts` — `m:ss/m:ss` en la barra de estado y la barra en la esquina. Hasta entonces esta
+tarea no se cierra, por tercera vez con la misma lección.
+
+L37 (verificación en el host, verbatim del dueño): "Listo ya hice la prueba y funcionço todo. El tiempo en la card
+sale asi 0:44/2:51 y en la esquina ya sale la barra de avance también".
+
+**T15 cerrada**, y esta vez por el camino que las dos anteriores no tuvieron: la prueba en Pi con el código del
+candidato. `m:ss/m:ss` en la barra de estado y la barra de progreso en la esquina, que eran las dos superficies que
+S12 y S15 piden y que llevaban tres ciclos diciendo `--:--`.
+
+El saldo de esta tarea es un método, no una línea de código: **una integración con el host no está lista cuando el
+gate está verde, está lista cuando abre en Pi** — y una prueba de integración que *espera* (el `sleep` de mi primera
+verificación) está probando otra cosa que la que corre en producción. Las dos veces que T15 se declaró lista sin
+eso, el host la desmintió en un minuto.

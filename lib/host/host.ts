@@ -108,28 +108,6 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	/**
-	 * S12, S15: the total is the player's fact, not the file's. The scanner reads names, not tags, so
-	 * `Track.durationMs` is almost always undefined and the card could never draw the bar. mpv only
-	 * knows `duration` once something is loaded, so it is asked after `loadfile` and asked again on
-	 * every play, because the total belongs to the track. A player that cannot answer (no mpv, a
-	 * timeout, a property it does not expose) leaves the total unknown: every surface keeps the
-	 * fallback it already has and nothing is invented.
-	 */
-	function readDuration(trackId: string): void {
-		const active = player;
-		if (!active) return;
-		void active.command(["get_property", "duration"]).then((reply) => {
-			if (reply.error !== "success") return;
-			const seconds = reply.data;
-			if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return;
-			// A late answer must not rewrite the clock of the track that took over meanwhile.
-			if (playback === undefined || playback.trackId !== trackId) return;
-			playback = { ...playback, durationMs: Math.round(seconds * 1000) };
-			refresh();
-		});
-	}
-
-	/**
 	 * Pi's status line is a finished string, not a render callback (types.d.ts:95). The formatter
 	 * already truncates the title; the glyph is the one part this adapter colours, because the host
 	 * theme owns the palette and S12 forbids colour as the only signal.
@@ -186,10 +164,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 					const track = trackById(effect.trackId);
 					if (!track) break;
 					playback = { trackId: effect.trackId, startedAt: clock() };
-					const started = player?.play(track);
-					// The total is asked once the load has been acknowledged, never before: under
-					// `--idle` mpv has no `duration` property until something is loaded.
-					void started?.then(() => readDuration(effect.trackId));
+					// The total is not asked for here: the `loadfile` reply is not a load fact, and the player
+					// reports `duration` once mpv says the file is loaded (S12). Nothing in this adapter queries mpv.
+					void player?.play(track);
 					// The card keeps the keyboard while it is being driven. Releasing it on every play
 					// left the card undriveable after the first `enter` (space, n and p went to the
 					// editor). S4 asks that the card not be MODAL: the editor gets the keys back when
@@ -411,6 +388,13 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 				break;
 			case "failed":
 				dispatch({ kind: "track-failed", trackId: report.trackId });
+				break;
+			case "duration":
+				// The total belongs to the track that is still playing: a report for one that was replaced
+				// or stopped is dropped instead of rewriting the clock on screen (S12, S15).
+				if (playback === undefined || playback.trackId !== report.trackId) break;
+				playback = { ...playback, durationMs: report.durationMs };
+				refresh();
 				break;
 			case "unavailable":
 				// S6's guided state is a later slice; for now the host reports it without crashing.
