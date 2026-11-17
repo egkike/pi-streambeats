@@ -248,7 +248,9 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | abierta | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
-| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
+| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso | inline | corregida (L46) — **falta la prueba en el host** | sin commit |
+| T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | worker | abierta — unidad propia, cambia el contrato (L46) | — |
+| T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | worker | abierta — bloqueada por la API del host (L48) | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
 | T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | corregida (L42) — **falta la prueba en el host** | sin commit |
@@ -872,3 +874,72 @@ El clamp se conserva igual: pedir más ancho del que hay es incorrecto aunque en
 Propuesta para no dejarlo como misterio: una guarda en el borde que, si una línea renderizada excede su presupuesto, la
 trunque y lo registre con `SB_MUSIC_DEBUG`. No arregla una causa que no está identificada, pero convierte la próxima
 aparición en evidencia en vez de en otra suposición.
+
+L46 (T16, endurecimiento, autorizado por el dueño: "Dale al T16 + el latch del scan"). Cuatro defectos corregidos, y
+el quinto —el scanner asíncrono— se separó a **T21** porque cambia el contrato del dep `scan` y no cabe en la misma
+unidad revisable.
+
+1. **Latch del primer scan** (el que incumplía S5). `show()` marcaba `loaded = true` **antes** de escanear, así que un
+   `libraryRoot` ausente o sin permiso dejaba la card vacía **toda la sesión** con un toast ya desvanecido. Ahora el
+   latch se pone sólo si el scan salió bien, y la próxima vez que se muestre la card se reintenta. Además la falla es
+   **estado**: nuevo evento `notice` en el modelo, y el pie la mantiene con su ruta hasta que la card cargue otra cosa.
+2. **Rechazos del player.** Los seis call sites (`play`, `pause`, `resume`, `stop`, `setVolume`, `quit`) iban con
+   `void`; un `socket.write` que tiraba escapaba como rechazo no observado y la política de Node decidía. Ahora pasan
+   por `guard()`, que avisa al usuario. En `play` además se limpia el reloj y se despacha `track-failed`: un play que
+   nunca cargó no deja un reloj corriendo.
+3. **`ctrl+c` — fuera de este ciclo.** La review paró el primer intento con un BLOCKER real (`R4-001`), y al corregirlo
+   el validador dictaminó que el criterio original **no es alcanzable**: `Component.handleInput` devuelve `void`, así
+   que una card enfocada no puede reenviar la tecla. `lib/host/component.ts` y su test **quedaron en la línea base**
+   (comportamiento actual: cerrar la card, que libera el teclado), y la intención original pasa a **T22**, que necesita
+   un cambio en el host. Ver **L48**.
+4. **Tick ocioso.** `refresh()` forzaba un frame completo **cada segundo durante toda la sesión**, incluso con la card
+   oculta y sin música. Ahora sólo repinta si hay overlay o algo sonando.
+
+Tests: cuatro nuevos en `tests/host/host.test.ts` (reintento tras fallo, falla como estado en el pie, rechazo del
+player sin reloj, tick silencioso sobre un overlay real ya oculto) y el del componente invertido. `pnpm check` verde:
+**318 tests / 79 suites**.
+
+T21 queda abierta: el dep `scan` es "synchronous by contract" y corre dentro de `onKey`; hacerlo asíncrono toca el
+dispatch, el borde y dos tests que pinan la sincronía. Es una unidad propia, no un ítem de bolsa.
+
+L47 (una decisión del dueño que no es implementable, y el BLOCKER que la destapó): la review nativa de T16 levantó
+`R4-001` como **BLOCKER determinista** —"Ctrl-C with the music card focused is now consumed and dropped"— y tiene razón:
+`Component.handleInput?(data: string): void` **no puede declinar una tecla**, así que "que `ctrl+c` pase al host" no se
+puede escribir desde la card. Mi versión hacía `return`, que consumía la tecla y no hacía nada: peor que el
+comportamiento original.
+
+Decisión efectiva, distinta de la que se había registrado en L34: **`ctrl+c` cierra la card**. No es una preferencia
+estética — es el único mecanismo disponible: cerrar libera el teclado, y la pulsación siguiente llega a Pi. Si algún día
+el host expone una forma de reenviar la tecla, esto se revisa; hoy no existe.
+
+Estado del trámite, que quedó abierto y **no se resuelve inventando nada**: la review nativa está en
+`correction_required` y el plan de corrección **no se pudo enviar** por las vías disponibles — el `collectBinding` del
+slot `correction_lines` se rechaza como "missing or stale for current STATUS" incluso tomándolo de un STATUS
+inmediatamente anterior (parece invalidarse solo al pedir el siguiente), y `gentle_review_run` rechaza la lineage con
+`selector-mismatch` tanto con `origin/main` como con el `base-ref` con el que nació. Todos los intentos registraron
+`mutation_performed: false`. La corrección del código se hizo igual, porque el hallazgo era real y verificable a mano.
+
+L48 (la review de T16 se detuvo, y por qué). Secuencia real, que deja rastro útil para la próxima:
+
+1. Las dos lentes corrieron y entraron. El proveedor pidió un **refuter** y lo corrí: dictaminó `correction_required` con un
+   **BLOCKER determinista** (`R4-001`) por el `ctrl+c`. El hallazgo era real y lo introduje yo.
+2. Corregí el código... **antes** de enviar el plan. Error de secuencia: `--correction-lines` es un forecast
+   *pre-edición*, así que al commitear moví el árbol congelado (`7a0bd7f2…`) y el pedido quedó viejo. El tool decía
+   "stale for current STATUS" y tenía razón. Se detectó comparando `git rev-parse HEAD^{tree}` con el árbol congelado.
+3. Restaurado el árbol (revert no destructivo), el plan se aceptó **por la CLI nativa**
+   (`gentle-ai review capture-correction-plan`), no por el facade. 44 líneas de diff, dentro del presupuesto de 92.
+4. El proveedor emitió un `validation_request` para `R4-001`. El validador es **host-mediated** para `pi`:
+   `--execute` responde "unavailable for pi"; hay que materializar y correr el rol en el host. Se hizo con
+   `--materialize` + el subagente `review-validator` + `--input`.
+5. Veredicto: `correction_regression.passed = true`, `original_criteria.passed = **false**` — el criterio pedía que
+   `ctrl+c` llegara a Pi, y eso **no es implementable**: `Component.handleInput` devuelve `void`.
+6. El proveedor escaló (`targeted_validator_rejected`) y la lineage quedó en **stop terminal**
+   (`native_stop_required`). No se continúa; el interruptor lo posee el dueño.
+
+**Consecuencia técnica, que es el resultado valioso de todo esto:** la card **no puede** reenviar `ctrl+c` al host. La
+decisión de L34 ("`ctrl+c` pasa al host") no es alcanzable desde este lado de la frontera; el comportamiento correcto
+—y el que quedó en el código— es **cerrar la card**, que libera el teclado para que la pulsación siguiente llegue a Pi.
+Lo que haría falta para cumplir la intención original es un cambio **en el host**, no en la extensión: eso es **T22**.
+
+Estado del código al detenerse: `pnpm check` verde, **318 tests**, `ctrl+c` cierra la card con el motivo escrito, y el
+resto de T16 (latch del scan, rechazos del player, tick ocioso) sin observaciones de la review más allá del BLOCKER.

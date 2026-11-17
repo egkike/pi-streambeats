@@ -164,6 +164,8 @@ export type CardEvent =
 	| { readonly kind: "key"; readonly id: string }
 	/** The overlay shortcut (S15): toggles presence and works without the card's focus. */
 	| { readonly kind: "overlay" }
+	/** A message that has to survive the toast: the footer keeps it until something else happens (S5). */
+	| { readonly kind: "notice"; readonly text: string }
 	/** `/sb-music` (S15): opens the card expanded. */
 	| { readonly kind: "open" }
 	| { readonly kind: "focus" }
@@ -230,6 +232,8 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 	switch (event.kind) {
 		case "key":
 			return pressKey(state, event.id, deps);
+		case "notice":
+			return { state: { ...state, notice: event.text }, effects: [] };
 		case "overlay":
 			return { state: state.presence === "visible" ? hidden(state) : shown(state, "corner"), effects: [] };
 		case "open":
