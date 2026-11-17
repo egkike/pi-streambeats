@@ -82,6 +82,11 @@ export interface ViewOptions {
 	readonly elapsedMs?: number;
 	/** Duration the player knows better than the track metadata; falls back to `durationMs`. */
 	readonly totalMs?: number;
+	/**
+	 * Durations the player reported for tracks during this session (S12, issue #42). The scanner reads
+	 * names, not tags, so this is the only way a row learns its length without playing the track again.
+	 */
+	readonly knownDurations?: ReadonlyMap<string, number>;
 }
 
 /** A rendered row and the entry it stands for (S17): a click resolves without screen coordinates. */
@@ -163,7 +168,7 @@ function expandedFrame(
 	const listRowFits = contentRows - 1 - footerRows - 2 >= 1;
 	const ruleRows = listRowFits ? 2 : 0;
 	const listRows = Math.max(0, contentRows - 1 - footerRows - ruleRows);
-	const durationWidth = widestDuration(entries);
+	const durationWidth = widestDuration(entries, options);
 
 	lines.push(headerLine(state, theme, contentWidth, options));
 	// Top and bottom hairline, decided together by `ruleRows`: they exist as a pair or not at all.
@@ -183,7 +188,7 @@ function expandedFrame(
 			continue;
 		}
 		hits.set(lines.length, { index, entry });
-		lines.push(entryLine(entry, index, state, theme, contentWidth, glyphs, durationWidth));
+		lines.push(entryLine(entry, index, state, theme, contentWidth, glyphs, durationWidth, options));
 	}
 
 	// Same pair decision as above, spelled as `=== 2` so it cannot be read as a spacing rule.
@@ -261,17 +266,21 @@ function summaryOf(entries: readonly LibraryEntry[]): string {
 	return `${count}${SEPARATOR}${clock(total)}`;
 }
 
-function widestDuration(entries: readonly LibraryEntry[]): number {
+function widestDuration(entries: readonly LibraryEntry[], options: ViewOptions): number {
 	let widest = 0;
-	for (const entry of entries) widest = Math.max(widest, durationOf(entry).length);
+	for (const entry of entries) widest = Math.max(widest, durationOf(entry, options).length);
 	return widest;
 }
 
-/** A track's duration, or a tabular placeholder until the player knows it. Folders have none. */
-function durationOf(entry: LibraryEntry): string {
+/**
+ * A track's duration, or nothing. `--:--` used to stand in for "not known yet", but a column of placeholders is
+ * dead chrome and it never filled in: the player's answer was spent on the status line and forgotten. Now the
+ * column only exists when some visible row knows its length, and only those rows say something (issue #42).
+ */
+function durationOf(entry: LibraryEntry, options: ViewOptions): string {
 	if (entry.kind === "folder") return "";
-	if (entry.track.durationMs === undefined) return "--:--";
-	return clock(entry.track.durationMs);
+	const known = entry.track.durationMs ?? options.knownDurations?.get(entry.track.id);
+	return known === undefined ? "" : clock(known);
 }
 
 function entryLine(
@@ -282,6 +291,7 @@ function entryLine(
 	width: number,
 	glyphs: Glyphs,
 	durationWidth: number,
+	options: ViewOptions,
 ): string {
 	const pad = width >= 6 ? HORIZONTAL_PADDING : 0;
 	const inner = width - pad * 2;
@@ -301,7 +311,7 @@ function entryLine(
 	const name = entryName(entry, nameWidth);
 	// The name owns a fixed field, so the duration column never drifts row to row (S3).
 	const nameText = paint(theme, playingHere ? "success" : "text", name) + spaces(nameWidth - printableLength(name));
-	const durationText = durationOf(entry);
+	const durationText = durationOf(entry, options);
 	const duration =
 		durationWidthHere > 0
 			? `${spaces(COLUMN_GAP)}${durationText ? paint(theme, "muted", durationText) : spaces(durationWidthHere)}`
