@@ -81,7 +81,6 @@ export type KeyAction =
 	| "activate"
 	| "folder-up"
 	| "hide"
-	| "toggle-size"
 	| "start-filter"
 	| "toggle-pause"
 	| "stop"
@@ -124,7 +123,6 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
 	{ id: "<", label: "<", action: "previous", help: "prev", hint: false },
 	{ id: "u", label: "u", action: "folder-up", help: "up a folder", hint: true },
 	{ id: "backspace", label: "⌫", action: "folder-up", help: "up a folder", hint: false },
-	{ id: "l", label: "l", action: "toggle-size", help: "expand", hint: true },
 	{ id: "/", label: "/", action: "start-filter", help: "filter", hint: true },
 	{ id: "s", label: "s", action: "stop", help: "stop", hint: true },
 	{ id: "+", label: "+", action: "volume-up", help: "vol", hint: true },
@@ -317,9 +315,6 @@ function pressKey(state: CardState, id: string, deps: ModelDeps): Reduction {
 			return folderUp(state);
 		case "hide":
 			return clearFilterOrHide(state);
-		case "toggle-size":
-			if (!state.focused) return unchanged(state);
-			return { state: { ...state, size: state.size === "expanded" ? "corner" : "expanded" }, effects: [] };
 		case "start-filter":
 			return startFilter(state);
 		case "toggle-pause":

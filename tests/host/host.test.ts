@@ -400,9 +400,9 @@ describe("the /sb-music command (S1, S4)", () => {
 	});
 });
 
-it("rebuilds the overlay when a card key changes the size (S15)", async () => {
-	// `l` goes through the reducer, not through `show`, and an overlay keeps the geometry it was
-	// created with: without the rebuild the corner was asked to draw in an expanded frame.
+it("rebuilds the overlay when the cycle changes the size (S15)", async () => {
+	// An overlay keeps the geometry it was created with, so reaching the corner from an expanded card
+	// has to build a new one. With the cycle (L38) that path is expanded -> hidden -> corner.
 	const h = harness();
 	register(h);
 	await start(h);
@@ -410,7 +410,9 @@ it("rebuilds the overlay when a card key changes the size (S15)", async () => {
 	await flush();
 	assert.equal(h.overlays.length, 1);
 
-	h.overlays[0]?.component.handleInput?.("l");
+	await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+	await flush();
+	await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
 	await flush();
 
 	assert.equal(h.overlays.length, 2, "a new overlay was built for the other size");
@@ -440,26 +442,34 @@ it("dismissing with escape leaves the model hidden, so the shortcut can show it 
 	assert.equal(h.overlays.length, 2, "the first press after an escape shows the card again");
 });
 
-describe("the overlay shortcut (S4, S15)", () => {
-	it("shows, hides and shows again without taking the keyboard", async () => {
+describe("the overlay shortcut cycles the three states (S4, S15)", () => {
+	it("cycles hidden -> corner -> expanded -> hidden, and only the expanded card wants the keys", async () => {
+		// One command, because the size was reachable only with the keyboard the corner never holds
+		// (L38): collapsing handed the keys back and the old `l` could not be pressed again.
 		const h = harness();
 		register(h);
 		await start(h);
+		const press = async (): Promise<void> => {
+			await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+			await flush();
+		};
 
-		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
-		await flush();
+		await press();
 		assert.equal(h.overlays.length, 1);
-		assert.equal(h.overlays[0]?.handle.calls.focus, 0, "the shortcut shows without grabbing the keys");
+		assert.equal(h.overlays[0]?.handle.calls.focus, 0, "the corner is a passive readout");
+
+		await press();
+		assert.equal(h.overlays.length, 2, "expanding builds a fresh overlay for the new geometry");
+		assert.ok((h.overlays[1]?.handle.calls.focus ?? 0) >= 1, "the expanded card takes the keyboard");
 
 		// Hiding finishes the overlay instead of parking it hidden: a parked handle never came back
 		// in the real smoke, and finishing is the documented exit from `custom`.
-		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
-		await flush();
+		await press();
+		assert.equal(h.closed(), 2, "expanding and hiding both finished their overlay");
 
-		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
-		await flush();
-		assert.equal(h.overlays.length, 2, "showing again builds a fresh overlay");
-		assert.equal(h.overlays[1]?.handle.calls.focus, 0);
+		await press();
+		assert.equal(h.overlays.length, 3, "the cycle restarts at the corner");
+		assert.equal(h.overlays[2]?.handle.calls.focus, 0);
 	});
 });
 
@@ -556,7 +566,9 @@ describe("the total duration comes from the player (S12, S15)", () => {
 		h.overlays[0]?.component.handleInput?.("j");
 		h.overlays[0]?.component.handleInput?.("\r");
 		playerReport(h, { kind: "duration", trackId: BLUE, durationMs: 245_000 });
-		h.overlays[0]?.component.handleInput?.("l");
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
 		await flush();
 
 		const frame = h.overlays.at(-1)?.component.render(46).join("\n") ?? "";

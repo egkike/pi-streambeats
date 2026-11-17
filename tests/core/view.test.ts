@@ -87,7 +87,7 @@ function folderRow(marker: string, name: string, width = 90): string {
 	return fill(` ${marker} ${name.padEnd(width - 10)} ${"    "} `, width);
 }
 
-const HINTS = "↑ · enter · space · n · p · u · l · / · s · + · - · z · esc";
+const HINTS = "↑ · enter · space · n · p · u · / · s · + · - · z · esc";
 
 function footerLine(hints: string, right: string, width: number): string {
 	return between(` ${hints}`, `${right} `, width);
@@ -126,7 +126,7 @@ describe("the expanded card at 90 columns (S3, S9)", () => {
 			entryRow("  ", "03 - Neon Nights.mp3", "3:18"),
 			entryRow("▸ ", "04 - Paper Planes.mp3", "2:57"),
 			entryRow("  ", "05 - Rainy Window.mp3", "4:31"),
-			footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, 90),
+			footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, 90),
 		]);
 	});
 
@@ -154,7 +154,7 @@ describe("the expanded card at 78 columns (S3, S9)", () => {
 			entryRow("  ", "04 - Paper Planes.mp3", "2:57", 78),
 			entryRow("  ", "05 - Rainy Window.mp3", "4:31", 78),
 			entryRow("  ", "07 - Midnight Commute (extended midnight mix, remastered deluxe edi…", "6:12", 78),
-			footerLine(HINTS, `0:47 ${bar(6, 47_000, 222_000)} 3:42`, 78),
+			footerLine(HINTS, `0:47 ${bar(10, 47_000, 222_000)} 3:42`, 78),
 		]);
 	});
 
@@ -249,13 +249,13 @@ describe("the footer (S3, S13)", () => {
 	it("announces every key from the model's table and the progress at 90 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, 90));
+		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, 90));
 	});
 
 	it("shrinks the progress bar instead of dropping a key at 78 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 78, 8, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(6, 47_000, 245_000)} 4:05`, 78));
+		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(10, 47_000, 245_000)} 4:05`, 78));
 	});
 
 	it("drops the progress when the total is not known yet instead of inventing one", () => {
@@ -277,7 +277,7 @@ describe("the footer (S3, S13)", () => {
 
 		assert.equal(frame.lines.length, 10);
 		assert.deepEqual(frame.lines.slice(7, 9), [" ".repeat(90), " ".repeat(90)]);
-		assert.equal(frame.lines[9], footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, 90));
+		assert.equal(frame.lines[9], footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, 90));
 	});
 });
 

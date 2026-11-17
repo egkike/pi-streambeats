@@ -306,7 +306,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 							dismiss: () => dispatch({ kind: "key", id: "escape" }),
 							// A focused overlay swallows the global shortcut, so the card answers it too.
 							isOverlayKey: (data) => matchesOverlayKey(data, deps.settings.shortcuts.overlay),
-							togglePresence: () => togglePresence(),
+							togglePresence: () => cyclePresence(),
 						});
 						return component;
 					},
@@ -368,14 +368,24 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		refresh();
 	}
 
-	function togglePresence(): void {
-		debug("toggle", "presence=", state.presence, "ctx=", Boolean(ctx), "overlay=", Boolean(overlay));
+	/**
+	 * The overlay key cycles the three states in a fixed order (S15, L38): hidden -> corner -> expanded ->
+	 * hidden. One command, so the size never depends on a focus the corner does not have: collapsing handed
+	 * the keyboard back to the editor, and the old `l` could not be pressed again from there.
+	 */
+	function cyclePresence(): void {
+		debug("cycle", "presence=", state.presence, "size=", state.size, "ctx=", Boolean(ctx));
 		if (!ctx) return;
-		if (state.presence === "visible") {
-			dispatch({ kind: "overlay" });
+		if (state.presence === "hidden") {
+			show("corner", false);
 			return;
 		}
-		show("corner", false);
+		if (state.size === "corner") {
+			// The expanded card is the one that wants the keyboard; the corner is a passive readout.
+			show("expanded", true);
+			return;
+		}
+		dispatch({ kind: "overlay" });
 	}
 
 	/* --- the session (S6) -------------------------------------------------------------------- */
@@ -458,7 +468,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		handler: async (shortcutCtx: ExtensionContext) => {
 			if (shortcutCtx.mode !== "tui") return;
 			startSession(shortcutCtx);
-			togglePresence();
+			cyclePresence();
 		},
 	});
 

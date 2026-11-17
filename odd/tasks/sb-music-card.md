@@ -94,7 +94,7 @@ segmento de tiempo es lo último en ceder. La barra de estado es la **única due
 esquina no lo repite (muestra sólo tiempo y progreso) y la barra no muestra volumen (S11).
 
 S13 — Teclas dentro de la card, todas anunciadas en su fila de pie: `↑`/`↓` y `k`/`j` mueven el cursor;
-`enter` entra a una carpeta o reproduce un archivo; `u` y `\u232b` suben de carpeta; `esc` oculta la card salvo en modo filtro, donde primero lo limpia (S18); `l` expande y colapsa (S15);
+`enter` entra a una carpeta o reproduce un archivo; `u` y `\u232b` suben de carpeta; `esc` oculta la card salvo en modo filtro, donde primero lo limpia (S18); 
 `/` abre el filtro (S18); `space` pausa o continúa; `s` stop; `n`/`>` siguiente y `p`/`<` anterior; `+`/`-` volumen; `z` shuffle.
 Las teclas de selección respetan las keybindings de Pi (`tui.select.*`) cuando estén disponibles. El mapa de
 transporte de la app Go se hereda como **teclas**, no como fila visual: esa fila del repo Go es decorativa
@@ -111,13 +111,18 @@ entre sesiones: la card siempre abre en `libraryRoot`.
 S15 — Tres estados. **Oculta (estado inicial):** nada en pantalla; la barra de estado es la única superficie de
 música (S12). **Esquina (por defecto al mostrarse):** la card vive abajo a la derecha, chica y anclada, y muestra
 sólo glifo de estado y tiempo con su barra de progreso — el título lo posee la barra de estado (S12).
-**Expandida:** `l` la abre a la lista completa de S3, sin perder cursor ni carpeta.
+**Expandida:** la lista completa de S3, sin perder cursor ni carpeta.
 
-Las teclas separan **presencia** de **tamaño**: `ctrl+alt+z` (tecla `overlay`) muestra u oculta y funciona desde
-el editor, sin que la card tenga foco — es la única forma de recuperarla cuando está oculta, porque `l` sólo actúa
-con la card enfocada; `l` expande y colapsa; `esc` oculta siempre, salvo en modo filtro (S18). Mostrar lleva
-**siempre a la esquina**, aunque se haya ocultado estando expandida. `/sb-music` abre directo en expandida. Al
-iniciar una sesión de Pi la card arranca **oculta**.
+`ctrl+alt+z` (tecla `overlay`) **cicla los tres estados en orden fijo**, y funciona igual desde el editor que con
+la card enfocada: oculta → esquina → expandida → oculta. La primera pulsación llega siempre a la esquina, aunque la
+card se haya ocultado estando expandida; la segunda expande y toma el teclado; la tercera oculta.
+
+`l` no existe. El tamaño dejó de ser una tecla aparte porque dependía de un foco que la esquina no tiene: al colapsar,
+el teclado vuelve al editor, así que `l` no podía ejecutarse de nuevo y la card quedaba sin forma de volver a
+expandirse (L38). `esc` oculta siempre, salvo en modo filtro (S18). `/sb-music` abre directo en expandida. Al iniciar
+una sesión de Pi la card arranca **oculta**.
+
+La esquina es pasiva y no toma el teclado; la expandida sí, y el editor lo recupera cuando la card se oculta.
 
 S16 — Glifos. Una sola familia geométrica: `●` reproduciendo, `○` pausado, `▸` cursor, `▾` expandido, `━`/`─`
 progreso. Nunca emoji en el chrome. `settings.asciiGlyphs: true` cambia la familia a ASCII (`*`, `-`, `>`, `v`,
@@ -235,6 +240,7 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
+| T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | abierta (L38) | — |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -656,3 +662,20 @@ El saldo de esta tarea es un método, no una línea de código: **una integraci�
 gate está verde, está lista cuando abre en Pi** — y una prueba de integración que *espera* (el `sleep` de mi primera
 verificación) está probando otra cosa que la que corre en producción. Las dos veces que T15 se declaró lista sin
 eso, el host la desmintió en un minuto.
+
+L38 (la tecla `l` es un viaje de ida; decisión del dueño, verbatim): "La tecla l dice expandir al pié de la ventana
+expandida... al presionar l minimiza, y al dar nuevamente l solo se escribe en el chat... No expande en realidad. No
+sería más logico que se Expanda y Minimice con Ctrl+Alt+z y quitemos la tecla l?"
+
+Diagnóstico: no era una tecla rota, era un callejón sin salida construido por dos decisiones correctas. `ctrl+alt+z`
+mostraba la esquina con `show("corner", false)` —sin foco—; `l` alternaba el tamaño, y al colapsar `dispatch`
+reconstruía el overlay con `hadFocus = false`, devolviendo el teclado al editor; la esquina no toma foco nunca, y `l`
+sólo actúa con la card enfocada. Resultado: el pie anunciaba `l expand` y no había forma de expandir salvo
+`/sb-music`. S15 separaba presencia de tamaño; S4/S15 piden que colapsar devuelva el teclado. Juntas, dejan la
+esquina sin entrada de teclado.
+
+Decisión: **un solo comando que cicla los tres estados** (oculta → esquina → expandida → oculta). Elimina la
+dependencia de foco en lugar de parchearla, mantiene la esquina pasiva, y conserva "la primera pulsación llega a la
+esquina". Costo declarado y aceptado: S15 se reescribe (el tamaño ya no es una tecla aparte), `l` sale de S13 y del
+pie, y tres tests que pinan el comportamiento viejo se reescriben a propósito —`model.test.ts:179`,
+`host.test.ts:413` y `:559`— porque borrarlos destruiría la evidencia de que el cambio fue deliberado.
