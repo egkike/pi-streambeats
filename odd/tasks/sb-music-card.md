@@ -250,6 +250,7 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso | inline | corregida (L46) — **falta la prueba en el host** | sin commit |
 | T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | worker | abierta — unidad propia, cambia el contrato (L46) | — |
+| T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | worker | abierta — bloqueada por la API del host (L48) | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
 | T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | corregida (L42) — **falta la prueba en el host** | sin commit |
@@ -917,3 +918,28 @@ slot `correction_lines` se rechaza como "missing or stale for current STATUS" in
 inmediatamente anterior (parece invalidarse solo al pedir el siguiente), y `gentle_review_run` rechaza la lineage con
 `selector-mismatch` tanto con `origin/main` como con el `base-ref` con el que nació. Todos los intentos registraron
 `mutation_performed: false`. La corrección del código se hizo igual, porque el hallazgo era real y verificable a mano.
+
+L48 (la review de T16 se detuvo, y por qué). Secuencia real, que deja rastro útil para la próxima:
+
+1. Las dos lentes corrieron y entraron. El proveedor pidió un **refuter** y lo corrí: dictaminó `correction_required` con un
+   **BLOCKER determinista** (`R4-001`) por el `ctrl+c`. El hallazgo era real y lo introduje yo.
+2. Corregí el código... **antes** de enviar el plan. Error de secuencia: `--correction-lines` es un forecast
+   *pre-edición*, así que al commitear moví el árbol congelado (`7a0bd7f2…`) y el pedido quedó viejo. El tool decía
+   "stale for current STATUS" y tenía razón. Se detectó comparando `git rev-parse HEAD^{tree}` con el árbol congelado.
+3. Restaurado el árbol (revert no destructivo), el plan se aceptó **por la CLI nativa**
+   (`gentle-ai review capture-correction-plan`), no por el facade. 44 líneas de diff, dentro del presupuesto de 92.
+4. El proveedor emitió un `validation_request` para `R4-001`. El validador es **host-mediated** para `pi`:
+   `--execute` responde "unavailable for pi"; hay que materializar y correr el rol en el host. Se hizo con
+   `--materialize` + el subagente `review-validator` + `--input`.
+5. Veredicto: `correction_regression.passed = true`, `original_criteria.passed = **false**` — el criterio pedía que
+   `ctrl+c` llegara a Pi, y eso **no es implementable**: `Component.handleInput` devuelve `void`.
+6. El proveedor escaló (`targeted_validator_rejected`) y la lineage quedó en **stop terminal**
+   (`native_stop_required`). No se continúa; el interruptor lo posee el dueño.
+
+**Consecuencia técnica, que es el resultado valioso de todo esto:** la card **no puede** reenviar `ctrl+c` al host. La
+decisión de L34 ("`ctrl+c` pasa al host") no es alcanzable desde este lado de la frontera; el comportamiento correcto
+—y el que quedó en el código— es **cerrar la card**, que libera el teclado para que la pulsación siguiente llegue a Pi.
+Lo que haría falta para cumplir la intención original es un cambio **en el host**, no en la extensión: eso es **T22**.
+
+Estado del código al detenerse: `pnpm check` verde, **318 tests**, `ctrl+c` cierra la card con el motivo escrito, y el
+resto de T16 (latch del scan, rechazos del player, tick ocioso) sin observaciones de la review más allá del BLOCKER.
