@@ -853,3 +853,22 @@ habría cerrado el diagnóstico sigue faltando.
 
 Deuda viva de esta unidad, ya declarada: `knownDurations` vive en memoria de sesión. Al reiniciar Pi, cada fila vuelve
 a no decir su largo hasta que el tema suene una vez. Persistirlo es una decisión aparte.
+
+L45 (el dato que refuta el diagnóstico, verbatim del dueño): "tput cols" → **195**.
+
+**El diagnóstico del ancho era falso.** Para que la card desbordara por el `minWidth: 60` fijo, la terminal tenía que
+medir menos de ~62 columnas. Mide 195: el clamp introducido en `b3023c1` **no hace nada** en ese caso.
+
+Queda entonces: el nombre partido que el dueño vio dentro del recuadro **desapareció**, y no sabemos por qué. El otro
+cambio de esa unidad —la columna de duraciones con datos reales en vez de `--:--`— altera el ancho disponible en una o
+dos celdas, y no alcanza para explicar el síntoma. Las dos hipótesis vivas son (a) un artefacto de observación —la fila
+previa en pantalla o el texto de Pi al costado, mezclados al copiar— o (b) algo en cómo Pi compone el overlay que no es
+visible desde este repositorio.
+
+El clamp se conserva igual: pedir más ancho del que hay es incorrecto aunque en esta terminal no se note. Y el
+`renderFrame` sigue cumpliendo su invariante —cada línea exactamente al ancho pedido—, verificado en 46, 60, 78, 90 y
+120 con duraciones desconocidas.
+
+Propuesta para no dejarlo como misterio: una guarda en el borde que, si una línea renderizada excede su presupuesto, la
+trunque y lo registre con `SB_MUSIC_DEBUG`. No arregla una causa que no está identificada, pero convierte la próxima
+aparición en evidencia en vez de en otra suposición.
