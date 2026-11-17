@@ -68,7 +68,7 @@ interface OverlayCall {
 	readonly handle: OverlayHandle & { calls: HandleCalls };
 	readonly editor: Component | null;
 	readonly overlay: boolean | undefined;
-	readonly overlayOptions: { nonCapturing?: boolean } | undefined;
+	readonly overlayOptions: { nonCapturing?: boolean; width?: unknown; minWidth?: number } | undefined;
 }
 
 interface Harness {
@@ -276,6 +276,7 @@ function harness(editor: Component | null = EDITOR): Harness {
 function register(
 	h: Harness,
 	scan: (path: string) => ScanResult = (path) => ({ ok: true, path, entries: ENTRIES }),
+	terminalColumns?: () => number,
 ): void {
 	registerSbMusic(h.pi, {
 		settings: SETTINGS,
@@ -296,6 +297,7 @@ function register(
 			return () => {};
 		},
 		statusWidth: 80,
+		terminalColumns,
 	});
 }
 
@@ -711,5 +713,57 @@ describe("the card's state is owned by the model (S8)", () => {
 		h.overlays[0]?.component.handleInput?.("\r");
 
 		assert.deepEqual(h.scanCalls, [ROOT, `${ALBUM}/Extras`]);
+	});
+});
+
+describe("the card never asks for more room than the terminal has (issue #42)", () => {
+	it("clamps the expanded card's minimum width to the terminal it lives in", async () => {
+		// A fixed `minWidth: 60` on a 40-column terminal built a card wider than its area, and the
+		// terminal wrapped every line: that is what put the row's name on two lines in the host.
+		const h = harness();
+		register(h, undefined, () => 40);
+		await start(h);
+		await open(h);
+
+		assert.equal(h.overlays[0]?.overlayOptions?.minWidth, 38, "two cells of margin, never more");
+	});
+
+	it("keeps the configured minimum when the terminal is wide enough", async () => {
+		const h = harness();
+		register(h, undefined, () => 120);
+		await start(h);
+		await open(h);
+
+		assert.equal(h.overlays[0]?.overlayOptions?.minWidth, 60);
+	});
+});
+
+describe("rows learn the duration the player reported (issue #42)", () => {
+	it("fills a row from what the player said, even for a track that is not playing", async () => {
+		// The scanner reads names, not tags: the player's answer is the only source. It used to be spent on
+		// the status line and forgotten, so the row stayed `--:--` after the track had played.
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+
+		playerReport(h, { kind: "duration", trackId: `${ALBUM}/02 - Blue Hour.mp3`, durationMs: 245_000 });
+		await flush();
+
+		const frame = h.overlays[0]?.component.render(90).join("\n") ?? "";
+		assert.match(frame, /4:05/, "the row shows what the player reported");
+	});
+
+	it("prints no placeholder when nothing is known yet", async () => {
+		const h = harness();
+		const unknown = ENTRIES.map((entry) =>
+			entry.kind === "track" ? { kind: "track" as const, track: { ...entry.track, durationMs: undefined } } : entry,
+		);
+		register(h, (path) => ({ ok: true, path, entries: unknown }));
+		await start(h);
+		await open(h);
+
+		const frame = h.overlays[0]?.component.render(90).join("\n") ?? "";
+		assert.equal(frame.includes("--:--"), false, "a column of placeholders is dead chrome");
 	});
 });

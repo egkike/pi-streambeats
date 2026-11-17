@@ -252,6 +252,7 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
 | T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | corregida (L42) — **falta la prueba en el host** | sin commit |
+| T20 | S3, S12 | La card no pide más ancho del que entra, y las filas aprenden la duración del player sin `--:--` | inline | corregida (L43) — **falta la prueba en el host** | sin commit |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -806,3 +807,35 @@ Las líneas exactas de `tests/core/view.test.ts` las realineó un worker con ins
 aserciones: censo 81 → 90 (los nuevos son del marco), alturas +2 donde había que conservar las filas de lista. Tests
 nuevos: marco en rol `border`, marco ASCII, y card demasiado chica sin marco. `pnpm check` verde: **308 tests / 73
 suites**, `biome` 33 archivos, `tsc` limpio.
+
+L43 (primera mirada a la card ya enmarcada, verbatim del dueño): "El borde quedó bien. La lista de musicas muestra la
+duración así: Black Sabbath - Paranoid (Official […] Video).flac […] --:--". Ante la pregunta de dónde quedaba el
+texto ajeno que no es de la card: "Está DENTRO del recuadro"; sobre las duraciones: "Las dos cosas juntas".
+
+**Dos defectos, y uno era mío de método.**
+
+1. **La card podía pedir más ancho del que entra.** `overlayOptions` pedía `width: "80%"` con `minWidth: 60` fijo: en
+   una terminal más angosta que 60 columnas, Pi construía una card más ancha que su área y el terminal **envolvía cada
+   línea** — el nombre partido en dos y el texto del host asomando por las columnas que la card no cubría. El renderer
+   no tenía la culpa: `renderFrame` emite cada línea exactamente al ancho pedido (verificado en 46, 60, 78, 90 y 120
+   con duraciones desconocidas). Lo que estaba mal era **pedir** ese ancho. Ahora el mínimo se deriva del terminal
+   (`columns()`, con costura inyectable) y nunca lo excede.
+
+   Antes de eso cometí un error de método que dejo escrito: hice la primera reproducción sobre un `main` local
+   **atrasado** (sin el marco), así que el experimento no probaba el código desplegado. La repetición sobre la base
+   correcta dio el mismo resultado —cero desbordes en el renderer—, pero la conclusión sólo vale desde la segunda.
+
+2. **Las filas nunca aprendían la duración.** `Track.durationMs` viene del escáner, que lee nombres y no etiquetas
+   (S5), así que un archivo local jamás tiene una: la columna decía `--:--` para siempre. Desde #33 la card **sí**
+   aprende la duración de mpv, pero la gastaba en la barra de estado y en la esquina, y la olvidaba.
+   Ahora `ViewOptions.knownDurations` lleva lo que el player reportó en la sesión y las filas lo usan; y cuando
+   ninguna fila visible conoce su largo, **la columna no se dibuja** — una columna de `--:--` es chrome muerto que
+   además nunca se llenaba.
+
+Tests: cuatro nuevos en `tests/host/host.test.ts` — el mínimo se recorta a 38 con terminal de 40 columnas y queda en
+60 con 120; un reporte de duración llena la fila aunque la pista no esté sonando; sin datos no aparece ningún `--:--`.
+Hueco que esto destapó: los tests de vista usaban pistas **con** duración conocida, así que el camino `--:--` no tenía
+cobertura y el cambio no se habría detectado solo. `pnpm check` verde: **314 tests / 76 suites**.
+
+Pendiente declarado: el `knownDurations` vive en memoria de la sesión. Persistirlo es una decisión aparte (¿dónde,
+con qué invalidación?), y hoy no hace falta: se llena sola con el uso.

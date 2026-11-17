@@ -31,6 +31,12 @@ const STATUS_MAX_WIDTH = 44;
 /** The artboard's corner card is 46 cells wide (S15). */
 const CORNER_WIDTH = 46;
 
+/** The narrowest the expanded card is allowed to be; the terminal still gets the last word (issue #42). */
+const EXPANDED_MIN_WIDTH = 60;
+
+/** The overlay's own margin, in cells on each side. */
+const OVERLAY_MARGIN = 1;
+
 /** Everything the adapter needs from the process, injected so tests never touch mpv or disk. */
 export interface SbMusicDeps {
 	readonly settings: Settings;
@@ -46,6 +52,8 @@ export interface SbMusicDeps {
 	readonly tick?: (refresh: () => void) => () => void;
 	/** Budget for the status segment when the host reports no terminal width (S12). */
 	readonly statusWidth?: number;
+	/** Terminal width source; defaults to the live overlay's terminal, then `process.stdout`. */
+	readonly terminalColumns?: () => number;
 	/** A settings problem worth telling the user about once the session exists (S2). */
 	readonly warning?: string;
 }
@@ -87,18 +95,24 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	/** The session's TUI, kept so the status line can force a repaint with no card on screen. */
 	let sessionTui: TUI | undefined;
 	let playback: PlaybackClock | undefined;
+	/** What the player has told us about each track this session (issue #42). */
+	const knownDurations = new Map<string, number>();
 	let loaded = false;
 	let wantsFocus = false;
 	let closing = false;
 
 	/* --- the status line (S12) ---------------------------------------------------------------- */
 
+	function columns(): number {
+		if (deps.terminalColumns !== undefined) return deps.terminalColumns();
+		return overlay?.tui.terminal.columns ?? process.stdout.columns ?? 120;
+	}
+
 	function statusWidth(): number {
 		if (deps.statusWidth !== undefined) return deps.statusWidth;
-		const columns = overlay?.tui.terminal.columns ?? 120;
 		// The host draws statuses in its own footer panel and wraps what does not fit, so the budget
 		// is the narrow panel and not the terminal: a full-width segment became a two-line bullet.
-		return Math.max(20, Math.min(STATUS_MAX_WIDTH, Math.floor(columns) - 2));
+		return Math.max(20, Math.min(STATUS_MAX_WIDTH, Math.floor(columns()) - 2));
 	}
 
 	function elapsedMs(): number {
@@ -228,10 +242,14 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 
 	function overlayOptions(size: CardSize): OverlayOptions {
 		const corner = size === "corner";
+		// Never request more columns than the terminal has: a fixed `minWidth: 60` on a narrower screen built
+		// a card wider than its area, and the terminal wrapped every line -- the row's name broke in two and
+		// the host's own text showed in the columns the card never covered (issue #42).
+		const available = Math.max(20, Math.floor(columns()) - 2 * OVERLAY_MARGIN);
 		return {
 			anchor: corner ? "bottom-right" : "center",
-			width: corner ? CORNER_WIDTH : "80%",
-			minWidth: corner ? CORNER_WIDTH : 60,
+			width: corner ? Math.min(CORNER_WIDTH, available) : "80%",
+			minWidth: corner ? Math.min(CORNER_WIDTH, available) : Math.min(EXPANDED_MIN_WIDTH, available),
 			maxHeight: corner ? 2 : "80%",
 			margin: 1,
 			// Never capture the keyboard: S4 wants the editor to keep typing while the card is
@@ -297,6 +315,8 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 								asciiGlyphs: deps.settings.asciiGlyphs,
 								elapsedMs: elapsedMs(),
 								totalMs: playback?.durationMs,
+								// The listing learns from the player as the session goes (issue #42).
+								knownDurations,
 							}),
 							height: () => overlayHeight(state.size, tui.terminal.rows),
 							onKey: (id) => dispatch({ kind: "key", id }),
@@ -407,9 +427,15 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 				dispatch({ kind: "track-failed", trackId: report.trackId });
 				break;
 			case "duration":
-				// The total belongs to the track that is still playing: a report for one that was replaced
-				// or stopped is dropped instead of rewriting the clock on screen (S12, S15).
-				if (playback === undefined || playback.trackId !== report.trackId) break;
+				// What the player says about a track is true for that track, so it is remembered for the
+				// session and the listing can fill the row in (issue #42) -- even when it arrives for a
+				// track that is no longer playing.
+				knownDurations.set(report.trackId, report.durationMs);
+				// The clock on screen, though, belongs only to the track that is still playing (S12, S15).
+				if (playback === undefined || playback.trackId !== report.trackId) {
+					refresh();
+					break;
+				}
 				playback = { ...playback, durationMs: report.durationMs };
 				refresh();
 				break;
