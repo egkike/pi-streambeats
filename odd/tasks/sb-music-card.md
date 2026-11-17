@@ -245,7 +245,8 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | abierta — frontera hecha, falta el host falso | `872d5c2` (parcial) |
 | T11 | S9 | Suite completa verde y reporte | inline | **hecho** — 320 tests / 79 suites, `pnpm check` verde y `gate` verde en `main` (L51) | — |
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
-| T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — pendiente de verificación del dueño en el host; el mouse del host no se puede probar desde CI (L52) | — |
+| T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
+| T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | abierta — hallazgos no bloqueantes de la review de #52: `R4-hit-map-staleness` (WARNING) y `R3-002` (L53) | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
@@ -1049,3 +1050,18 @@ Cierre de dos preguntas abiertas, verbatim del dueño (misma sesión que T13):
    muerta. La decisión —implementarlas o retirarlas— queda abierta, y con ella si `/sb-music --keys` sirve para
    leerlas, escribirlas, o las dos cosas. Motivo del hallazgo: el dueño preguntó "¿no las utilizamos para nada? Es
    así?" revisando las teclas que íbamos a documentar en el README.
+
+L53 (T13 cerrada con la verificación del dueño, verbatim: "Ya hice la prueba y si funciona el mouse"). El mouse
+funciona en Pi: hover sobre las filas, click en carpeta y en track, rueda. La deuda que dejó `L52` queda saldada, y la
+cadena completa fue: issue **#51** → candidato `e0d22a0` / `eb081c2` → review nativa aprobada (lentes `resilience` +
+`reliability`, lineage `review-393f6e47630ac039`, autoridad quemada) → `gate` verde → smoke del dueño → merge
+(**PR #52**).
+
+Dos hallazgos **no bloqueantes** de esa review pasan a **T24**, sin reabrir el candidato: el proveedor los declaró
+informativos y su receipt sigue en pie.
+
+1. `R4-hit-map-staleness` (WARNING, `lib/host/component.ts:110`): el hit map se captura al renderizar y no se
+   invalida si el modelo cambia antes del próximo frame. Un segundo click en esa ventana puede activar una fila
+   **in-range del listado anterior**; la guarda del reducer evita el fuera de rango, no la fila equivocada.
+2. `R3-002` (SUGGESTION, `lib/host/component.ts:176-180`): el caso `click` con `clickCount > 1` no consulta el hit
+   map, así que las dos guardas no coinciden sobre cuál manda. Hoy es benigno porque el `press` ya declinó.
