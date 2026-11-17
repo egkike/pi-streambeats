@@ -218,8 +218,11 @@ aceptado: está olvidado.
 - **Publicación en el hub de Gentle diferida.** El repo no lleva ningún topic todavía, incluido
   `gentle-hub-project`, que es el que lo hace aparecer en el hub. Publicar una tarjeta que lleva a un README
   sin nada instalable gasta la primera impresión, y los topics se agregan después en un comando.
-  **Revisar cuando** exista un slice que corra de verdad (`/sb-music` abre la card y reproduce): ese día se
-  agregan los topics y el hub lo crawlea en horas.
+  **Revisar cuando** el backlog de v1 esté cerrado: sin tareas abiertas en `odd/tasks/sb-music-card.md` (hoy
+  T10, T12, T21 y T22) y sin hallazgos de review pendientes de arreglar. El disparador anterior —"que exista un
+  slice que corra de verdad"— **ya se cumplió** y el dueño lo reemplazó por éste: la publicación va al final, con el
+  proyecto terminado, no con el primero que funcione (L59). Ese día se agregan los topics y el hub lo crawlea en
+  horas.
 
 ## Fuera de alcance (v1)
 
