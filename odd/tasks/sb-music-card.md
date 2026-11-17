@@ -273,8 +273,8 @@ Requisitos, todos verificables:
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | abierta — hallazgos no bloqueantes de la review de #52: `R4-hit-map-staleness` (WARNING) y `R3-002` (L53) | — |
-| T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **implementada** — falta la prueba del dueño en el host (L56) | — |
-| T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help`, descripciones honestas y tabla del README | worker | abierta (issue #57) | — |
+| T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
+| T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help` y tabla del README | worker | **implementado** — falta la prueba del dueño en el host (L58) | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
@@ -1166,3 +1166,81 @@ hay tecla duplicada que lo obligue.
 Pendiente para cerrar T25: la prueba del dueño en el host —`pi -e ./extensions/sb-music.ts`, reproducir algo, ocultar
 la card con `ctrl+alt+z` y probar `ctrl+alt+space`/`n`/`p` desde el editor—, más la verificación de que Pi las acepta
 como claves válidas.
+
+L57 (T25 cerrada con la verificación del dueño, verbatim: "Hice la prueba y funciona perfecto"). Las tres teclas
+funcionan desde el editor con el modelo y mpv vivos aunque la card nunca se haya abierto, que es justo lo que la
+guarda de presencia de `pressKey` habría impedido si el shortcut se hubiera despachado como key id.
+
+Queda abierto de T25, declarado y no verificado: si Pi acepta esas tres combinaciones sin chocar con un binding suyo
+y si las despacha con el overlay enfocado. La respuesta a lo primero la va a dar T26 (validación y cambio de teclas);
+lo segundo sigue siendo del host.
+
+L58 (T26 implementado: `/sb-music --keys` lee y reconfigura las teclas). Cubre S22 requisitos **3, 4, 5, 6, 7 y 9**;
+el 1 y el 8 los cerró T25 y el 2 se conserva tal cual (sin argumentos el comando sigue abriendo la card).
+
+1. **La edición es pura** (`lib/settings.ts`): `editShortcuts(settings, pares, knownKeys)` devuelve la `settings`
+   resultante o un error, más la lista de cambios. Una negativa **no devuelve settings en absoluto**, así que el
+   llamador no puede escribir medio cambio: eso es la atomicidad, no una bandera. Reglas, cada una con su mensaje:
+   modificador obligatorio (`ctrl`/`alt`/`shift`, una letra pelada robaría la tecla del editor), sin duplicados
+   entre las cuatro (la comparación es por identidad, así que `alt+ctrl+n` colisiona con `ctrl+alt+n` y también
+   colisiona contra una tecla que nadie editó), nombre existente (lista los cuatro), valor producible por Pi
+   (lista los válidos agrupados: `a–z · 0–9 · f1–f12 · <nombres> · <símbolos>`), y `=default` restaura el default
+   documentado. El escritor es el de siempre, expuesto como `saveSettings(ctx, settings): SaveResult` — un fallo de
+   disco vuelve como dato, nunca como excepción.
+2. **La gramática es nuestra; el vocabulario es del host.** `@earendil-works/pi-tui` **no exporta** forma de validar
+   un key id: `parseKey` va de secuencia cruda a id (en la dirección contraria) y `matchesKey` pide la secuencia, así
+   que no hay ida y vuelta. `@earendil-works/pi-coding-agent` sí tiene el schema autoritativo (`dist/core/key-id-schema.js`,
+   un `Type.Unsafe` con `pattern`), pero **no está en su mapa de exports** (`"."` y `"./rpc-entry"` solamente), así que
+   importarlo sería un deep import privado. Lo que sí es del host es el **vocabulario**: `HOST_KEYS` en `lib/host/host.ts`
+   se arma con `Object.values(Key)` —la misma tabla de la que el schema del host deriva sus nombres base— más las
+   letras y dígitos sueltos que ese schema agrega. `lib/settings.ts` lo recibe como parámetro y no importa nada del
+   host (S8, y el test de frontera lo afirma). Lo que queda propio es el **grammar** (`modifier+…+key`, modificadores
+   en minúscula, sin repetir), escrito acá y no en el host.
+3. **Superficie de impresión: `ctx.ui.setWidget`.** El `ExtensionUIContext` no tiene un `print`: `notify` es una línea
+   de estado (una tabla ahí se mutila) y `custom()` es un overlay interactivo, justo lo que `--keys` no debe construir.
+   El widget de strings es la única superficie multi-línea no interactiva (TUI y RPC) y el host la trunca a **10
+   líneas** (`InteractiveMode.MAX_WIDGET_LINES = 10`, verificado en el código), así que el reporte mide 7 líneas y
+   `--help` exactamente 10; hay un test que falla si el reporte crece más. En **print/JSON** el host instala un UI
+   context no-op (`noOpUIContext` en `ExtensionRunner`): ahí no hay superficie para varias líneas, y lo más cercano
+   —un `notify` con las líneas unidas— es lo que se usa. `--keys` **no** tiene la guarda `mode !== "tui"` que sí tiene
+   abrir la card: es texto, y el texto no necesita pantalla.
+4. **Qué dice el reporte, y de dónde.** Las filas salen de lo que esta sesión **registró de verdad**: `registerShortcut`
+   anota tecla y descripción al registrar, así que el reporte no puede mentir sobre qué está activo. Las teclas de
+   adentro de la card salen de `footerHints()` (la tabla única de S13), no de una segunda lista. Después de guardar,
+   el host **no** reescribe su `deps.settings`: Pi bindea las shortcuts al inicio de la sesión, así que la fila muestra
+   la tecla activa y, al lado, `· file <nueva>, next session`. Esa es la razón por la que el mensaje de éxito dice
+   explícitamente que el cambio rige en la próxima sesión (requisito 6) en vez de prometer inmediatez.
+5. **Decisiones donde S22 calla, todas declaradas.** (a) Un argumento desconocido (`/sb-music --key`, `/sb-music next`)
+   **no abre la card**: imprime el error y la sintaxis, porque ignorar lo que el usuario escribió es el mismo defecto
+   que ignorar una tecla. (b) `super` es válido para el host y **no** se acepta acá: el vocabulario y la gramática
+   prometen `ctrl`/`alt`/`shift`, que es lo que S22 nombra. (c) Se acepta `overlay=default` con la palabra exacta;
+   `nombre=` vacío se rechaza como «empty». (d) `--help` ignora tokens de más en vez de pelearse por ellos.
+
+Test-first, un RED por regla. `tests/settings.test.ts` (10 nuevos): «applies several pairs and says what changed»,
+«refuses a bare key…», «refuses two keys that would become the same, including the overlay key», «refuses a name that
+is not one of the four…», «refuses a key name the host cannot produce and lists the valid ones», «refuses an unusable
+value: a repeated modifier, an unknown one, or no key at all», «restores the documented default with `=default`»,
+«changes nothing when one pair of several is refused», «reads without writing…» y «writes the saved file atomically,
+and reports a failure instead of throwing». `tests/host/host.test.ts` (7 nuevos): «prints the effective keys, the
+resolved file and the card's own keys, and opens nothing» (incluye el tope de 10 líneas), «prints the syntax with
+`--help`», «saves once with the expected settings and says where and when it applies», «writes nothing when one pair
+is refused, and names the pair», «will not overwrite a settings file it could not read», «prints instead of refusing in
+a mode that cannot host the card» y «refuses an argument it does not know instead of opening the card». RED observado:
+las 6 del host fallaban porque los argumentos se ignoraban y la card se abría, y el módulo de settings no exportaba
+`editShortcuts`/`saveSettings`. Triangulación que cambió el código: `overlay=f13` daba «has no modifier» y el defecto
+era el orden de las reglas —un nombre que no existe no se arregla agregando un modificador—, así que el vocabulario se
+chequea antes.
+
+**Una guarda que S22 no pide y S2 sí:** si el archivo no se pudo usar, `loadSettings` lo deja intacto a propósito (L19)
+para que el dueño pueda arreglarlo; que `/sb-music --keys` lo reescriba sería la forma de saltarse esa regla, así que
+con `warning` presente la escritura se rechaza y el mensaje nombra el problema.
+
+`pnpm check` verde: **384 tests / 89 suites**, `biome` 35 archivos, `tsc` limpio. `README.md` gana **Keys** y
+**Changing the keys**: las cuatro globales con lo que hacen, las de adentro de la card, `⌥` para `alt` en macOS, y el
+comando más el archivo. Se corrigieron de paso dos frases que ya mentían: `l` (no existe desde L38) y «suelta el
+teclado al elegir un tema» (desde L31 lo conserva mientras está enfocada).
+
+**Pendiente para cerrar la fila**, y es la lección repetida del documento: la prueba del dueño en el host —
+`pi -e ./extensions/sb-music.ts`, `/sb-music --keys`, `/sb-music --help`, `/sb-music --keys overlay=ctrl+alt+m`, y
+ver que la tecla vieja sigue andando hasta reiniciar Pi y la nueva después—, más si Pi acepta la combinación nueva sin
+chocar con un binding suyo.

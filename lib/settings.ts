@@ -46,6 +46,11 @@ export const DEFAULT_SETTINGS: Omit<Settings, "libraryRoot"> = {
 	asciiGlyphs: false,
 };
 
+/** The four shortcut names, in the order the file and the `--keys` table present them (S2, S22). */
+export const SHORTCUT_NAMES = ["overlay", "playPause", "next", "prev"] as const;
+
+export type ShortcutName = (typeof SHORTCUT_NAMES)[number];
+
 export interface SettingsLoad {
 	readonly settings: Settings;
 	/** A human-readable reason why the file could not be used verbatim (S2). */
@@ -224,4 +229,163 @@ export function loadSettings(ctx: SettingsContext): SettingsLoad {
 	return problem
 		? { settings, wroteDefaults: false, warning: `${path}: ${problem}` }
 		: { settings, wroteDefaults: false };
+}
+
+/** The result of a write the user asked for (S22): a failure is data, never a throw. */
+export type SaveResult = { readonly ok: true } | { readonly ok: false; readonly error: string };
+
+/** Write `settings.json` atomically (S2): the one way `/sb-music --keys` saves (S22). */
+export function saveSettings(ctx: SettingsContext, settings: Settings): SaveResult {
+	try {
+		writeSettings(ctx, settings);
+		return { ok: true };
+	} catch (error) {
+		return { ok: false, error: `${settingsPath(ctx)}: ${reasonOf(error)}` };
+	}
+}
+
+/* --- shortcut edits (S22) ----------------------------------------------------------------------- */
+
+/** The modifiers this project accepts. `super` is valid for the host and is not promised here (S22). */
+const MODIFIERS: readonly string[] = ["ctrl", "shift", "alt"];
+
+/** One shortcut a set of assignments would change, and what it was before. */
+export interface ShortcutChange {
+	readonly key: ShortcutName;
+	readonly from: string;
+	readonly to: string;
+}
+
+/**
+ * The outcome of `/sb-music --keys name=value ...` as data. A refusal carries no settings at all, so a
+ * caller cannot write half an edit by mistake: that is what makes several pairs atomic (S22).
+ */
+export type ShortcutEdit =
+	| { readonly ok: true; readonly settings: Settings; readonly changes: readonly ShortcutChange[] }
+	| { readonly ok: false; readonly error: string };
+
+type ValueCheck = { readonly ok: true } | { readonly ok: false; readonly error: string };
+
+/**
+ * The valid base keys, grouped for a message a human reads instead of a list of eighty names. It is
+ * derived from the vocabulary it is given, so the adapter stays the only owner of what Pi can produce.
+ */
+function describeKeys(knownKeys: readonly string[]): string {
+	const isFunction = (key: string) => /^f(?:[1-9]|1[0-2])$/.test(key);
+	const functions = knownKeys.filter(isFunction);
+	const named = knownKeys.filter((key) => key.length > 1 && !isFunction(key));
+	const symbols = knownKeys.filter((key) => key.length === 1 && !/[a-z0-9]/.test(key));
+	const groups = [
+		knownKeys.some((key) => /^[a-z]$/.test(key)) ? "a–z" : "",
+		knownKeys.some((key) => /^[0-9]$/.test(key)) ? "0–9" : "",
+		functions.length > 0 ? "f1–f12" : "",
+		named.join(", "),
+		symbols.join(" "),
+	];
+	return groups.filter((group) => group !== "").join(" · ");
+}
+
+/**
+ * The value grammar (S22): `modifier+…+key`, at least one modifier, none repeated, all lowercase. It
+ * is a grammar of our own and not the host's parser — `@earendil-works/pi-tui` exports no way to
+ * validate a key id string — but the base-key vocabulary is the host's own and arrives as a parameter,
+ * because only `lib/host/` may import a host package (S8).
+ */
+function checkValue(value: string, knownKeys: readonly string[]): ValueCheck {
+	const trimmed = value.trim();
+	if (trimmed === "") return { ok: false, error: "it is empty" };
+
+	const parts = trimmed.split("+");
+	const key = parts.at(-1) ?? "";
+	const modifiers = parts.slice(0, -1);
+
+	if (key === "") return { ok: false, error: `"${trimmed}" has modifiers and no key` };
+	// The vocabulary comes before the modifier rule: telling the user `f13` "has no modifier" would send
+	// them to fix the wrong half of the value.
+	if (!knownKeys.includes(key)) {
+		return {
+			ok: false,
+			error: `"${key}" is not a key Pi can produce; valid names: ${describeKeys(knownKeys)}`,
+		};
+	}
+	if (modifiers.length === 0) {
+		return { ok: false, error: `"${trimmed}" has no modifier: a bare key would take that key away from the editor` };
+	}
+	for (const modifier of modifiers) {
+		if (!MODIFIERS.includes(modifier)) {
+			return { ok: false, error: `"${modifier}" is not a modifier; use ${MODIFIERS.join(", ")}` };
+		}
+	}
+	if (new Set(modifiers).size !== modifiers.length) return { ok: false, error: `"${trimmed}" repeats a modifier` };
+	return { ok: true };
+}
+
+/**
+ * What makes two values THE SAME key for the host: modifier order does not matter, nor does the case
+ * of what the user typed, so `alt+ctrl+n` collides with `ctrl+alt+n` (S22, no duplicates).
+ */
+function identityOf(value: string): string {
+	const parts = value.trim().toLowerCase().split("+");
+	const key = parts.at(-1) ?? "";
+	const modifiers = [...new Set(parts.slice(0, -1))].sort();
+	return [...modifiers, key].join("+");
+}
+
+/**
+ * Edit the four shortcuts as one pure step (S22): `settings` in, the would-be `settings` or an error
+ * out, plus what changed. Every rule the command enforces lives here, so it is testable without a
+ * terminal: the names must exist, the values must be producible, nothing may collide, at least one
+ * modifier is required, and `=default` restores the documented default.
+ */
+export function editShortcuts(
+	settings: Settings,
+	assignments: readonly string[],
+	knownKeys: readonly string[],
+): ShortcutEdit {
+	const working: Record<string, string> = { ...settings.shortcuts };
+
+	for (const assignment of assignments) {
+		const at = assignment.indexOf("=");
+		if (at === -1) {
+			return {
+				ok: false,
+				error: `"${assignment}" is not name=value; names are ${SHORTCUT_NAMES.join(", ")}`,
+			};
+		}
+
+		const name = assignment.slice(0, at).trim();
+		const raw = assignment.slice(at + 1).trim();
+		if (!SHORTCUT_NAMES.includes(name as ShortcutName)) {
+			return {
+				ok: false,
+				error: `"${name}" is not a shortcut name; names are ${SHORTCUT_NAMES.join(", ")}`,
+			};
+		}
+		const shortcut = name as ShortcutName;
+		const value = raw === "default" ? DEFAULT_SETTINGS.shortcuts[shortcut] : raw;
+		const checked = checkValue(value, knownKeys);
+		if (!checked.ok) return { ok: false, error: `"${assignment}": ${checked.error}` };
+		working[shortcut] = value;
+	}
+
+	// Collisions are checked on the FINAL four values, so a pair can also collide with one nobody edited.
+	const seen = new Map<string, ShortcutName>();
+	for (const shortcut of SHORTCUT_NAMES) {
+		const value = working[shortcut] ?? "";
+		const identity = identityOf(value);
+		const other = seen.get(identity);
+		if (other !== undefined) {
+			return { ok: false, error: `${other} and ${shortcut} would both be ${value}` };
+		}
+		seen.set(identity, shortcut);
+	}
+
+	const changes: ShortcutChange[] = [];
+	for (const shortcut of SHORTCUT_NAMES) {
+		const from = settings.shortcuts[shortcut];
+		const to = working[shortcut] ?? from;
+		if (from !== to) changes.push({ key: shortcut, from, to });
+	}
+
+	return { ok: true, settings: { ...settings, shortcuts: working as unknown as Shortcuts }, changes };
 }
