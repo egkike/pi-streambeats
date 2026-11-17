@@ -236,19 +236,19 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T2 | S2, S10 | `lib/settings.ts`: defaults, lectura, escritura atómica, malformado | inline | hecho (PR #2) | `430a2da` |
 | T3 | S7 | `lib/types.ts` + interfaz de resolución | worker | hecho | `872d5c2` |
 | T4 | S5, S14 | `lib/library/scan.ts`: carpeta actual sin recursión, extensiones, ocultos, estados | worker | hecho (PR #5) | `87be737` |
-| T5 | S3, S11, S13, S15 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación y teclas | worker | hecho (PR pendiente) | `c29a5e5` |
-| T5b | S18 | `lib/core/model.ts`: filtro sobre la carpeta actual (unidad 2 de T5) | worker | hecho (PR pendiente) | `4f961c1` |
-| T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | hecho (PR pendiente) | `b00943f` |
+| T5 | S3, S11, S13, S15 | `lib/core/model.ts`: estado, cursor, sonando, cola, navegación y teclas | worker | hecho (PR #8) | `c29a5e5` |
+| T5b | S18 | `lib/core/model.ts`: filtro sobre la carpeta actual (unidad 2 de T5) | worker | hecho (PR #13) | `4f961c1` |
+| T6 | S3, S9, S16, S17 | `lib/core/view.ts`: `renderFrame` con roles, glifos, marcadores, truncado, progreso, hits | worker | hecho (PR #10) | `b00943f` |
 | T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | hecho (PR #16) | `6f3b70d` |
 | T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | hecho (PR #17) | `5828bd5`, `a083366` |
 | T9 | S1, S4, S8, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | hecho (PR #25) | `bf2ebf3` … `c259e87` |
 | T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | abierta — frontera hecha, falta el host falso | `872d5c2` (parcial) |
-| T11 | S9 | Suite completa verde y reporte | inline | abierta — el gate está verde, la suite es de 4 tests | — |
+| T11 | S9 | Suite completa verde y reporte | inline | **hecho** — 320 tests / 79 suites, `pnpm check` verde y `gate` verde en `main` (L51) | — |
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | abierta | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
-| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick) + sin commit (cierre por `ctrl+c`, L49) |
+| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
 | T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | worker | abierta — unidad propia, cambia el contrato (L46) | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | worker | abierta — bloqueada por la API del host (L48) | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
@@ -256,8 +256,10 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | **hecho** — verificado por el dueño en el host (L49) | `c857843` (PR #39) |
 | T20 | S3, S12 | La card no pide más ancho del que entra, y las filas aprenden la duración del player sin `--:--` | inline | **hecho** — verificado por el dueño en el host (L44) | `b3023c1` |
 
-El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
-`in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
+El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` da por implementado `01-lista-unica.html`
+(la card real es `lib/core/view.ts` + `lib/host/component.ts`, T6 y T9). `03-mini-card.html` sigue en `sent`: la card
+de esquina existe (S15), pero el artboard no se comparó todavía contra ella, y cerrarlo sin esa comparación sería
+afirmar algo que nadie miró.
 
 ## Log
 
@@ -969,3 +971,15 @@ host. `ctrl+c` cierra la card y libera el teclado, que es el efecto que S21 busc
 Queda abierto, sin confundirlo con esto: **T22** (reenviar `ctrl+c` a Pi con la card enfocada necesita un camino del
 host) y una pregunta de alcance que el dueño todavía no decidió: si la card en **esquina** —pasiva, sin teclado—
 debería ocultarse también con `ctrl+c`, lo que exigiría un listener de input sin foco.
+
+L51 (limpieza del documento, autorizada por el dueño: "Solo Limpieza del documentos y otras limpiezas (veamos la
+lista). T14 todavía no"). No cambia código: corrige lo que el documento afirmaba y ya no era cierto.
+
+1. **T11 cerrada.** La fila decía "la suite es de 4 tests"; hoy son **320 tests / 79 suites**, `pnpm check` verde y
+   `gate` verde en `main`. Era la única tarea abierta cuyo trabajo ya estaba hecho y medido.
+2. **T5, T5b y T6 dejan de decir "PR pendiente".** Los tres están mergeados hace ciclos: PR **#8**, **#13** y **#10**.
+3. **T16 con sus dos commits.** `5435f72` (latch, rechazos, tick, PR #46) y `7140488` (cierre por `ctrl+c`, PR #49);
+   la columna decía "sin commit" porque el commit llegó después de cerrar la fila.
+4. **Handoff de diseño.** `01-lista-unica.html` queda implementado: la card real existe en `lib/core/view.ts` y
+   `lib/host/component.ts`. `03-mini-card.html` sigue en `sent` a propósito: la card de esquina existe, pero el
+   artboard no se comparó contra ella, y marcarlo implementado sin esa comparación afirmaría algo que nadie miró.
