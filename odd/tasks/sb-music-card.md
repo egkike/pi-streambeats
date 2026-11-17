@@ -243,7 +243,7 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | corregida (L39) — **falta la prueba en el host** | `77ce72f` |
-| T18 | — | Decidir la política de runners macOS en `gate`: hoy cada push a `main` puede quedar rojo por cola | inline | abierta — decisión del dueño (L39) | — |
+| T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -717,3 +717,28 @@ Los dos jobs de `macos-26` se cancelaron a los 15m01s (`abandoned`) y `gate` fal
 pasaron, y en el run del PR #33 el `ipc probe` probó que la imagen funciona. Se resolvió con rerun las tres veces.
 Queda como **T18**: decidir si `gate` debe exigir los tres nodos de macOS o alcanza el `ipc probe`, que es el único
 que ejercita macOS de verdad.
+L40 (política de runners de macOS, decisión del dueño, verbatim): "En qué momento hacemos esto: 2. Sacar
+macos-26 del check y dejar sólo el ipc probe en macOS.?" — elegida con `AGENTS.md` actualizado en el mismo commit.
+
+Evidencia que la motivó, de la sesión: la cola de runners de macOS sirve **aproximadamente un job por run**, y el
+workflow pedía dos (`matrix.os` del `check` más `ipc`). El que perdía la carrera se cancelaba a los **15m01s**
+exactos y `gate` fallaba por `abandoned`; cuatro runs en una tarde, con todos los jobs de Ubuntu verdes. La prueba
+de que es cola y no imagen: en un rerun el `check` de macOS pasó y el `ipc probe` se canceló; en otro, al revés.
+
+Cambio: `macos-26` sale de la matriz de `check`. En macOS queda el `ipc probe` —el único que necesita macOS de
+verdad: mpv real, sockets reales— y sigue filtrado por `transport`, así que un PR que no toca transporte **no pide
+ningún runner de macOS**. `gate` no se tocó: sigue aceptando sólo `success` y `skipped` deliberado, así que un job
+cancelado o abandonado lo sigue volteando. Lo que cambió es qué lo alimenta, no su regla.
+
+**Cobertura que se pierde, verificada por un verificador independiente y no a ojo**: el suite en macOS real (Node
+darwin, `tmpdir()`, `realpathSync` con symlinks de macOS) y —hallazgo que no había visto— la **ruta de producción
+del socket en darwin** (`~/Library/Caches/…/mpv.sock`, `lib/player/mpv.ts:81`): el `ipc probe` no la importa, usa la
+suya, así que esa ruta no se ejecuta nativamente en ninguna parte. La lógica de plataforma sí sigue cubierta desde
+Linux, porque las funciones son puras y reciben `platform` (S19): `tests/player/target.test.ts:24,65`,
+`tests/settings.test.ts:44`, `tests/library/paths.test.ts:28-29`.
+
+Deuda declarada: la ruta del socket de darwin no tiene cobertura nativa. Se cierra cuando alguien haga que el probe
+importe el target de producción, o con un job propio — no con una promesa en un documento.
+
+`README.md` decía "plus macOS 26 for the darwin code path": esta entrada corrige el README en el mismo commit, porque
+un documento público que promete cobertura que no existe es peor que la falta de cobertura.

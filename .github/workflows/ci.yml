@@ -52,9 +52,14 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     # Runner pinned, never -latest: an image migration has to be a visible edit.
-    # Ubuntu carries the declared Node floor and the Active LTS; macOS executes the
-    # darwin code path on the Active LTS. Windows joins with T12, once the fake mpv
-    # can speak named pipes.
+    # Ubuntu carries the declared Node floor and every supported LTS. macOS is NOT in
+    # this matrix on purpose: the macOS runner pool serves roughly one job per run, and
+    # asking for two (this matrix plus `ipc`) starved whichever lost the race -- four
+    # cancelled runs at exactly 15m01s in one afternoon, each turning `gate` red on
+    # infrastructure rather than on code. darwin LOGIC stays covered on every code change
+    # because the platform-dependent functions are pure and take `platform` (S19), and the
+    # native side is the `ipc` job below, which is the one that actually needs macOS.
+    # Windows joins with T12, once the fake mpv can speak named pipes.
     strategy:
       fail-fast: false
       matrix:
@@ -64,8 +69,6 @@ jobs:
           - os: ubuntu-26.04
             node: "24"
           - os: ubuntu-26.04
-            node: "26"
-          - os: macos-26
             node: "26"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
