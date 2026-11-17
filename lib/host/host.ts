@@ -350,6 +350,10 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 							// A focused overlay swallows the global shortcut, so the card answers it too.
 							isOverlayKey: (data) => matchesOverlayKey(data, deps.settings.shortcuts.overlay),
 							togglePresence: () => cyclePresence(),
+							// What the terminal actually sent, so the next host round diagnoses instead of guessing:
+							// ctrl-c is `\u0003` on a terminal that ignores the Kitty protocol and CSI-u on one
+							// that answers it (L49). Writes nothing unless SB_MUSIC_DEBUG is set.
+							trace: (data) => debug("input", JSON.stringify(data)),
 						});
 						return component;
 					},

@@ -269,6 +269,17 @@ describe("presence and size (S15)", () => {
 		assert.equal(hidden.focused, false);
 	});
 
+	it("hides on the `interrupt` identifier ctrl-c arrives as (L49)", () => {
+		// The host adapter maps ctrl-c to `interrupt`, and a Kitty-encoding terminal sends it as a
+		// CSI-u sequence instead of the raw `\u0003` byte. An identifier the table does not bind is
+		// a key the card silently ignores, which is exactly what the host showed (L49).
+		const expanded = reduce(withFocus(visible(start())), { kind: "open" }).state;
+		const hidden = key(expanded, "interrupt");
+
+		assert.equal(hidden.presence, "hidden");
+		assert.equal(hidden.size, "corner");
+	});
+
 	it("toggles with the overlay key and does not take the keyboard from the editor (S4)", () => {
 		const shown = visible(start());
 		assert.equal(shown.focused, false);
