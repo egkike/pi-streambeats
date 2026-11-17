@@ -242,7 +242,7 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
-| T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | corregida (L39) — **falta la prueba en el host** | `77ce72f` |
+| T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
@@ -742,3 +742,23 @@ importe el target de producción, o con un job propio — no con una promesa en 
 
 `README.md` decía "plus macOS 26 for the darwin code path": esta entrada corrige el README en el mismo commit, porque
 un documento público que promete cobertura que no existe es peor que la falta de cobertura.
+
+L41 (verificación del ciclo y los divisores en el host, verbatim del dueño): "Hice mi prueba y todo funciona bien.
+Algo que agregaría es linea de contorno o bordes de la ventana expandida... para que no se mezcle con el fondo de pi.
+De paso puedes arreglar los 2 issues del review."
+
+**T17 cerrada**, con las dos superficies de S15 confirmadas por el dueño en una sesión de Pi: el ciclo
+oculta → esquina → expandida → oculta, y las dos líneas internas (bajo el header, sobre el pie).
+
+Cierra además `R3-doc-t17-stale`: la fila decía "falta la prueba en el host", que se lee como *tests del host* cuando
+significaba **la prueba manual del dueño en una sesión de Pi** — y esa prueba ya había ocurrido. El defecto era la
+redacción, no el hecho; queda explícito acá y en la tabla.
+
+Lo que el dueño pidió en la misma prueba —el **borde exterior** de la card, el tercero del artboard— no entra acá: es
+la issue #36, junto con los hallazgos que las reviews dejaron acumulados (`R3-doc-t17-stale` cerrado por esta entrada,
+`R3-rule-width-empty` y `R2-jargon-refs` pendientes).
+
+Estado de entrega de esta unidad, para que quede el rastro completo: PR #35 con `Closes #34`, review nativa aprobada
+(`review-fbb7a8f275cb211b`, lentes readability + reliability, 7 hallazgos no bloqueantes), y el delta que trajo la
+fusión de `main` revisado aparte (`review-8618d72c78675310`, lentes risk + readability) porque mover la base mueve el
+candidato. `main` en `601f713`, CI verde.
