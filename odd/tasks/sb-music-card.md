@@ -252,7 +252,7 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
 | T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | corregida (L42) — **falta la prueba en el host** | sin commit |
-| T20 | S3, S12 | La card no pide más ancho del que entra, y las filas aprenden la duración del player sin `--:--` | inline | corregida (L43) — **falta la prueba en el host** | sin commit |
+| T20 | S3, S12 | La card no pide más ancho del que entra, y las filas aprenden la duración del player sin `--:--` | inline | **hecho** — verificado por el dueño en el host (L44) | `b3023c1` |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -839,3 +839,17 @@ cobertura y el cambio no se habría detectado solo. `pnpm check` verde: **314 te
 
 Pendiente declarado: el `knownDurations` vive en memoria de la sesión. Persistirlo es una decisión aparte (¿dónde,
 con qué invalidación?), y hoy no hace falta: se llena sola con el uso.
+
+L44 (verificación en el host de #42, verbatim del dueño). Preguntado si quedaba algún `--:--`: **"No"**. Preguntado
+por el nombre largo: "Sale así en una sola fila: Black Sabbath - War Pigs.flac […] 7:55".
+
+**T20 cerrada.** Las dos reglas de #42 se sostienen en Pi: ninguna fila muestra el placeholder, un nombre largo se
+trunca en **una** línea en vez de partirse, y la duración aparece una vez que el tema sonó —el player es la única
+fuente, porque el escáner lee nombres y no etiquetas (S5).
+
+La causa del ancho se confirma por observación y no por deducción: con el mínimo derivado del terminal, la línea deja
+de envolverse. Queda anotado que el `tput cols` nunca llegó: la corrección es correcta igual, pero la medición que
+habría cerrado el diagnóstico sigue faltando.
+
+Deuda viva de esta unidad, ya declarada: `knownDurations` vive en memoria de sesión. Al reiniciar Pi, cada fila vuelve
+a no decir su largo hasta que el tema suene una vez. Persistirlo es una decisión aparte.
