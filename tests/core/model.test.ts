@@ -176,7 +176,6 @@ describe("the key table (S13)", () => {
 			u: "folder-up",
 			backspace: "folder-up",
 			escape: "hide",
-			l: "toggle-size",
 			space: "toggle-pause",
 			s: "stop",
 			n: "next",
@@ -233,7 +232,7 @@ describe("presence and size (S15)", () => {
 	});
 
 	it("lands in the corner even after being hidden while expanded", () => {
-		const expanded = key(withFocus(visible(start())), "l");
+		const expanded = reduce(withFocus(visible(start())), { kind: "open" }).state;
 		assert.equal(expanded.size, "expanded");
 
 		const hidden = key(expanded, "escape");
@@ -251,18 +250,18 @@ describe("presence and size (S15)", () => {
 		assert.equal(state.size, "expanded");
 	});
 
-	it("expands and collapses with l only while the card is focused", () => {
-		const unfocused = visible(start());
-		assert.equal(key(unfocused, "l").size, "corner");
+	it("ignores the retired `l` key: one key owns presence and size (L38)", () => {
+		// `l` disappeared because the size was reachable only while the card held the keyboard, and
+		// the corner never holds it. The card must not answer it at any size.
+		const expanded = reduce(withFocus(visible(start())), { kind: "open" }).state;
+		const afterL = key(expanded, "l");
 
-		const focused = withFocus(unfocused);
-		const expanded = key(focused, "l");
-		assert.equal(expanded.size, "expanded");
-		assert.equal(key(expanded, "l").size, "corner");
+		assert.equal(afterL.size, "expanded", "`l` no longer resizes the card");
+		assert.equal(afterL.presence, "visible");
 	});
 
 	it("hides with esc from either size and gives the keyboard back", () => {
-		const expanded = key(withFocus(visible(start())), "l");
+		const expanded = reduce(withFocus(visible(start())), { kind: "open" }).state;
 		const hidden = key(expanded, "escape");
 
 		assert.equal(hidden.presence, "hidden");

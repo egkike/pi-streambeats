@@ -94,7 +94,7 @@ segmento de tiempo es lo último en ceder. La barra de estado es la **única due
 esquina no lo repite (muestra sólo tiempo y progreso) y la barra no muestra volumen (S11).
 
 S13 — Teclas dentro de la card, todas anunciadas en su fila de pie: `↑`/`↓` y `k`/`j` mueven el cursor;
-`enter` entra a una carpeta o reproduce un archivo; `u` y `\u232b` suben de carpeta; `esc` oculta la card salvo en modo filtro, donde primero lo limpia (S18); `l` expande y colapsa (S15);
+`enter` entra a una carpeta o reproduce un archivo; `u` y `\u232b` suben de carpeta; `esc` oculta la card salvo en modo filtro, donde primero lo limpia (S18); 
 `/` abre el filtro (S18); `space` pausa o continúa; `s` stop; `n`/`>` siguiente y `p`/`<` anterior; `+`/`-` volumen; `z` shuffle.
 Las teclas de selección respetan las keybindings de Pi (`tui.select.*`) cuando estén disponibles. El mapa de
 transporte de la app Go se hereda como **teclas**, no como fila visual: esa fila del repo Go es decorativa
@@ -111,17 +111,24 @@ entre sesiones: la card siempre abre en `libraryRoot`.
 S15 — Tres estados. **Oculta (estado inicial):** nada en pantalla; la barra de estado es la única superficie de
 música (S12). **Esquina (por defecto al mostrarse):** la card vive abajo a la derecha, chica y anclada, y muestra
 sólo glifo de estado y tiempo con su barra de progreso — el título lo posee la barra de estado (S12).
-**Expandida:** `l` la abre a la lista completa de S3, sin perder cursor ni carpeta.
+**Expandida:** la lista completa de S3, sin perder cursor ni carpeta.
 
-Las teclas separan **presencia** de **tamaño**: `ctrl+alt+z` (tecla `overlay`) muestra u oculta y funciona desde
-el editor, sin que la card tenga foco — es la única forma de recuperarla cuando está oculta, porque `l` sólo actúa
-con la card enfocada; `l` expande y colapsa; `esc` oculta siempre, salvo en modo filtro (S18). Mostrar lleva
-**siempre a la esquina**, aunque se haya ocultado estando expandida. `/sb-music` abre directo en expandida. Al
-iniciar una sesión de Pi la card arranca **oculta**.
+`ctrl+alt+z` (tecla `overlay`) **cicla los tres estados en orden fijo**, y funciona igual desde el editor que con
+la card enfocada: oculta → esquina → expandida → oculta. La primera pulsación llega a la esquina **cuando hay algo
+sonando**, porque ahí está su única lectura; **sin música abre directo la lista**, porque la esquina sólo mostraría
+`nothing playing` y obligaría a una segunda pulsación para llegar a lo útil. La siguiente pulsación expande y toma el
+teclado; la última oculta.
+
+`l` no existe. El tamaño dejó de ser una tecla aparte porque dependía de un foco que la esquina no tiene: al colapsar,
+el teclado vuelve al editor, así que `l` no podía ejecutarse de nuevo y la card quedaba sin forma de volver a
+expandirse (L38). `esc` oculta siempre, salvo en modo filtro (S18). `/sb-music` abre directo en expandida. Al iniciar
+una sesión de Pi la card arranca **oculta**.
+
+La esquina es pasiva y no toma el teclado; la expandida sí, y el editor lo recupera cuando la card se oculta.
 
 S16 — Glifos. Una sola familia geométrica: `●` reproduciendo, `○` pausado, `▸` cursor, `▾` expandido, `━`/`─`
-progreso. Nunca emoji en el chrome. `settings.asciiGlyphs: true` cambia la familia a ASCII (`*`, `-`, `>`, `v`,
-`=`) para terminales donde los geométricos ocupen dos celdas. **No hay detección automática**: es una decisión
+progreso, `─` la línea de separación. Nunca emoji en el chrome. `settings.asciiGlyphs: true` cambia la familia a
+ASCII (`*`, `-`, `>`, `v`, `=`, `-`) para terminales donde los geométricos ocupen dos celdas. **No hay detección automática**: es una decisión
 del usuario, no una adivinanza del código.
 
 S17 — Mouse. Un click sobre una fila la selecciona y la activa: carpeta → entra, archivo → reproduce. La rueda
@@ -235,6 +242,8 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
+| T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | corregida (L39) — **falta la prueba en el host** | `77ce72f` |
+| T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -657,6 +666,57 @@ gate está verde, está lista cuando abre en Pi** — y una prueba de integraci�
 verificación) está probando otra cosa que la que corre en producción. Las dos veces que T15 se declaró lista sin
 eso, el host la desmintió en un minuto.
 
+L38 (la tecla `l` es un viaje de ida; decisión del dueño, verbatim): "La tecla l dice expandir al pié de la ventana
+expandida... al presionar l minimiza, y al dar nuevamente l solo se escribe en el chat... No expande en realidad. No
+sería más logico que se Expanda y Minimice con Ctrl+Alt+z y quitemos la tecla l?"
+
+Diagnóstico: no era una tecla rota, era un callejón sin salida construido por dos decisiones correctas. `ctrl+alt+z`
+mostraba la esquina con `show("corner", false)` —sin foco—; `l` alternaba el tamaño, y al colapsar `dispatch`
+reconstruía el overlay con `hadFocus = false`, devolviendo el teclado al editor; la esquina no toma foco nunca, y `l`
+sólo actúa con la card enfocada. Resultado: el pie anunciaba `l expand` y no había forma de expandir salvo
+`/sb-music`. S15 separaba presencia de tamaño; S4/S15 piden que colapsar devuelva el teclado. Juntas, dejan la
+esquina sin entrada de teclado.
+
+Decisión: **un solo comando que cicla los tres estados** (oculta → esquina → expandida → oculta). Elimina la
+dependencia de foco en lugar de parchearla, mantiene la esquina pasiva, y conserva "la primera pulsación llega a la
+esquina". Costo declarado y aceptado: S15 se reescribe (el tamaño ya no es una tecla aparte), `l` sale de S13 y del
+pie, y tres tests que pinan el comportamiento viejo se reescriben a propósito —`model.test.ts:179`,
+`host.test.ts:413` y `:559`— porque borrarlos destruiría la evidencia de que el cambio fue deliberado.
+
+L39 (segunda prueba en el host, verbatim del dueño): "Funciona bien las 3 secuencias pero hay un detalle: La primera
+vez que presiono ctrl+alt+z no hay ventana expandida y me sale en la esquina: ○ nothing playing, luego la segunda vez
+que presiono ctrl+alt+z ya sale la ventana expandida... y tercero oculta. Otro detalle es que la fila de botones del
+pié se confunde con toda la ventana [...] quizás valga la pena que tengan una linea por arriba o recuadro, colores en
+las teclas quizás... Qué te parece?"
+
+**El pie se confundía porque el artboard tiene tres bordes y el frame no dibujaba ninguno.** `01-lista-unica.html`:
+`.card{border}`, `.hd{border-bottom}`, `.ft{border-top}`. L1 declara el artboard spec visual, así que no era una
+opinión de diseño: era una desviación. Se dibujan los **dos internos** (`─` en rol `border`, ancho completo, sin
+padding; glifo `rule` en la misma familia S16, con su versión ASCII). El **borde exterior no**: cuesta 2 filas + 2
+columnas de cada frame y a la esquina de 46 celdas le come 4 de contenido. Las **teclas con color propio tampoco**:
+el artboard pone todo el pie en `muted`, y en este proyecto el artboard cambia primero.
+
+Costo declarado y aceptado: los divisores salen del alto del frame, no lo agrandan. En 15 filas, la lista pasa de 13
+renglones a 11. La alternativa —crecer la card 2 filas— se la come el editor, y se descartó.
+
+**El ciclo ahora es consciente del contenido**: sin música, `ctrl+alt+z` abre directo la lista; con algo sonando
+empieza en la esquina. Sin esa regla la primera pulsación mostraba `nothing playing` y obligaba a una segunda para
+llegar a lo útil.
+
+**Defecto que la revisión del padre atrapó y el worker había tapado subiendo alturas**: con alto 4 —el piso de
+`overlayHeight`— los dos divisores dejaban `listRows = 0`, o sea header, separador, separador, pie, sin fila de lista
+y sin poder mostrar el estado de "sin coincidencias" de S18. Ahora los divisores exigen una fila de lista entre ellos
+(`height >= 5`) y hay un test que pina que en 4 filas no se dibuja ninguno.
+
+Verificación: `pnpm check` exit 0 — **305 tests / 72 suites**, `biome` 33 archivos, `tsc` limpio. La actualización de
+las líneas exactas de `view.test.ts` la hizo un worker con instrucción explícita de no borrar ni aflojar aserciones:
+censo 77 → 79 asserts (los dos nuevos son del glifo `rule`), 0 borradas.
+
+Operativo, y es la tercera vez en la sesión: `main` volvió a quedar **rojo por cola de runners macOS**, no por código.
+Los dos jobs de `macos-26` se cancelaron a los 15m01s (`abandoned`) y `gate` falló por regla; los tres de ubuntu
+pasaron, y en el run del PR #33 el `ipc probe` probó que la imagen funciona. Se resolvió con rerun las tres veces.
+Queda como **T18**: decidir si `gate` debe exigir los tres nodos de macOS o alcanza el `ipc probe`, que es el único
+que ejercita macOS de verdad.
 L40 (política de runners de macOS, decisión del dueño, verbatim): "En qué momento hacemos esto: 2. Sacar
 macos-26 del check y dejar sólo el ipc probe en macOS.?" — elegida con `AGENTS.md` actualizado en el mismo commit.
 

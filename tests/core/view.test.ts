@@ -78,6 +78,14 @@ function between(left: string, right: string, width: number): string {
 	return `${left}${" ".repeat(width - [...left].length - [...right].length)}${right}`;
 }
 
+/**
+ * One hairline dividing the card (S3): the artboard's `.hd`/`.ft borders, full width in the `border`
+ * role and with no padding. `fill` and `between` cannot express it because it has no cells to pad.
+ */
+function ruleLine(width: number, theme: ViewTheme = plain): string {
+	return `${theme.fg("border")}${"─".repeat(width)}${theme.fg("text")}`;
+}
+
 /** One listing row, in the column order the card promises (S3): name field, then duration. */
 function entryRow(marker: string, name: string, duration: string, width = 90): string {
 	return fill(` ${marker} ${name.padEnd(width - 10)} ${duration} `, width);
@@ -87,7 +95,7 @@ function folderRow(marker: string, name: string, width = 90): string {
 	return fill(` ${marker} ${name.padEnd(width - 10)} ${"    "} `, width);
 }
 
-const HINTS = "↑ · enter · space · n · p · u · l · / · s · + · - · z · esc";
+const HINTS = "↑ · enter · space · n · p · u · / · s · + · - · z · esc";
 
 function footerLine(hints: string, right: string, width: number): string {
 	return between(` ${hints}`, `${right} `, width);
@@ -116,17 +124,19 @@ describe("the expanded card at 90 columns (S3, S9)", () => {
 	});
 
 	it("renders a mixed listing of folders and tracks, one row per entry", () => {
-		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options({ elapsedMs: 47_000 }));
+		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 10, options({ elapsedMs: 47_000 }));
 
 		assert.deepEqual(frame.lines, [
 			between(" sb-music StreamBeats/Chillhop", "5 tracks · 18:33 ", 90),
+			ruleLine(90),
 			folderRow("  ", "Extras/"),
 			entryRow("  ", "01 - Arcade Dreams.mp3", "3:42"),
 			entryRow(" ●", "02 - Blue Hour.mp3", "4:05"),
 			entryRow("  ", "03 - Neon Nights.mp3", "3:18"),
 			entryRow("▸ ", "04 - Paper Planes.mp3", "2:57"),
 			entryRow("  ", "05 - Rainy Window.mp3", "4:31"),
-			footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, 90),
+			ruleLine(90),
+			footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, 90),
 		]);
 	});
 
@@ -143,10 +153,11 @@ describe("the expanded card at 78 columns (S3, S9)", () => {
 
 	it("still renders every row, truncating the long name with an ellipsis", () => {
 		const state = card({ entries, cursor: 0, playing: trackAt(entries, 1) });
-		const frame = renderFrame(state, plain, 78, 9, options({ elapsedMs: 47_000 }));
+		const frame = renderFrame(state, plain, 78, 11, options({ elapsedMs: 47_000 }));
 
 		assert.deepEqual(frame.lines, [
 			between(" sb-music StreamBeats/Chillhop", "6 tracks · 24:45 ", 78),
+			ruleLine(78),
 			folderRow("▸ ", "Extras/", 78),
 			entryRow(" ●", "01 - Arcade Dreams.mp3", "3:42", 78),
 			entryRow("  ", "02 - Blue Hour.mp3", "4:05", 78),
@@ -154,7 +165,8 @@ describe("the expanded card at 78 columns (S3, S9)", () => {
 			entryRow("  ", "04 - Paper Planes.mp3", "2:57", 78),
 			entryRow("  ", "05 - Rainy Window.mp3", "4:31", 78),
 			entryRow("  ", "07 - Midnight Commute (extended midnight mix, remastered deluxe edi…", "6:12", 78),
-			footerLine(HINTS, `0:47 ${bar(6, 47_000, 222_000)} 3:42`, 78),
+			ruleLine(78),
+			footerLine(HINTS, `0:47 ${bar(10, 47_000, 222_000)} 3:42`, 78),
 		]);
 	});
 
@@ -168,27 +180,27 @@ describe("the expanded card at 78 columns (S3, S9)", () => {
 
 describe("the two marker cells (S3, S16)", () => {
 	it("marks a row that is only playing in the second cell", () => {
-		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options());
+		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 10, options());
 
-		assert.equal(frame.lines[3], entryRow(" ●", "02 - Blue Hour.mp3", "4:05"));
+		assert.equal(frame.lines[4], entryRow(" ●", "02 - Blue Hour.mp3", "4:05"));
 	});
 
 	it("marks a row that only holds the cursor in the first cell", () => {
-		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options());
+		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 10, options());
 
-		assert.equal(frame.lines[5], entryRow("▸ ", "04 - Paper Planes.mp3", "2:57"));
+		assert.equal(frame.lines[6], entryRow("▸ ", "04 - Paper Planes.mp3", "2:57"));
 	});
 
 	it("marks a row that is both playing and under the cursor without moving a column", () => {
-		const frame = renderFrame(card({ cursor: 2, playing: B }), plain, 90, 8, options());
+		const frame = renderFrame(card({ cursor: 2, playing: B }), plain, 90, 10, options());
 
-		assert.equal(frame.lines[3], entryRow("▸●", "02 - Blue Hour.mp3", "4:05"));
+		assert.equal(frame.lines[4], entryRow("▸●", "02 - Blue Hour.mp3", "4:05"));
 	});
 
 	it("keeps the two cells apart for every combination", () => {
-		const onlyPlaying = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options()).lines[3] ?? "";
-		const onlyCursor = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options()).lines[5] ?? "";
-		const both = renderFrame(card({ cursor: 2, playing: B }), plain, 90, 8, options()).lines[3] ?? "";
+		const onlyPlaying = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 10, options()).lines[4] ?? "";
+		const onlyCursor = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 10, options()).lines[6] ?? "";
+		const both = renderFrame(card({ cursor: 2, playing: B }), plain, 90, 10, options()).lines[4] ?? "";
 
 		assert.equal(onlyPlaying.slice(0, 4), "  ● ");
 		assert.equal(onlyCursor.slice(0, 4), " ▸  ");
@@ -207,10 +219,10 @@ describe("roles (S3, S16)", () => {
 	});
 
 	it("paints the playing row's name in the success role", () => {
-		const frame = renderFrame(card({ cursor: 4, playing: trackAt(ENTRIES, 1) }), marked, 90, 8, options());
+		const frame = renderFrame(card({ cursor: 4, playing: trackAt(ENTRIES, 1) }), marked, 90, 10, options());
 
 		assert.equal(
-			frame.lines[2],
+			frame.lines[3],
 			`  {success}●{text} {success}01 - Arcade Dreams.mp3{text}${" ".repeat(58)} {muted}3:42{text} `,
 		);
 	});
@@ -218,13 +230,13 @@ describe("roles (S3, S16)", () => {
 	it("paints the cursor row's background on the surface role", () => {
 		const frame = renderFrame(card({ cursor: 0, playing: B }), marked, 90, 8, options());
 
-		assert.equal(frame.lines[1], `{bg:surface} {accent}▸{text}  Extras/${" ".repeat(73)} ${"    "} {/bg:surface}`);
+		assert.equal(frame.lines[2], `{bg:surface} {accent}▸{text}  Extras/${" ".repeat(73)} ${"    "} {/bg:surface}`);
 	});
 
 	it("closes the background it opened, so it cannot leak into the next row (R4-004)", () => {
 		const frame = renderFrame(card({ cursor: 0, playing: B }), marked, 90, 8, options());
 
-		const line = frame.lines[1] ?? "";
+		const line = frame.lines[2] ?? "";
 		assert.ok(line.startsWith("{bg:surface}"), "the row opens the elevated surface");
 		assert.ok(line.endsWith("{/bg:surface}"), "and closes it before the next line starts");
 	});
@@ -232,14 +244,14 @@ describe("roles (S3, S16)", () => {
 	it("asks for no background on the rows that are not under the cursor", () => {
 		const frame = renderFrame(card({ cursor: 0, playing: B }), marked, 90, 8, options());
 
-		assert.equal((frame.lines[2] ?? "").includes("{bg:"), false);
+		assert.equal((frame.lines[3] ?? "").includes("{bg:"), false);
 	});
 
 	it("distinguishes paused by the hollow glyph, not by dropping the success role", () => {
-		const frame = renderFrame(card({ cursor: 4, playing: B, paused: true }), marked, 90, 8, options());
+		const frame = renderFrame(card({ cursor: 4, playing: B, paused: true }), marked, 90, 10, options());
 
 		assert.equal(
-			frame.lines[3],
+			frame.lines[4],
 			`  {success}○{text} {success}02 - Blue Hour.mp3{text}${" ".repeat(62)} {muted}4:05{text} `,
 		);
 	});
@@ -249,13 +261,13 @@ describe("the footer (S3, S13)", () => {
 	it("announces every key from the model's table and the progress at 90 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, 90));
+		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, 90));
 	});
 
 	it("shrinks the progress bar instead of dropping a key at 78 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 78, 8, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(6, 47_000, 245_000)} 4:05`, 78));
+		assert.equal(frame.lines[7], footerLine(HINTS, `0:47 ${bar(10, 47_000, 245_000)} 4:05`, 78));
 	});
 
 	it("drops the progress when the total is not known yet instead of inventing one", () => {
@@ -272,12 +284,25 @@ describe("the footer (S3, S13)", () => {
 		assert.equal(frame.lines[7], fill(" playlist ended ", 90));
 	});
 
-	it("pins the footer to the last row and fills the spare rows of a taller frame", () => {
-		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 10, options({ elapsedMs: 47_000 }));
+	it("drops the hairlines before it drops the content on a very short frame (S3)", () => {
+		// `overlayHeight` bottoms out at 4 rows. Two hairlines there would leave no list row between
+		// them and stack one separator over the other, so the separators give way first.
+		const frame = renderFrame(card(), plain, 90, 4, options());
 
-		assert.equal(frame.lines.length, 10);
-		assert.deepEqual(frame.lines.slice(7, 9), [" ".repeat(90), " ".repeat(90)]);
-		assert.equal(frame.lines[9], footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, 90));
+		assert.equal(frame.lines.length, 4);
+		assert.equal(
+			frame.lines.some((line) => line.includes("─")),
+			false,
+			"no hairline fits without content",
+		);
+	});
+
+	it("pins the footer to the last row and fills the spare rows of a taller frame", () => {
+		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 12, options({ elapsedMs: 47_000 }));
+
+		assert.equal(frame.lines.length, 12);
+		assert.deepEqual(frame.lines.slice(8, 10), [" ".repeat(90), " ".repeat(90)]);
+		assert.equal(frame.lines[11], footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, 90));
 	});
 });
 
@@ -329,11 +354,13 @@ describe("the ASCII glyph family (S16)", () => {
 			[geometric.playing, geometric.paused, geometric.cursor, geometric.expanded, geometric.caret],
 			["●", "○", "▸", "▾", "▏"],
 		);
+		assert.equal(geometric.rule, "─", "the hairline is part of the same family");
 		assert.deepEqual([geometric.bar.fill, geometric.bar.head, geometric.bar.rest], ["━", "╸", "─"]);
 		assert.deepEqual(
 			[ascii.playing, ascii.paused, ascii.cursor, ascii.expanded, ascii.caret],
 			["*", "-", ">", "v", "|"],
 		);
+		assert.equal(ascii.rule, "-", "the hairline is part of the same family");
 		assert.deepEqual([ascii.bar.fill, ascii.bar.head, ascii.bar.rest], ["=", "=", "-"]);
 	});
 
@@ -359,7 +386,7 @@ describe("the ASCII glyph family (S16)", () => {
 			options({ elapsedMs: 47_000, asciiGlyphs: true }),
 		);
 
-		assert.equal(frame.lines[3], entryRow(">*", "02 - Blue Hour.mp3", "4:05"));
+		assert.equal(frame.lines[4], entryRow(">*", "02 - Blue Hour.mp3", "4:05"));
 	});
 });
 
@@ -416,39 +443,43 @@ describe("the filter (S18)", () => {
 	});
 
 	it("narrows the listing and the header summary to what the term matches", () => {
-		const frame = renderFrame(card({ filter: "Blue", filtering: true }), plain, 90, 4, options());
+		const frame = renderFrame(card({ filter: "Blue", filtering: true }), plain, 90, 6, options());
 
 		assert.deepEqual(frame.lines, [
 			between(" sb-music StreamBeats/Chillhop", "1 track · 4:05 ", 90),
+			ruleLine(90),
 			entryRow("▸ ", "02 - Blue Hour.mp3", "4:05"),
 			" ".repeat(90),
+			ruleLine(90),
 			filterRow("Blue", 90),
 		]);
 	});
 
 	it("keeps the click map on the filtered indexes", () => {
-		const frame = renderFrame(card({ filter: "Blue", filtering: true }), plain, 90, 4, options());
+		const frame = renderFrame(card({ filter: "Blue", filtering: true }), plain, 90, 6, options());
 
-		assert.deepEqual(frame.hits.get(1), { index: 0, entry: ENTRIES[2] });
+		assert.deepEqual(frame.hits.get(2), { index: 0, entry: ENTRIES[2] });
 		assert.equal(frame.hits.size, 1);
 	});
 
 	it("names the active term and offers to clear it when nothing matches", () => {
-		const frame = renderFrame(card({ filter: "zzz", filtering: true }), plain, 90, 4, options());
+		const frame = renderFrame(card({ filter: "zzz", filtering: true }), plain, 90, 6, options());
 
 		assert.deepEqual(frame.lines, [
 			between(" sb-music StreamBeats/Chillhop", "0 tracks ", 90),
+			ruleLine(90),
 			noResultsRow("zzz", 90),
 			" ".repeat(90),
+			ruleLine(90),
 			filterRow("zzz", 90),
 		]);
 	});
 
 	it("keeps explaining the empty listing after the mode is confirmed", () => {
-		const frame = renderFrame(card({ filter: "zzz", filtering: false }), plain, 90, 4, options());
+		const frame = renderFrame(card({ filter: "zzz", filtering: false }), plain, 90, 6, options());
 
-		assert.equal(frame.lines[1], noResultsRow("zzz", 90));
-		assert.equal(frame.lines[3], fill(` ${HINTS} `, 90));
+		assert.equal(frame.lines[2], noResultsRow("zzz", 90));
+		assert.equal(frame.lines[5], fill(` ${HINTS} `, 90));
 	});
 
 	it("takes the footer's row so no key hint lies while the keys are text", () => {
@@ -460,12 +491,14 @@ describe("the filter (S18)", () => {
 	});
 
 	it("renders the filter and the no-results rows at 78 columns too", () => {
-		const frame = renderFrame(card({ filter: "zzz", filtering: true }), plain, 78, 4, options());
+		const frame = renderFrame(card({ filter: "zzz", filtering: true }), plain, 78, 6, options());
 
 		assert.deepEqual(frame.lines, [
 			between(" sb-music StreamBeats/Chillhop", "0 tracks ", 78),
+			ruleLine(78),
 			noResultsRow("zzz", 78),
 			" ".repeat(78),
+			ruleLine(78),
 			filterRow("zzz", 78),
 		]);
 		for (const line of frame.lines) assert.equal([...line].length, 78);
@@ -481,9 +514,9 @@ describe("the filter (S18)", () => {
 
 	it("shortens a long term instead of dropping the offer to clear it", () => {
 		const term = "0123456789".repeat(5);
-		const frame = renderFrame(card({ filter: term, filtering: false }), plain, 78, 4, options());
+		const frame = renderFrame(card({ filter: term, filtering: false }), plain, 78, 6, options());
 
-		assert.equal(frame.lines[1], fill(` no matches for "${term.slice(0, 45)}…" · esc clears`, 78));
+		assert.equal(frame.lines[2], fill(` no matches for "${term.slice(0, 45)}…" · esc clears`, 78));
 	});
 
 	it("neutralizes control characters in the term, as everywhere else", () => {
@@ -494,19 +527,19 @@ describe("the filter (S18)", () => {
 
 	it("paints the input on the accent role and the no-results row on muted", () => {
 		const input = renderFrame(card({ filter: "Blue", filtering: true }), marked, 90, 4, options());
-		const empty = renderFrame(card({ filter: "zzz", filtering: true }), marked, 90, 4, options());
+		const empty = renderFrame(card({ filter: "zzz", filtering: true }), marked, 90, 6, options());
 
 		assert.equal(input.lines[3], ` {accent}/{text}Blue{accent}▏{text}${" ".repeat(83)}`);
-		assert.equal(empty.lines[1], ` {muted}no matches for "zzz" · esc clears{text}${" ".repeat(56)}`);
+		assert.equal(empty.lines[2], ` {muted}no matches for "zzz" · esc clears{text}${" ".repeat(56)}`);
 	});
 });
 
 describe("the click map (S17)", () => {
 	it("maps each rendered row to the entry it stands for", () => {
-		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 8, options());
+		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 10, options());
 
-		assert.deepEqual(frame.hits.get(1), { index: 0, entry: ENTRIES[0] });
-		assert.deepEqual(frame.hits.get(6), { index: 5, entry: ENTRIES[5] });
+		assert.deepEqual(frame.hits.get(2), { index: 0, entry: ENTRIES[0] });
+		assert.deepEqual(frame.hits.get(7), { index: 5, entry: ENTRIES[5] });
 		assert.equal(frame.hits.size, ENTRIES.length);
 	});
 
@@ -518,11 +551,11 @@ describe("the click map (S17)", () => {
 	});
 
 	it("maps windowed rows to their real entry index when the listing does not fit", () => {
-		const frame = renderFrame(card({ cursor: 4 }), plain, 90, 4, options());
+		const frame = renderFrame(card({ cursor: 4 }), plain, 90, 6, options());
 
 		assert.equal(frame.hits.size, 2);
-		assert.deepEqual(frame.hits.get(1), { index: 3, entry: ENTRIES[3] });
-		assert.deepEqual(frame.hits.get(2), { index: 4, entry: ENTRIES[4] });
+		assert.deepEqual(frame.hits.get(2), { index: 3, entry: ENTRIES[3] });
+		assert.deepEqual(frame.hits.get(3), { index: 4, entry: ENTRIES[4] });
 	});
 });
 
