@@ -85,6 +85,8 @@ interface Harness {
 	readonly overlays: OverlayCall[];
 	readonly player: Player;
 	readonly playerCalls: string[];
+	/** How many players the adapter built: the session is the only thing that creates one (S6). */
+	readonly created: { players: number };
 	readonly scanCalls: string[];
 	readonly report: (report: PlayerReport) => void;
 	readonly tick: () => void;
@@ -169,6 +171,7 @@ function harness(editor: Component | null = EDITOR): Harness {
 	const notices: [string, string | undefined][] = [];
 	const overlays: OverlayCall[] = [];
 	const scanCalls: string[] = [];
+	const created = { players: 0 };
 	const now = { value: 1_000 };
 	const reportHandler: (report: PlayerReport) => void = () => {};
 	let tickFn: (() => void) | undefined;
@@ -264,6 +267,7 @@ function harness(editor: Component | null = EDITOR): Harness {
 		overlays,
 		player,
 		playerCalls,
+		created,
 		scanCalls,
 		report: (report) => reportHandler(report),
 		tick: () => tickFn?.(),
@@ -288,6 +292,7 @@ function register(
 		createPlayer: (report) => {
 			// The harness needs the callback, so it is captured here and used by `report`.
 			Object.assign(h, { report });
+			h.created.players += 1;
 			return h.player;
 		},
 		now: () => h.now.value,
@@ -503,6 +508,117 @@ describe("the overlay shortcut cycles the three states (S4, S15)", () => {
 
 		await press();
 		assert.equal(h.closed(), 3, "the third press hides again");
+	});
+});
+
+describe("the transport shortcuts are registered and alive (S22)", () => {
+	it("registers the overlay and the three transport keys", () => {
+		const h = harness();
+		register(h);
+
+		assert.deepEqual([...h.shortcuts.keys()], ["ctrl+alt+m", "ctrl+alt+space", "ctrl+alt+n", "ctrl+alt+p"]);
+	});
+
+	it("tells the truth about the command and the cycle (S22 requirement 8)", () => {
+		// The command keeps opening the card, but the cycle key is what rescues the user who has no
+		// card on screen; and the overlay shortcut cycles three states, it does not show and hide.
+		const h = harness();
+		register(h);
+
+		assert.equal(h.commands.get("sb-music")?.description, "Open the music card · ctrl+alt+m cycles it");
+		assert.match(h.shortcuts.get("ctrl+alt+m")?.description ?? "", /hidden → corner → expanded/);
+		assert.equal(h.shortcuts.get("ctrl+alt+space")?.description, "Music card: pause or resume");
+		assert.equal(h.shortcuts.get("ctrl+alt+n")?.description, "Music card: next track");
+		assert.equal(h.shortcuts.get("ctrl+alt+p")?.description, "Music card: previous track");
+	});
+
+	it("starts the session on a transport key pressed before the card ever opened", async () => {
+		// No `session_start` and no `/sb-music`: the shortcut has to build the model, the player and mpv
+		// itself, or the key would answer to a session that does not exist yet.
+		const h = harness();
+		register(h);
+
+		await h.shortcuts.get("ctrl+alt+n")?.handler(h.ctx);
+		await flush();
+
+		assert.equal(h.created.players, 1, "the session was built by the shortcut");
+		assert.deepEqual(h.overlays, [], "and it did not open a card the user never asked for");
+		assert.ok(h.statuses.length > 0, "the adapter has a session context to paint into");
+	});
+
+	it("pauses and resumes from the editor while the card is hidden", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+		component?.handleInput?.("\u001b");
+		await flush();
+		assert.equal(h.closed(), 1, "the card is hidden, not parked: this is the case that matters");
+
+		await h.shortcuts.get("ctrl+alt+space")?.handler(h.ctx);
+		assert.equal(h.playerCalls.at(-1), "pause");
+		assert.equal(lastStatus(h), "○ Arcade Dreams · Chillhop 0:00/3:42");
+
+		await h.shortcuts.get("ctrl+alt+space")?.handler(h.ctx);
+		assert.equal(h.playerCalls.at(-1), "resume");
+		assert.equal(h.overlays.length, 1, "a transport key never rebuilds the card");
+	});
+
+	it("plays the next and the previous track from the editor while the card is hidden", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+		component?.handleInput?.("\u001b");
+		await flush();
+
+		await h.shortcuts.get("ctrl+alt+n")?.handler(h.ctx);
+		assert.equal(h.playerCalls.at(-1), `play:${ALBUM}/02 - Blue Hour.mp3`);
+		assert.match(lastStatus(h) ?? "", /Blue Hour/);
+
+		await h.shortcuts.get("ctrl+alt+p")?.handler(h.ctx);
+		assert.equal(h.playerCalls.at(-1), `play:${ALBUM}/01 - Arcade Dreams.mp3`);
+		assert.match(lastStatus(h) ?? "", /Arcade Dreams/);
+	});
+
+	it("ends the queue on the last track instead of wrapping around", async () => {
+		// `next` from the editor is `advance`, not a second "skip": the same rule that stops at the end
+		// of the queue (S11) applies, so the status bar goes quiet instead of looping the album.
+		const h = harness();
+		const last = ENTRIES.slice(2, 3);
+		register(h, (path) => ({ ok: true, path, entries: last }));
+		await start(h);
+		await open(h);
+		h.overlays[0]?.component.handleInput?.("j");
+		h.overlays[0]?.component.handleInput?.("\r");
+		h.overlays[0]?.component.handleInput?.("\u001b");
+		await flush();
+
+		await h.shortcuts.get("ctrl+alt+n")?.handler(h.ctx);
+
+		assert.equal(h.playerCalls.at(-1), "stop");
+		assert.deepEqual(h.statuses.at(-1), [STATUS_KEY, undefined]);
+	});
+
+	it("does nothing in a mode that cannot host the card", async () => {
+		const h = harness();
+		register(h);
+		const printCtx = { ...h.ctx, mode: "print", hasUI: false } as ExtensionContext;
+
+		for (const key of ["ctrl+alt+m", "ctrl+alt+space", "ctrl+alt+n", "ctrl+alt+p"]) {
+			await h.shortcuts.get(key)?.handler(printCtx);
+		}
+		await flush();
+
+		assert.equal(h.created.players, 0, "no session, no player");
+		assert.deepEqual(h.overlays, []);
+		assert.deepEqual(h.statuses, []);
 	});
 });
 
