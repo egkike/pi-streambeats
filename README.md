@@ -62,9 +62,13 @@ node scripts/ipc-probe.mjs mpv   # the real transport, against a real mpv
 `pnpm check` never spawns mpv and never reads your library: the tests fake both. The transport is proven
 separately by the probe, which is what CI runs on macOS against a Homebrew mpv.
 
-CI runs on Ubuntu 26.04 with Node 22.19 and 24 — the declared floor is a promise only if something
-executes it — plus macOS 26 for the darwin code path and the real IPC probe. Windows is validated on a
-Windows 11 VM (toolchain, gate and named-pipe transport) and joins CI with task T12.
+CI runs the suite on Ubuntu 26.04 with Node 22.19, 24 and 26 — the declared floor is a promise only if
+something executes it. **macOS does not run the suite**: the macOS runner pool serves roughly one job per
+run, so asking for two starved whichever lost the race and turned `gate` red on infrastructure instead of
+on code. macOS runs the real IPC probe, against Homebrew mpv, when a change touches the transport; the
+darwin code path itself stays covered on Ubuntu because the platform-dependent functions are pure and take
+`platform` as a parameter. A darwin-only path owes a test that runs from Linux, or its own job. Windows is
+validated on a Windows 11 VM (toolchain, gate and named-pipe transport) and joins CI with task T12.
 
 ## Design
 

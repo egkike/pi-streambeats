@@ -656,3 +656,29 @@ El saldo de esta tarea es un método, no una línea de código: **una integraci�
 gate está verde, está lista cuando abre en Pi** — y una prueba de integración que *espera* (el `sleep` de mi primera
 verificación) está probando otra cosa que la que corre en producción. Las dos veces que T15 se declaró lista sin
 eso, el host la desmintió en un minuto.
+
+L40 (política de runners de macOS, decisión del dueño, verbatim): "En qué momento hacemos esto: 2. Sacar
+macos-26 del check y dejar sólo el ipc probe en macOS.?" — elegida con `AGENTS.md` actualizado en el mismo commit.
+
+Evidencia que la motivó, de la sesión: la cola de runners de macOS sirve **aproximadamente un job por run**, y el
+workflow pedía dos (`matrix.os` del `check` más `ipc`). El que perdía la carrera se cancelaba a los **15m01s**
+exactos y `gate` fallaba por `abandoned`; cuatro runs en una tarde, con todos los jobs de Ubuntu verdes. La prueba
+de que es cola y no imagen: en un rerun el `check` de macOS pasó y el `ipc probe` se canceló; en otro, al revés.
+
+Cambio: `macos-26` sale de la matriz de `check`. En macOS queda el `ipc probe` —el único que necesita macOS de
+verdad: mpv real, sockets reales— y sigue filtrado por `transport`, así que un PR que no toca transporte **no pide
+ningún runner de macOS**. `gate` no se tocó: sigue aceptando sólo `success` y `skipped` deliberado, así que un job
+cancelado o abandonado lo sigue volteando. Lo que cambió es qué lo alimenta, no su regla.
+
+**Cobertura que se pierde, verificada por un verificador independiente y no a ojo**: el suite en macOS real (Node
+darwin, `tmpdir()`, `realpathSync` con symlinks de macOS) y —hallazgo que no había visto— la **ruta de producción
+del socket en darwin** (`~/Library/Caches/…/mpv.sock`, `lib/player/mpv.ts:81`): el `ipc probe` no la importa, usa la
+suya, así que esa ruta no se ejecuta nativamente en ninguna parte. La lógica de plataforma sí sigue cubierta desde
+Linux, porque las funciones son puras y reciben `platform` (S19): `tests/player/target.test.ts:24,65`,
+`tests/settings.test.ts:44`, `tests/library/paths.test.ts:28-29`.
+
+Deuda declarada: la ruta del socket de darwin no tiene cobertura nativa. Se cierra cuando alguien haga que el probe
+importe el target de producción, o con un job propio — no con una promesa en un documento.
+
+`README.md` decía "plus macOS 26 for the darwin code path": esta entrada corrige el README en el mismo commit, porque
+un documento público que promete cobertura que no existe es peor que la falta de cobertura.
