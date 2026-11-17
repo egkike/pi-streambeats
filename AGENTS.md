@@ -91,6 +91,13 @@ extensions → host → {library, player} → core → types
 - **El transporte IPC real se prueba aparte**, no en los tests: `node scripts/ipc-probe.mjs [mpv]` spawnea mpv,
   conecta al socket (Linux/macOS) o al named pipe (Windows), verifica el round-trip y sale distinto de cero si
   falla. La CI lo corre en macOS contra un mpv instalado con Homebrew.
+- **macOS no corre el suite.** `lint`, `typecheck` y `test` corren sólo en Ubuntu: el pool de runners de macOS
+  sirve aproximadamente un job por run, y pedirle dos (la matriz del `check` más el `ipc probe`) dejaba al que
+  perdía la carrera cancelado a los 15 minutos, con `gate` en rojo por infraestructura y no por código. En macOS
+  queda **el `ipc probe`**, que es el único que necesita macOS de verdad, y corre cuando el filtro de paths ve
+  transporte. La lógica de darwin se cubre en Linux porque las funciones dependientes de plataforma son puras y
+  reciben `platform` (S19). Un camino exclusivo de darwin necesita un test que lo cubra desde Linux, o un job
+  propio — no una promesa en este archivo.
 
 ## Feedback Loop (antes de decir "listo")
 
