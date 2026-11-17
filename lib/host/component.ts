@@ -45,6 +45,12 @@ export interface CardComponentDeps {
 	 * or from CI, so this is the only way to learn what the terminal actually sent.
 	 */
 	readonly trace?: (data: string) => void;
+	/**
+	 * A trace of the pointer event as the host dispatched it, under the same flag. Mouse input exists
+	 * only in Pi's fullscreen TUI, so "nothing happened" has two very different causes and the log is
+	 * the only thing that tells them apart: no line means the event never arrived.
+	 */
+	readonly tracePointer?: (event: TuiMouseEvent) => void;
 }
 
 /** The rows an expanded card asks for, leaving room for the editor and the footer. */
@@ -131,6 +137,7 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			cachedHits = undefined;
 		},
 		handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+			deps.tracePointer?.(event);
 			if (!deps.onPointer) return undefined;
 			// Only the expanded card draws rows (S17): the corner is a passive readout with no list, no
 			// hit zones and no keyboard, so a click there has nothing to mean. It is ignored on purpose

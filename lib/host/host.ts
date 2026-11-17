@@ -357,6 +357,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 							// ctrl-c is `\u0003` on a terminal that ignores the Kitty protocol and CSI-u on one
 							// that answers it (L49). Writes nothing unless SB_MUSIC_DEBUG is set.
 							trace: (data) => debug("input", JSON.stringify(data)),
+							// `pointer` with no line at all is the answer to "the mouse does nothing": the event never
+							// reached the card, which is what Pi's regular (non-fullscreen) TUI does with it.
+							tracePointer: (event) => debug("pointer", event.type, event.button, event.x, event.y, event.wheelDelta),
 						});
 						return component;
 					},

@@ -381,3 +381,38 @@ describe("the overlay component's pointer (S17)", () => {
 		assert.match(after[line] ?? "", /\[b\]/);
 	});
 });
+
+describe("the pointer trace (S17)", () => {
+	it("reports every dispatched pointer event before deciding anything, so an absent line means it never arrived", () => {
+		// Mouse input exists only in Pi's fullscreen TUI. When the card ignores a click, the difference
+		// between "the host never sent it" and "we dropped it" lives in this trace and nowhere else.
+		const seen: string[] = [];
+		const component = createCardComponent({
+			state: () => card(),
+			theme: () => plain,
+			options: () => options,
+			height: () => 8,
+			onKey: () => {},
+			tracePointer: (event) => seen.push(`${event.type}:${event.y}`),
+		});
+
+		component.render(90);
+		component.handleMouse?.(mouse({ type: "move", y: 1 }));
+		component.handleMouse?.(mouse({ type: "wheel", y: 1, wheelDelta: -1 }));
+
+		assert.deepEqual(seen, ["move:1", "wheel:1"], "every event is traced, including the ones the card ignores");
+	});
+
+	it("does not trace when no trace was given", () => {
+		const component = createCardComponent({
+			state: () => card(),
+			theme: () => plain,
+			options: () => options,
+			height: () => 8,
+			onKey: () => {},
+		});
+
+		component.render(90);
+		assert.doesNotThrow(() => component.handleMouse?.(mouse({ type: "move", y: 1 })));
+	});
+});
