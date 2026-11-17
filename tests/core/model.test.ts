@@ -521,6 +521,65 @@ describe("pausing (S13)", () => {
 	});
 });
 
+/**
+ * The transport shortcuts (S22): the keys are registered with the host, so they arrive while the card
+ * is HIDDEN — the presence guard that makes card keys honest would turn every one of them into a
+ * no-op. The event is separate on purpose, and these tests pin both halves of that decision.
+ */
+describe("the transport shortcuts (S22)", () => {
+	it("pauses and resumes a playing track while the card is hidden", () => {
+		const hidden = key(playingB(), "escape");
+		assert.equal(hidden.presence, "hidden");
+		assert.equal(hidden.playing?.id, B.id);
+
+		const paused = reduce(hidden, { kind: "transport", action: "toggle-pause" });
+		assert.equal(paused.state.paused, true);
+		assert.equal(paused.state.playing?.id, B.id, "the same track keeps playing");
+		assert.deepEqual(paused.effects, [{ kind: "pause" }]);
+
+		const resumed = reduce(paused.state, { kind: "transport", action: "toggle-pause" });
+		assert.equal(resumed.state.paused, false);
+		assert.deepEqual(resumed.effects, [{ kind: "resume" }]);
+	});
+
+	it("moves the queue forward and back while the card is hidden", () => {
+		const hidden = key(playingB(), "escape");
+
+		const next = reduce(hidden, { kind: "transport", action: "next" });
+		assert.equal(next.state.playing?.id, C.id);
+		assert.deepEqual(next.effects, [{ kind: "play", trackId: C.id }]);
+
+		const previous = reduce(next.state, { kind: "transport", action: "previous" });
+		assert.equal(previous.state.playing?.id, B.id);
+		assert.deepEqual(previous.effects, [{ kind: "play", trackId: B.id }]);
+	});
+
+	it("keeps the presence guard on the key path, so a hidden card still ignores those keys", () => {
+		// The transport event must not become a back door for card keys: the same three actions, asked
+		// for as keys on a hidden card, stay no-ops.
+		const hidden = key(playingB(), "escape");
+
+		assert.equal(press(hidden, "space").state, hidden);
+		assert.equal(press(hidden, "n").state, hidden);
+		assert.equal(press(hidden, "p").state, hidden);
+	});
+
+	it("does nothing when the queue is empty", () => {
+		// Nothing playing, nothing queued: a shortcut pressed from the editor has nothing to act on.
+		const browsing = key(browsingAlbum(), "escape");
+
+		assert.deepEqual(reduce(browsing, { kind: "transport", action: "toggle-pause" }), {
+			state: browsing,
+			effects: [],
+		});
+		assert.deepEqual(reduce(browsing, { kind: "transport", action: "next" }), { state: browsing, effects: [] });
+		assert.deepEqual(reduce(browsing, { kind: "transport", action: "previous" }), {
+			state: browsing,
+			effects: [],
+		});
+	});
+});
+
 describe("shuffle (S11)", () => {
 	it("permutes only what is left, keeps the current track playing and the cursor still", () => {
 		const state = playingB();

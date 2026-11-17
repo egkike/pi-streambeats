@@ -12,7 +12,15 @@
 import { appendFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, KeyId, OverlayHandle, OverlayOptions, TUI } from "@earendil-works/pi-tui";
-import { type CardEvent, type CardSize, type CardState, type Effect, initialState, reduce } from "../core/model.ts";
+import {
+	type CardEvent,
+	type CardSize,
+	type CardState,
+	type Effect,
+	initialState,
+	reduce,
+	type TransportAction,
+} from "../core/model.ts";
 import { statusSegment } from "../core/now-playing.ts";
 import type { ScanResult } from "../library/scan.ts";
 import type { Player, PlayerReport } from "../player/mpv.ts";
@@ -520,7 +528,10 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	/* --- the Pi registrations (S1) ----------------------------------------------------------- */
 
 	pi.registerCommand("sb-music", {
-		description: "Open the StreamBeats music card",
+		// The command still opens the card (S22 requirement 2): it is the rescue path for a terminal
+		// where the shortcut is unavailable, so it announces the key that owns the cycle instead of
+		// describing itself as the only way in.
+		description: `Open the music card · ${deps.settings.shortcuts.overlay} cycles it`,
 		handler: async (_args: string, commandCtx: ExtensionCommandContext) => {
 			if (commandCtx.mode !== "tui") {
 				commandCtx.ui.notify("/sb-music needs Pi's interactive TUI, not print or JSON mode", "error");
@@ -534,13 +545,37 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	});
 
 	pi.registerShortcut(deps.settings.shortcuts.overlay as KeyId, {
-		description: "Show or hide the music card",
+		// Three states, not a show/hide (S15, L38): Pi prints this string wherever it lists the
+		// shortcuts it knows, so it has to describe what the key actually does.
+		description: "Music card: cycle hidden → corner → expanded",
 		handler: async (shortcutCtx: ExtensionContext) => {
 			if (shortcutCtx.mode !== "tui") return;
 			startSession(shortcutCtx);
 			cyclePresence();
 		},
 	});
+
+	/**
+	 * The three transport shortcuts (S22 requirement 1). One shape for all of them, so none can
+	 * forget the session: a shortcut pressed before `/sb-music` ever ran has to build the model and
+	 * the player itself, or the key would answer to nothing.
+	 */
+	function registerTransport(key: string, action: TransportAction, description: string): void {
+		pi.registerShortcut(key as KeyId, {
+			description,
+			handler: async (shortcutCtx: ExtensionContext) => {
+				if (shortcutCtx.mode !== "tui") return;
+				startSession(shortcutCtx);
+				// Through the model, never around it: the reducer returns the effects the card already
+				// uses, so a global key and the card's own `space`/`n`/`p` cannot drift apart (S22).
+				dispatch({ kind: "transport", action });
+			},
+		});
+	}
+
+	registerTransport(deps.settings.shortcuts.playPause, "toggle-pause", "Music card: pause or resume");
+	registerTransport(deps.settings.shortcuts.next, "next", "Music card: next track");
+	registerTransport(deps.settings.shortcuts.prev, "previous", "Music card: previous track");
 
 	pi.on("session_start", (_event, sessionCtx) => {
 		startSession(sessionCtx);

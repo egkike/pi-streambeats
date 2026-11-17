@@ -111,6 +111,12 @@ export type KeyAction =
 	| "volume-down"
 	| "toggle-shuffle";
 
+/**
+ * The transport a global shortcut can ask for (S22). It borrows the key table's own identifiers, so
+ * "pause", "next" and "previous" mean one thing in this module and not two.
+ */
+export type TransportAction = Extract<KeyAction, "toggle-pause" | "next" | "previous">;
+
 export interface KeyBinding {
 	/** Identifier the host adapter maps a physical key to (S13). */
 	readonly id: string;
@@ -188,6 +194,11 @@ export type CardEvent =
 	| { readonly kind: "key"; readonly id: string }
 	/** The overlay shortcut (S15): toggles presence and works without the card's focus. */
 	| { readonly kind: "overlay" }
+	/**
+	 * A transport shortcut registered with the host (S22): pause/resume, next or previous while the
+	 * card may be hidden. It is a separate event because it is NOT a card key — see `transport`.
+	 */
+	| { readonly kind: "transport"; readonly action: TransportAction }
 	/** A message that has to survive the toast: the footer keeps it until something else happens (S5). */
 	| { readonly kind: "notice"; readonly text: string }
 	/** `/sb-music` (S15): opens the card expanded. */
@@ -263,6 +274,8 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 			return { state: { ...state, notice: event.text }, effects: [] };
 		case "overlay":
 			return { state: state.presence === "visible" ? hidden(state) : shown(state, "corner"), effects: [] };
+		case "transport":
+			return transport(state, event.action);
 		case "open":
 			return { state: shown(state, "expanded"), effects: [] };
 		case "focus":
@@ -378,6 +391,25 @@ function pressKey(state: CardState, id: string, deps: ModelDeps): Reduction {
 			return setVolume(state, state.volume - VOLUME_STEP);
 		case "toggle-shuffle":
 			return toggleShuffle(state, deps);
+	}
+}
+
+/**
+ * A transport shortcut registered with the host (S22). It deliberately does NOT go through
+ * `pressKey`: that guard — "keys only reach a card that is on screen" — is exactly right for a card
+ * key, because nobody is looking at a hidden card, and exactly wrong here, because the shortcut is
+ * registered with Pi and arrives with the card hidden. That is its whole job. What it does share is
+ * the actions themselves (`togglePause`, `advance`, `previous`), so there is one playback path and
+ * the effects still come out as data for the shell to execute (S8).
+ */
+function transport(state: CardState, action: TransportAction): Reduction {
+	switch (action) {
+		case "toggle-pause":
+			return togglePause(state);
+		case "next":
+			return advance(state);
+		case "previous":
+			return previous(state);
 	}
 }
 
