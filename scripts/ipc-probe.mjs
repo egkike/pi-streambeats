@@ -67,24 +67,34 @@ function attempt() {
 
 	socket.on("data", (chunk) => {
 		buffer += chunk;
-		const line = buffer.split("\n")[0];
-		if (!line) return;
+		const lines = buffer.split("\n");
+		buffer = lines.pop() ?? ""; // the tail may be a partial line: keep it for the next chunk
 
-		let reply;
-		try {
-			reply = JSON.parse(line);
-		} catch {
-			return; // partial line: wait for the rest
+		for (const line of lines) {
+			if (line.trim() === "") continue;
+
+			let message;
+			try {
+				message = JSON.parse(line);
+			} catch {
+				continue; // not a message: never ours to guess
+			}
+
+			// mpv sends EVENTS down the same stream as replies (`idle`, `start-file`, `file-loaded`).
+			// They are not answers: match the reply by request_id, the way the player's own line
+			// handler does, or an event that wins the race turns a healthy transport into a failure.
+			if (message.request_id !== 1) continue;
+
+			clearTimeout(giveUp);
+			if (message.error !== "success" || typeof message.data !== "string") fail(`unexpected reply: ${line}`, 2);
+
+			socket.write(`${JSON.stringify({ command: ["quit"], request_id: 2 })}\n`);
+			socket.end();
+			child.removeAllListeners("exit");
+			child.kill();
+			succeed(message.data);
+			return; // unreachable (succeed exits), but the loop must not continue past the answer
 		}
-
-		clearTimeout(giveUp);
-		if (reply.error !== "success" || typeof reply.data !== "string") fail(`unexpected reply: ${line}`, 2);
-
-		socket.write(`${JSON.stringify({ command: ["quit"], request_id: 2 })}\n`);
-		socket.end();
-		child.removeAllListeners("exit");
-		child.kill();
-		succeed(reply.data);
 	});
 
 	socket.on("error", () => {
