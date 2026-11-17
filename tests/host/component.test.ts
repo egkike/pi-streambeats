@@ -129,7 +129,7 @@ describe("the frame height the host gives the component (S15)", () => {
 		elapsed = 5_000;
 		assert.notStrictEqual(component.render(90), first, "a tick that only advances the clock re-renders");
 	});
-	it("closes itself on escape and ctrl-c, whatever the model does with them", () => {
+	it("closes itself on escape, and leaves ctrl-c to the host (T16, L34)", () => {
 		let dismissed = 0;
 		let keys = 0;
 		const component = createCardComponent({
@@ -149,8 +149,11 @@ describe("the frame height the host gives the component (S15)", () => {
 		assert.equal(dismissed, 1, "a lone escape always closes");
 		assert.equal(keys, 0, "and the model is not asked to interpret it");
 
+		// Ctrl-C belongs to the terminal and to Pi, not to a music card: swallowing it here meant that
+		// with the card focused you could not interrupt the agent at all (T16, L34).
 		component.handleInput?.("\u0003");
-		assert.equal(dismissed, 2, "ctrl-c is the terminal's panic button and also closes");
+		assert.equal(dismissed, 1, "ctrl-c does not close the card");
+		assert.equal(keys, 0, "and it is not translated into a card key either");
 	});
 });
 

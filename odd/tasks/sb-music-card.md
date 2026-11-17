@@ -248,7 +248,8 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | abierta | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
-| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
+| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso | inline | corregida (L46) — **falta la prueba en el host** | sin commit |
+| T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | worker | abierta — unidad propia, cambia el contrato (L46) | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
 | T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | corregida (L42) — **falta la prueba en el host** | sin commit |
@@ -872,3 +873,27 @@ El clamp se conserva igual: pedir más ancho del que hay es incorrecto aunque en
 Propuesta para no dejarlo como misterio: una guarda en el borde que, si una línea renderizada excede su presupuesto, la
 trunque y lo registre con `SB_MUSIC_DEBUG`. No arregla una causa que no está identificada, pero convierte la próxima
 aparición en evidencia en vez de en otra suposición.
+
+L46 (T16, endurecimiento, autorizado por el dueño: "Dale al T16 + el latch del scan"). Cuatro defectos corregidos, y
+el quinto —el scanner asíncrono— se separó a **T21** porque cambia el contrato del dep `scan` y no cabe en la misma
+unidad revisable.
+
+1. **Latch del primer scan** (el que incumplía S5). `show()` marcaba `loaded = true` **antes** de escanear, así que un
+   `libraryRoot` ausente o sin permiso dejaba la card vacía **toda la sesión** con un toast ya desvanecido. Ahora el
+   latch se pone sólo si el scan salió bien, y la próxima vez que se muestre la card se reintenta. Además la falla es
+   **estado**: nuevo evento `notice` en el modelo, y el pie la mantiene con su ruta hasta que la card cargue otra cosa.
+2. **Rechazos del player.** Los seis call sites (`play`, `pause`, `resume`, `stop`, `setVolume`, `quit`) iban con
+   `void`; un `socket.write` que tiraba escapaba como rechazo no observado y la política de Node decidía. Ahora pasan
+   por `guard()`, que avisa al usuario. En `play` además se limpia el reloj y se despacha `track-failed`: un play que
+   nunca cargó no deja un reloj corriendo.
+3. **`ctrl+c`** ya no lo consume la card: lo maneja el host. `esc` sigue cerrando. Invierte a propósito el test que
+   pinaba la decisión anterior.
+4. **Tick ocioso.** `refresh()` forzaba un frame completo **cada segundo durante toda la sesión**, incluso con la card
+   oculta y sin música. Ahora sólo repinta si hay overlay o algo sonando.
+
+Tests: cuatro nuevos en `tests/host/host.test.ts` (reintento tras fallo, falla como estado en el pie, rechazo del
+player sin reloj, tick silencioso sobre un overlay real ya oculto) y el del componente invertido. `pnpm check` verde:
+**318 tests / 79 suites**.
+
+T21 queda abierta: el dep `scan` es "synchronous by contract" y corre dentro de `onKey`; hacerlo asíncrono toca el
+dispatch, el borde y dos tests que pinan la sincronía. Es una unidad propia, no un ítem de bolsa.

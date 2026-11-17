@@ -147,6 +147,20 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		sessionTui?.requestRender(true);
 	}
 
+	/**
+	 * The player resolves by contract, but a throwing socket write or a serialization failure still
+	 * rejects. Leaving that to the default unhandled-rejection policy turned one bad write into a dead
+	 * session, and the caller never learned (T16).
+	 */
+	function guard(action: Promise<void> | undefined, what: string, onFailure?: () => void): void {
+		void action?.catch((error: unknown) => {
+			const message = error instanceof Error ? error.message : String(error);
+			ctx?.ui.notify(`${what}: ${message}`, "error");
+			onFailure?.();
+			refresh();
+		});
+	}
+
 	/* --- the model's effects (S8) ------------------------------------------------------------- */
 
 	function trackById(trackId: string): Track | undefined {
@@ -158,13 +172,18 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		return undefined;
 	}
 
-	function loadFolder(path: string): void {
+	function loadFolder(path: string): boolean {
 		const result = deps.scan(path);
 		if (!result.ok) {
-			ctx?.ui.notify(`cannot show ${result.path}: ${result.failure.kind}`, "warning");
-			return;
+			// S5 asks for the failure as a state, not as a toast that fades: the footer keeps saying it,
+			// with the path, until the card loads something else.
+			const message = `cannot show ${result.path}: ${result.failure.kind}`;
+			dispatch({ kind: "notice", text: message });
+			ctx?.ui.notify(message, "warning");
+			return false;
 		}
 		dispatch({ kind: "folder-loaded", path: result.path, entries: result.entries });
+		return true;
 	}
 
 	/** Execute the model's requests. The keyboard is handed back only when the card is dismissed. */
@@ -180,7 +199,11 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 					playback = { trackId: effect.trackId, startedAt: clock() };
 					// The total is not asked for here: the `loadfile` reply is not a load fact, and the player
 					// reports `duration` once mpv says the file is loaded (S12). Nothing in this adapter queries mpv.
-					void player?.play(track);
+					guard(player?.play(track), `cannot play ${track.title}`, () => {
+						// A play that never loaded must not leave a clock ticking for it.
+						playback = undefined;
+						dispatch({ kind: "track-failed", trackId: effect.trackId });
+					});
 					// The card keeps the keyboard while it is being driven. Releasing it on every play
 					// left the card undriveable after the first `enter` (space, n and p went to the
 					// editor). S4 asks that the card not be MODAL: the editor gets the keys back when
@@ -189,7 +212,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 				}
 				case "pause":
 					if (playback && playback.frozen === undefined) playback = { ...playback, frozen: elapsedMs() };
-					void player?.pause();
+					guard(player?.pause(), "cannot pause");
 					break;
 				case "resume":
 					if (playback) {
@@ -200,18 +223,18 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 							durationMs: playback.durationMs,
 						};
 					}
-					void player?.resume();
+					guard(player?.resume(), "cannot resume");
 					break;
 				case "stop":
 					playback = undefined;
-					void player?.stop();
+					guard(player?.stop(), "cannot stop");
 					break;
 				case "volume":
-					void player?.setVolume(effect.level);
+					guard(player?.setVolume(effect.level), "cannot set the volume");
 					break;
 				case "quit":
 					playback = undefined;
-					void player?.quit();
+					guard(player?.quit(), "cannot quit mpv");
 					break;
 			}
 		}
@@ -366,8 +389,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		// The focus intent is recorded after any rebuild below: `hideOverlay` clears `wantsFocus`, and
 		// it used to wipe the request that the caller had just made (the card opened unfocused).
 		if (!loaded) {
-			loaded = true;
-			loadFolder(state.path);
+			// Latch only a load that worked. Latching first meant a library that was not ready when the
+			// card opened left it empty for the whole session, with no key to try again (S5, T16).
+			loaded = loadFolder(state.path);
 		}
 
 		if (overlay && overlay.size !== state.size) {
@@ -458,7 +482,10 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		loaded = false;
 		wantsFocus = false;
 		player = deps.createPlayer(onReport);
-		stopTick = schedule(() => refresh());
+		stopTick = schedule(() => {
+			// A full repaint every second for a hidden card with nothing playing is pure cost (T16).
+			if (overlay !== undefined || state.playing !== undefined) refresh();
+		});
 		if (deps.warning) sessionCtx.ui.notify(deps.warning, "warning");
 		refresh();
 	}

@@ -86,12 +86,14 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			return cachedLines;
 		},
 		handleInput(data: string): void {
-			// Ctrl-C is the terminal's own panic button and ESC is the card's: either one always
-			// closes, whatever the model decides to do with them.
-			if (data === "\u0003" || data === "\u001b") {
+			// ESC is the card's key: it always closes, whatever the model decides.
+			if (data === "\u001b") {
 				deps.dismiss?.();
 				return;
 			}
+			// Ctrl-C is the terminal's panic button and belongs to the host, not to a music card: it used
+			// to dismiss the card, so with the card focused Pi could not be interrupted (T16, L34).
+			if (data === "\u0003") return;
 			// A focused overlay swallows the global shortcut, so the card answers it here.
 			if (deps.isOverlayKey?.(data)) {
 				deps.togglePresence?.();

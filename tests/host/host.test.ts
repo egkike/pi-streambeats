@@ -767,3 +767,89 @@ describe("rows learn the duration the player reported (issue #42)", () => {
 		assert.equal(frame.includes("--:--"), false, "a column of placeholders is dead chrome");
 	});
 });
+
+describe("a folder that could not be read is a state, not a dead card (S5, T16)", () => {
+	it("retries the scan on the next show instead of latching the failure", async () => {
+		// The latch used to be set before the scan, so a missing or unreadable library left the card empty
+		// for the whole session with a toast that had already faded. S5 wants a state with its path.
+		const h = harness();
+		let attempts = 0;
+		register(h, (path) => {
+			attempts += 1;
+			return attempts === 1
+				? { ok: false, path, failure: { kind: "missing", path } }
+				: { ok: true, path, entries: ENTRIES };
+		});
+		await start(h);
+
+		await open(h);
+		await flush();
+		assert.equal(h.scanCalls.length, 1, "the first show tried and failed");
+
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+
+		assert.equal(h.scanCalls.length, 2, "showing again asks the scanner again");
+		const frame = h.overlays.at(-1)?.component.render(90).join("\n") ?? "";
+		assert.match(frame, /Arcade Dreams/, "and the listing is there once the folder answers");
+	});
+
+	it("names the failure in the footer, with its path", async () => {
+		const h = harness();
+		register(h, (path) => ({ ok: false, path, failure: { kind: "missing", path } }));
+		await start(h);
+		await open(h);
+		await flush();
+
+		const frame = h.overlays.at(-1)?.component.render(90).join("\n") ?? "";
+		assert.match(frame, /cannot show/, "the footer keeps saying what is wrong");
+		assert.match(frame, /missing/, "and why, not just that something failed");
+	});
+});
+
+describe("a player that rejects never escapes the adapter (T16)", () => {
+	it("reports the failure and does not start a clock for a play that did not happen", async () => {
+		// `void player.play(track)` left the rejection to Node's default policy: one throwing socket write
+		// could take the session down, and the clock ticked for a track that never loaded.
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		h.player.play = async () => {
+			throw new Error("socket is gone");
+		};
+
+		h.overlays[0]?.component.handleInput?.("j");
+		h.overlays[0]?.component.handleInput?.("\r");
+		await flush();
+
+		assert.equal(
+			h.notices.some(([message]) => /socket is gone/.test(message)),
+			true,
+			"the user is told, instead of the process dying",
+		);
+		assert.equal(lastStatus(h), undefined, "nothing is playing, so the status line says nothing");
+	});
+});
+
+describe("the one-second tick only repaints when there is something to show (T16)", () => {
+	it("does not force a frame when the card is hidden and nothing plays", async () => {
+		// `refresh()` forced a full repaint every second for the whole session, even with the card hidden
+		// and no music: the tick had nothing to update and paid for it anyway.
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+		const before = h.renders();
+
+		h.tick();
+		h.tick();
+
+		assert.equal(h.renders(), before, "a silent, hidden card costs nothing per second");
+	});
+});
