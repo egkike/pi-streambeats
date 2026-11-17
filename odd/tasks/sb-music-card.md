@@ -228,6 +228,32 @@ revisable porque tienen respaldo y costo desiguales. Nada de esto es una feature
 Orden decidido (L34): este ciclo es **sólo T15**. Endurecimiento es T16, en su propio ciclo y con su propio
 recorte; (1), (2) y (3) son los que tienen respaldo directo.
 
+S22 — Teclas descubribles y reconfigurables, y las tres de transporte vivas. Pedido del dueño, verbatim: "hagamos
+esta opción E con /sb-music --keys clave=valor y todo lo que recomiendas. Se implementan las 3 teclas
+(pausa/siguiente/anterior)". Contexto de la decisión, también verbatim: "podría solo abrir un menú de settings o
+keybinds" — se descartó: `ctrl+alt+z` no siempre está (conflicto con Pi, AltGr en teclados no-US, TUI no-fullscreen),
+así que `/sb-music` sigue abriendo la card porque es el camino de rescate y el de descubrimiento.
+
+Requisitos, todos verificables:
+
+1. **Las tres de transporte se registran** y funcionan desde el editor, con la card abierta u oculta: `playPause`
+   alterna pausa/reanudación, `next` avanza, `prev` retrocede. Despachan a los efectos que ya existen; no abren una
+   segunda vía de reproducción.
+2. **`/sb-music` sin argumentos abre la card**, como hoy.
+3. **`/sb-music --keys` sin argumentos imprime**: las teclas efectivas, cuáles están registradas, la ruta resuelta de
+   `settings.json`, y las teclas que funcionan dentro de la card. No escribe nada.
+4. **`/sb-music --keys clave=valor`** valida y guarda. Varias parejas en una invocación son **atómicas**: si una falla,
+   no se escribe ninguna. `=default` restaura el default documentado.
+5. **Validación**, con mensaje humano en cada caso: modificador obligatorio (una letra pelada le robaría la tecla al
+   editor); sin duplicados entre las cuatro teclas; el valor tiene que ser producible por el host; el nombre de clave
+   tiene que existir.
+6. **Toda escritura** reusa el escritor atómico existente y avisa que el cambio rige en la próxima sesión, porque las
+   shortcuts se registran al bindear la sesión.
+7. **`/sb-music --help`** imprime la tabla y la sintaxis.
+8. **Las dos descripciones dejan de mentir**: el comando anuncia la tecla del ciclo y el shortcut describe el ciclo de
+   tres estados (oculto → esquina → expandida), no un show/hide.
+9. **El README documenta las teclas** y distingue las que funcionan en el editor de las que funcionan dentro de la card.
+
 ## Tasks
 
 | ID | S# | Tarea | Ruta | Estado | Commit |
@@ -247,6 +273,8 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | abierta — hallazgos no bloqueantes de la review de #52: `R4-hit-map-staleness` (WARNING) y `R3-002` (L53) | — |
+| T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | abierta (issue #56) | — |
+| T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help`, descripciones honestas y tabla del README | worker | abierta (issue #57) | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
@@ -1081,3 +1109,17 @@ review de #52 quedan cerrados en el host, no en el core.
 Tres tests nuevos, primero en rojo: la ventana entre el cambio de listado y el frame (con el mapa viejo, el índice
 seguía siendo válido y activaba la fila equivocada), la guarda única del click, y la contracara del estrechamiento
 —un hover no vuelve obsoleto el frame— para que nadie "simplifique" de vuelta a comparar el estado entero.
+
+L55 (el dueño eligió la opción E de la consulta de teclas, y encendió las tres de transporte). Textual: "Listo,
+hagamos esta opción E con /sb-music --keys clave=valor y todo lo que recomiendas. Se implementan las 3 teclas
+(pausa/siguiente/anterior)".
+
+Qué se descartó y por qué, para que no vuelva como idea nueva: **convertir `/sb-music` en un menú** de settings. El
+argumento era razonable ("ya se hace con `ctrl+alt+z`"), pero la tecla no siempre está — conflicto con un atajo de Pi
+que la descarta en silencio, AltGr en teclados no-US, y TUI no-fullscreen — así que el comando tiene que seguir siendo
+la puerta. Tampoco hay menú editable: Pi registra las shortcuts al bindear la sesión, así que el cambio rige en la
+próxima sesión; un menú que promete inmediatez y entrega un reinicio es peor que un archivo documentado.
+
+Dos unidades revisables: **T25** (issue #56) registra las tres de transporte, **T26** (issue #57) es `--keys` + las
+descripciones + la tabla del README. T25 va primero porque el texto que imprime `--keys` tiene que decir la verdad
+sobre qué está registrado.
