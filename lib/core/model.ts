@@ -66,7 +66,28 @@ export interface CardState {
 	readonly filter: string;
 	/** True only while the card is taking the filter term (S18): keys are text, not transport. */
 	readonly filtering: boolean;
+	/**
+	 * The row the pointer is over (S17), as an index into `visibleEntries`, or absent when the pointer
+	 * is not on a row. It lives in the state for one reason: the frame is cached by state identity, so
+	 * a highlight that did not reach the state could never repaint. It is not a selection — the cursor
+	 * stays the keyboard's, and a click selects before it activates.
+	 */
+	readonly hover?: number;
 }
+
+/**
+ * Mouse input, as data (S17). The host resolves a pointer position to the row the renderer said is
+ * under it — `index` is an index into `visibleEntries`, never a screen coordinate — and the reducer
+ * decides what that means. Kept apart from `CardEvent` only so the adapter can name the subset it
+ * produces.
+ */
+export type PointerEvent =
+	/** The pointer moved onto a row, or off every row when `index` is absent (S17: the hover). */
+	| { readonly kind: "hover"; readonly index?: number }
+	/** A click on a row (S17): the row is selected first, then activated, as `enter` would. */
+	| { readonly kind: "click"; readonly index: number }
+	/** The wheel moved `delta` rows through the listing; positive is further down (S17). */
+	| { readonly kind: "wheel"; readonly delta: number };
 
 /** Everything the card needs to exist: where it starts and how far up it may go (S14). */
 export interface CardConfig {
@@ -177,7 +198,8 @@ export type CardEvent =
 	| { readonly kind: "track-ended"; readonly trackId: string }
 	| { readonly kind: "track-failed"; readonly trackId: string }
 	/** The session is shutting down (S6): the shell sends `quit` to mpv. */
-	| { readonly kind: "quit" };
+	| { readonly kind: "quit" }
+	| PointerEvent;
 
 export interface ModelDeps {
 	/**
@@ -234,7 +256,9 @@ export function selectedEntry(state: CardState): LibraryEntry | undefined {
 export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {}): Reduction {
 	switch (event.kind) {
 		case "key":
-			return pressKey(state, event.id, deps);
+			// The keyboard takes over from the pointer (S17): a highlight marks what a click would hit,
+			// and a key is not a click, so the row stops being marked as soon as the user types.
+			return pressKey(forgetHover(state), event.id, deps);
 		case "notice":
 			return { state: { ...state, notice: event.text }, effects: [] };
 		case "overlay":
@@ -254,7 +278,8 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 				effects: [],
 			};
 		case "folder-loaded":
-			// The filter is scoped to one folder (S18): another listing arrives unfiltered.
+			// The filter is scoped to one folder (S18): another listing arrives unfiltered. The highlight
+			// goes with it, because its index meant a row of the listing that just went away (S17).
 			return {
 				state: {
 					...state,
@@ -263,6 +288,7 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 					cursor: 0,
 					filter: "",
 					filtering: false,
+					hover: undefined,
 					notice: undefined,
 				},
 				effects: [],
@@ -273,6 +299,12 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 		case "track-failed":
 			if (state.playing?.id !== event.trackId) return unchanged(state);
 			return advance(state, cannotOpen(state.playing.title));
+		case "hover":
+			return hoverRow(state, event.index);
+		case "click":
+			return clickRow(state, event.index, deps);
+		case "wheel":
+			return wheelRows(state, event.delta);
 		case "quit":
 			return { state, effects: [{ kind: "quit" }] };
 	}
@@ -294,7 +326,15 @@ function unchanged(state: CardState): Reduction {
 
 /** Hiding forgets the size, the keyboard and the filter: a hidden card is in none of those states (S15, S18). */
 function hidden(state: CardState): CardState {
-	return { ...state, presence: "hidden", size: "corner", focused: false, filter: "", filtering: false };
+	return {
+		...state,
+		presence: "hidden",
+		size: "corner",
+		focused: false,
+		filter: "",
+		filtering: false,
+		hover: undefined,
+	};
 }
 
 /** Showing always lands in the corner, even when the card was hidden expanded (S15). */
@@ -347,6 +387,46 @@ function moveCursor(state: CardState, delta: number): Reduction {
 
 	const cursor = Math.min(rows.length - 1, Math.max(0, state.cursor + delta));
 	return cursor === state.cursor ? unchanged(state) : { state: { ...state, cursor }, effects: [] };
+}
+
+/* --- the pointer (S17) ----------------------------------------------------------------------- */
+
+/** The keyboard owns the cursor (S17): after a key, the pointer marks nothing until it moves again. */
+function forgetHover(state: CardState): CardState {
+	return state.hover === undefined ? state : { ...state, hover: undefined };
+}
+
+/**
+ * The highlight under the pointer (S17). It is a row of the listing, so a row that is no longer there
+ * cannot be highlighted: the host may point at a row the card has never seen, and that is a hover off
+ * the rows, not an out-of-range selection.
+ */
+function hoverRow(state: CardState, index: number | undefined): Reduction {
+	if (state.presence !== "visible") return unchanged(state);
+	const hover = index !== undefined && visibleEntries(state)[index] !== undefined ? index : undefined;
+	return hover === state.hover ? unchanged(state) : { state: { ...state, hover }, effects: [] };
+}
+
+/**
+ * A click selects before it activates (S17), which is exactly the pair the keyboard does with a cursor
+ * move plus `enter`: one reduction, so a folder opens and a track plays with the same rules as ever
+ * (S11), queue included.
+ */
+function clickRow(state: CardState, index: number, deps: ModelDeps): Reduction {
+	if (state.presence !== "visible") return unchanged(state);
+	if (visibleEntries(state)[index] === undefined) return unchanged(state);
+	return activate({ ...state, cursor: index }, deps);
+}
+
+/**
+ * The wheel walks the listing exactly like the arrows do (S17), and never past either end. The
+ * highlight is dropped on the way: the wheel moves the rows under a pointer that did not move, so the
+ * row the highlight named is no longer the row under it.
+ */
+function wheelRows(state: CardState, delta: number): Reduction {
+	if (state.presence !== "visible") return unchanged(state);
+	if (!Number.isFinite(delta)) return unchanged(state);
+	return moveCursor(forgetHover(state), Math.trunc(delta));
 }
 
 /* --- the filter over the current folder (S18) ------------------------------------------------ */

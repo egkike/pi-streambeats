@@ -5,22 +5,30 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type CardState, initialState } from "../../lib/core/model.ts";
+import type { Component, TuiMouseEvent } from "@earendil-works/pi-tui";
+import { type CardState, initialState, type PointerEvent, reduce } from "../../lib/core/model.ts";
 import { renderFrame, type ViewOptions } from "../../lib/core/view.ts";
 import { createCardComponent, overlayHeight } from "../../lib/host/component.ts";
-import type { LibraryEntry, ViewTheme } from "../../lib/types.ts";
+import type { LibraryEntry, Track, ViewTheme } from "../../lib/types.ts";
 
 const ROOT = "/home/kike/Music";
 const ALBUM = `${ROOT}/StreamBeats/Chillhop`;
 
 const plain: ViewTheme = { fg: () => "", bg: () => "", bgEnd: () => "", bold: (text) => text, dim: (text) => text };
 
+/** A theme whose weight is visible in the string, which is how a hover can be asserted. */
+const weighted: ViewTheme = { ...plain, bold: (text) => `[b]${text}[/b]` };
+
+const BLUE: Track = {
+	id: `${ALBUM}/01 - Blue Hour.mp3`,
+	title: "01 - Blue Hour.mp3",
+	origin: "local",
+	durationMs: 245_000,
+};
+
 const entries: readonly LibraryEntry[] = [
 	{ kind: "folder", folder: { path: `${ALBUM}/Extras`, name: "Extras" } },
-	{
-		kind: "track",
-		track: { id: `${ALBUM}/01 - Blue Hour.mp3`, title: "01 - Blue Hour.mp3", origin: "local", durationMs: 245_000 },
-	},
+	{ kind: "track", track: BLUE },
 ];
 
 function card(overrides: Partial<CardState> = {}): CardState {
@@ -212,5 +220,164 @@ describe("the overlay component's cache (S3, S8)", () => {
 
 		assert.notEqual(second, first);
 		assert.deepEqual(second, first);
+	});
+});
+
+/**
+ * A normalized mouse event as the host hands it to a component: `x`/`y` are local to the component,
+ * so `y` is a line index of the frame this component returned (pi-tui `TuiMouseEvent`). `screenX`/
+ * `screenY` exist to prove the component never reads them for a hit.
+ */
+function mouse(overrides: Partial<TuiMouseEvent> = {}): TuiMouseEvent {
+	return {
+		type: "move",
+		button: "none",
+		x: 2,
+		y: 0,
+		screenX: 2,
+		screenY: 14,
+		width: 90,
+		height: 8,
+		shift: false,
+		alt: false,
+		ctrl: false,
+		...overrides,
+	};
+}
+
+/** A component wired the way the host wires it: the model is reduced synchronously by the callback. */
+function interactive(
+	start: CardState,
+	theme: ViewTheme = plain,
+): { component: Component; seen: PointerEvent[]; state: () => CardState } {
+	let state = start;
+	const seen: PointerEvent[] = [];
+	const component = createCardComponent({
+		state: () => state,
+		theme: () => theme,
+		options: () => options,
+		height: () => 8,
+		onKey: () => {},
+		onPointer: (event) => {
+			seen.push(event);
+			state = reduce(state, event).state;
+		},
+	});
+	return { component, seen, state: () => state };
+}
+
+/** The line the frame puts a given row on, straight from the render's own hit map. */
+function rowLine(state: CardState, name: string): number {
+	const frame = renderFrame(state, plain, 90, 8, options);
+	const hit = [...frame.hits].find(([, row]) =>
+		row.entry.kind === "folder" ? row.entry.folder.name === name : row.entry.track.title === name,
+	);
+	assert.ok(hit, `${name} is on screen`);
+	return hit[0];
+}
+
+describe("the overlay component's pointer (S17)", () => {
+	it("resolves a click from the line the host reports, never from the cursor or the screen", () => {
+		const { component, seen, state } = interactive(card({ cursor: 0 }));
+		const line = rowLine(card({ cursor: 0 }), BLUE.title);
+
+		component.render(90);
+		component.handleMouse?.(mouse({ type: "press", button: "left", y: line }));
+		component.handleMouse?.(mouse({ type: "click", button: "left", y: line, screenY: 999 }));
+
+		// Row 1 of the listing, resolved from the frame's hit map: the cursor sat on the folder, and the
+		// screen coordinate was nonsense on purpose.
+		assert.deepEqual(seen, [{ kind: "click", index: 1 }]);
+		assert.equal(state().cursor, 1);
+		assert.equal(state().playing?.id, BLUE.id);
+	});
+
+	it("accepts the press, because the host only delivers the click it synthesizes to a handler", () => {
+		const { component } = interactive(card());
+		const line = rowLine(card(), BLUE.title);
+
+		component.render(90);
+
+		assert.equal(component.handleMouse?.(mouse({ type: "press", button: "left", y: line }))?.handled, true);
+		assert.equal(
+			component.handleMouse?.(mouse({ type: "press", button: "left", y: 1 })),
+			undefined,
+			"the header is not a row and takes no press",
+		);
+	});
+
+	it("reports the row under a moving pointer and repaints only when the row changes", () => {
+		const { component, seen, state } = interactive(card());
+		const line = rowLine(card(), BLUE.title);
+
+		component.render(90);
+		const first = component.handleMouse?.(mouse({ y: line }));
+		const again = component.handleMouse?.(mouse({ y: line }));
+
+		assert.deepEqual(seen[0], { kind: "hover", index: 1 }, "the model is asked with a row, not a coordinate");
+		assert.equal(state().hover, 1);
+		assert.equal(first?.render, true, "a new row is a new frame");
+		assert.equal(again?.render, false, "the same row is not");
+	});
+
+	it("clears the highlight when the pointer leaves the rows", () => {
+		const { component, seen, state } = interactive(card());
+		const line = rowLine(card(), BLUE.title);
+
+		component.render(90);
+		component.handleMouse?.(mouse({ y: line }));
+		assert.equal(state().hover, 1);
+
+		component.handleMouse?.(mouse({ y: 1 }));
+
+		assert.deepEqual(seen.at(-1), { kind: "hover", index: undefined });
+		assert.equal(state().hover, undefined);
+	});
+
+	it("scrolls one row per wheel notch, in the direction of the wheel", () => {
+		const { component, seen, state } = interactive(card());
+
+		component.render(90);
+		component.handleMouse?.(mouse({ type: "wheel", wheelDelta: -3 }));
+		assert.deepEqual(seen.at(-1), { kind: "wheel", delta: -1 });
+		assert.equal(state().cursor, 0, "an upward notch at the first row stays there");
+
+		component.handleMouse?.(mouse({ type: "wheel", wheelDelta: 4 }));
+		assert.deepEqual(seen.at(-1), { kind: "wheel", delta: 1 });
+		assert.equal(state().cursor, 1);
+	});
+
+	it("consumes a repeated click, so a folder that just opened cannot receive the second one", () => {
+		const { component, seen } = interactive(card());
+		const line = rowLine(card(), "Extras");
+
+		component.render(90);
+		component.handleMouse?.(mouse({ type: "press", button: "left", y: line }));
+		const second = component.handleMouse?.(mouse({ type: "click", button: "left", y: line, clickCount: 2 }));
+
+		assert.equal(second?.handled, true, "the host's repeat is answered, not left to fall through");
+		assert.deepEqual(seen, [], "and it never reaches the model");
+	});
+
+	it("ignores the pointer entirely on the corner card, which has no rows to hit (S15)", () => {
+		const { component, seen } = interactive(card({ size: "corner", playing: BLUE }));
+		component.render(46);
+
+		assert.equal(component.handleMouse?.(mouse({ type: "press", button: "left", y: 0 })), undefined);
+		assert.equal(component.handleMouse?.(mouse({ type: "click", button: "left", y: 0 })), undefined);
+		assert.equal(component.handleMouse?.(mouse({ type: "wheel", wheelDelta: 1, y: 0 })), undefined);
+		assert.deepEqual(seen, []);
+	});
+
+	it("repaints when only the highlight changed, because the cache follows the state", () => {
+		const { component } = interactive(card({ cursor: 0 }), weighted);
+		const line = rowLine(card({ cursor: 0 }), BLUE.title);
+
+		const before = component.render(90);
+		component.handleMouse?.(mouse({ y: line }));
+		const after = component.render(90);
+
+		assert.notEqual(after, before, "a hover is a new state and therefore a new frame");
+		assert.match(after[line] ?? "", /\[b\]/);
 	});
 });

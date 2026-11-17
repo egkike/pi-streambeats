@@ -306,11 +306,18 @@ function entryLine(
 	const nameWidth = Math.max(0, rest - gap - (durationWidthHere > 0 ? COLUMN_GAP + durationWidthHere : 0));
 	const playingHere = entry.kind === "track" && state.playing?.id === entry.track.id;
 	const cursorHere = state.cursor === index;
+	// The pointer's row (S17). It is deliberately NOT the cursor's elevated surface: two identical
+	// highlights would make "what would enter open" the less predictable of the two, and the cursor is
+	// the one that has to stay unmistakable. Weight is a signal the family of roles already owns
+	// (`bold`), it adds no cells, and it never touches the marker cells, so the three combinations of
+	// cursor and playback keep their shapes.
+	const hoveredHere = state.hover === index;
 
 	const marker = markerCells(cursorHere, playingHere, state.paused, theme, glyphs, markerWidth);
 	const name = entryName(entry, nameWidth);
 	// The name owns a fixed field, so the duration column never drifts row to row (S3).
-	const nameText = paint(theme, playingHere ? "success" : "text", name) + spaces(nameWidth - printableLength(name));
+	const paintedName = paint(theme, playingHere ? "success" : "text", name);
+	const nameText = (hoveredHere ? theme.bold(paintedName) : paintedName) + spaces(nameWidth - printableLength(name));
 	const durationText = durationOf(entry, options);
 	const duration =
 		durationWidthHere > 0

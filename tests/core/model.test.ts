@@ -824,6 +824,115 @@ describe("the filter over the current folder (S18)", () => {
 	});
 });
 
+describe("the mouse (S17)", () => {
+	/** A click on a row the renderer reported, carrying the row index its hit map gave it. */
+	function click(state: CardState, index: number): Reduction {
+		return reduce(state, { kind: "click", index });
+	}
+
+	/** Rows down the listing (positive) or up it (negative), as the wheel reports them. */
+	function wheel(state: CardState, delta: number): Reduction {
+		return reduce(state, { kind: "wheel", delta });
+	}
+
+	function hover(state: CardState, index?: number): CardState {
+		return reduce(state, { kind: "hover", index }).state;
+	}
+
+	it("selects the row a click lands on and plays the track under it", () => {
+		const clicked = click(browsingAlbum(), ROW.c);
+
+		assert.equal(clicked.state.cursor, ROW.c, "the click selects before it activates");
+		assert.equal(clicked.state.playing?.id, C.id);
+		assert.deepEqual(clicked.effects, [{ kind: "play", trackId: C.id }]);
+		assert.deepEqual(ids(clicked.state.queue?.tracks), [A.id, B.id, C.id, D.id], "the folder is still the queue");
+	});
+
+	it("enters the folder a click lands on", () => {
+		const clicked = click(browsingAlbum(), ROW.folder);
+
+		assert.deepEqual(clicked.effects, [{ kind: "load-folder", path: `${ALBUM}/Extras` }]);
+		assert.equal(clicked.state.path, `${ALBUM}/Extras`);
+		assert.equal(clicked.state.cursor, 0, "a new folder starts at its first row");
+	});
+
+	it("ignores a click on a row the card is not showing", () => {
+		const state = browsingAlbum();
+
+		assert.equal(click(state, 99).state, state);
+		assert.deepEqual(click(state, 99).effects, []);
+		assert.deepEqual(click(state, -1).effects, []);
+	});
+
+	it("scrolls the listing with the wheel", () => {
+		assert.equal(wheel(browsingAlbum(), 1).state.cursor, ROW.a);
+		assert.equal(wheel(at(browsingAlbum(), ROW.c), -1).state.cursor, ROW.b);
+	});
+
+	it("stops the wheel at both ends instead of wrapping", () => {
+		assert.equal(wheel(browsingAlbum(), -3).state.cursor, ROW.folder);
+		assert.equal(wheel(at(browsingAlbum(), ROW.d), 4).state.cursor, ROW.d);
+
+		const state = browsingAlbum();
+		assert.equal(wheel(state, 0).state, state, "no movement is not a new state");
+	});
+
+	it("never scrolls playback, only the listing", () => {
+		const scrolled = wheel(playingB(), 1);
+
+		assert.deepEqual(scrolled.effects, []);
+		assert.equal(scrolled.state.playing?.id, B.id);
+	});
+
+	it("highlights the row under the pointer", () => {
+		assert.equal(hover(browsingAlbum(), ROW.c).hover, ROW.c);
+	});
+
+	it("clears the highlight when the pointer leaves the rows or points at none", () => {
+		const highlighted = hover(browsingAlbum(), ROW.c);
+
+		assert.equal(hover(highlighted).hover, undefined);
+		assert.equal(hover(highlighted, 99).hover, undefined, "a row that is not on screen cannot be highlighted");
+	});
+
+	it("leaves the keyboard where it was: hovering never moves the cursor", () => {
+		const state = hover(at(browsingAlbum(), ROW.b), ROW.d);
+
+		assert.equal(state.cursor, ROW.b);
+		assert.equal(press(state, "enter").state.playing?.id, B.id, "enter still opens what the keyboard selected");
+	});
+
+	it("drops the highlight as soon as a key arrives, because the keyboard takes over", () => {
+		const pressed = press(hover(browsingAlbum(), ROW.d), "down").state;
+
+		assert.equal(pressed.hover, undefined);
+		assert.equal(pressed.cursor, ROW.a, "and the key still does exactly what it did before");
+	});
+
+	it("forgets the highlight when the listing changes under it or the card hides", () => {
+		const highlighted = hover(browsingAlbum(), ROW.d);
+
+		assert.equal(loaded(highlighted, ROOT, []).hover, undefined);
+		assert.equal(reduce(highlighted, { kind: "overlay" }).state.hover, undefined);
+	});
+
+	it("ignores the pointer while the card is not on screen", () => {
+		const hidden = start();
+
+		assert.equal(click(hidden, ROW.a).state, hidden);
+		assert.equal(reduce(hidden, { kind: "hover", index: ROW.a }).state, hidden);
+		assert.equal(wheel(hidden, 1).state, hidden);
+	});
+
+	it("activates the clicked row while the filter is open, exactly as it does otherwise", () => {
+		// S17 does not carve the filter mode out, so the literal rule applies: a click selects and
+		// activates the row it lands on, which here is the only visible result (S18).
+		const clicked = click(typing(browsingAlbum(), "B"), 0);
+
+		assert.equal(clicked.state.playing?.id, B.id);
+	});
+});
+
 describe("the reducer stays pure (S8, AGENTS.md)", () => {
 	it("does not mutate the state it receives", () => {
 		const state = deepFreeze(playingB());
@@ -834,6 +943,9 @@ describe("the reducer stays pure (S8, AGENTS.md)", () => {
 		press(state, "u");
 		reduce(state, { kind: "track-ended", trackId: B.id });
 		reduce(state, { kind: "track-failed", trackId: B.id });
+		reduce(state, { kind: "hover", index: ROW.c });
+		reduce(state, { kind: "click", index: ROW.a });
+		reduce(state, { kind: "wheel", delta: 1 });
 
 		assert.deepEqual(state, snapshot);
 	});

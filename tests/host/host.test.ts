@@ -12,7 +12,7 @@ import type {
 	ExtensionUIContext,
 	Theme,
 } from "@earendil-works/pi-coding-agent";
-import type { Component, OverlayHandle, TUI } from "@earendil-works/pi-tui";
+import type { Component, OverlayHandle, TUI, TuiMouseEvent } from "@earendil-works/pi-tui";
 import { registerSbMusic, STATUS_KEY } from "../../lib/host/host.ts";
 import type { ScanResult } from "../../lib/library/scan.ts";
 import type { Player, PlayerReport } from "../../lib/player/mpv.ts";
@@ -851,5 +851,127 @@ describe("the one-second tick only repaints when there is something to show (T16
 		h.tick();
 
 		assert.equal(h.renders(), before, "a silent, hidden card costs nothing per second");
+	});
+});
+
+/**
+ * A normalized mouse event as Pi dispatches it to an overlay component: `y` is local to the card, so
+ * it is a line index of the frame the card returned (pi-tui `TuiMouseEvent`).
+ */
+function mouseAt(y: number, overrides: Partial<TuiMouseEvent> = {}): TuiMouseEvent {
+	return {
+		type: "move",
+		button: "none",
+		x: 4,
+		y,
+		screenX: 24,
+		screenY: 20 + y,
+		width: 90,
+		height: 20,
+		shift: false,
+		alt: false,
+		ctrl: false,
+		...overrides,
+	};
+}
+
+/** The line the card draws the named row on, asked of the card's own frame instead of geometry. */
+function lineOf(component: Component | undefined, name: string): number {
+	const lines = component?.render(90) ?? [];
+	const index = lines.findIndex((line) => line.includes(name));
+	assert.ok(index >= 0, `${name} is on the card`);
+	return index;
+}
+
+/** One press-and-release on the same cell: what the host turns into the `click` the card reduces. */
+function clickAt(component: Component | undefined, y: number): void {
+	component?.handleMouse?.(mouseAt(y, { type: "press", button: "left" }));
+	component?.handleMouse?.(mouseAt(y, { type: "click", button: "left" }));
+}
+
+describe("the mouse on the card (S17)", () => {
+	it("enters the folder under the click", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		clickAt(component, lineOf(component, "Extras"));
+
+		assert.equal(h.scanCalls.at(-1), `${ALBUM}/Extras`, "the click loaded the folder it landed on");
+		assert.equal(h.playerCalls.length, 0, "and touched no playback");
+	});
+
+	it("plays the track under the click", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		clickAt(component, lineOf(component, "02 - Blue Hour.mp3"));
+
+		assert.ok(h.playerCalls.includes(`play:${ALBUM}/02 - Blue Hour.mp3`));
+	});
+
+	it("walks the listing with the wheel", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+		// The host only dispatches mouse events against a frame it has already painted, and the hit
+		// map comes from that frame: the card is rendered first, exactly as the overlay does.
+		component?.render(90);
+
+		component?.handleMouse?.(mouseAt(0, { type: "wheel", wheelDelta: 1 }));
+
+		const moved = component?.render(90)[lineOf(component, "01 - Arcade Dreams.mp3")] ?? "";
+		assert.match(moved, /│ ▸ /, "the cursor went one row down the listing");
+	});
+
+	it("leaves the keyboard exactly where it was, whatever the pointer did", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		// The pointer rests on the second track, and then the keyboard is driven as it always was.
+		component?.handleMouse?.(mouseAt(lineOf(component, "02 - Blue Hour.mp3")));
+		component?.handleInput?.("j");
+		component?.handleInput?.("\r");
+
+		assert.ok(h.playerCalls.includes(`play:${ALBUM}/01 - Arcade Dreams.mp3`), "enter plays what the cursor selects");
+		assert.equal(
+			h.playerCalls.some((call) => call.includes("Blue Hour")),
+			false,
+			"the row under the pointer was never activated by a key",
+		);
+	});
+
+	it("ignores a click on the corner card, which is a passive readout with no rows (S15)", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		// The cycle only passes through the corner while something plays (S15, L39).
+		h.overlays[0]?.component.handleInput?.("j");
+		h.overlays[0]?.component.handleInput?.("\r");
+		await flush();
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+
+		const corner = h.overlays[1]?.component;
+		const scans = h.scanCalls.length;
+		const plays = h.playerCalls.length;
+		clickAt(corner, 0);
+
+		assert.equal(h.overlays[1]?.handle.calls.focus, 0, "the corner still holds no keyboard");
+		assert.equal(h.scanCalls.length, scans, "a click there loads nothing");
+		assert.equal(h.playerCalls.length, plays, "and plays nothing");
 	});
 });
