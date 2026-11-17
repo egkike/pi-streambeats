@@ -81,6 +81,15 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 	 * re-derived here.
 	 */
 	let cachedHits: HitMap | undefined;
+	/**
+	 * What moves the rows of the cached frame (T24): the listing, the filter, the scroll the cursor
+	 * implies and the size. `hits` is geometry of one particular arrangement of those, so once any of
+	 * them changes the same line index names a different entry, and a hit resolved against the new
+	 * state could activate a row nobody clicked. Everything else -- the playing track, the clock, the
+	 * highlight itself -- leaves the rows where they are, and dropping those events would make the
+	 * pointer go deaf for a frame every time it hovered.
+	 */
+	let paintedRows: readonly [CardState["entries"], string, number, CardSize] | undefined;
 
 	return {
 		render(width: number): string[] {
@@ -108,6 +117,7 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			cachedLines = [...frame.lines];
 			// Stored with the lines: a hit is only meaningful for the frame the host is painting.
 			cachedHits = frame.hits;
+			paintedRows = [state.entries, state.filter, state.cursor, state.size];
 			return cachedLines;
 		},
 		handleInput(data: string): void {
@@ -135,18 +145,32 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			cachedElapsed = Number.NaN;
 			cachedLines = undefined;
 			cachedHits = undefined;
+			paintedRows = undefined;
 		},
 		handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 			deps.tracePointer?.(event);
 			if (!deps.onPointer) return undefined;
+			const state = deps.state();
 			// Only the expanded card draws rows (S17): the corner is a passive readout with no list, no
 			// hit zones and no keyboard, so a click there has nothing to mean. It is ignored on purpose
 			// rather than given a rule S17 never wrote.
-			if (deps.state().size !== "expanded") return undefined;
+			if (state.size !== "expanded") return undefined;
 			const hits = cachedHits;
 			// No painted frame means no row on screen to point at: the host dispatches pointer events
 			// against what it rendered, so this is the seam saying "nothing to hit yet".
 			if (!hits) return undefined;
+			// The hit map belongs to the rows the last render laid out, and the screen is only as fresh
+			// as that render (T24): a frame of the previous listing cannot be resolved against a new one.
+			const rows = paintedRows;
+			if (
+				!rows ||
+				rows[0] !== state.entries ||
+				rows[1] !== state.filter ||
+				rows[2] !== state.cursor ||
+				rows[3] !== state.size
+			) {
+				return undefined;
+			}
 
 			// `y` is local to this component, which is the line index of the frame it returned: the
 			// overlay is positioned by the host and never by us, so screen coordinates are not read.
@@ -165,9 +189,12 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 					// (pi-tui `handleMouseEvent`), so accepting it is what makes a click arrive at all.
 					return hit ? { handled: true, render: false } : undefined;
 				case "click":
+					// One guard decides whether a row was hit; the repeat rule only applies after it (R3-002).
+					// A click that landed on no row is not ours to answer.
+					if (!hit) return undefined;
 					// A repeat is the same click again, and by then the listing may already be another one
 					// (a folder was entered): it is answered so the host stops, and never reduced twice.
-					if (!hit || (event.clickCount ?? 1) > 1) return { handled: true, render: false };
+					if ((event.clickCount ?? 1) > 1) return { handled: true, render: false };
 					deps.onPointer({ kind: "click", index: hit.index });
 					return { handled: true };
 				case "wheel":

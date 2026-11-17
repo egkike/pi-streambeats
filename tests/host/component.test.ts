@@ -382,6 +382,80 @@ describe("the overlay component's pointer (S17)", () => {
 	});
 });
 
+describe("the frame a pointer is resolved against (T24)", () => {
+	it("ignores a pointer event that arrives after the model changed and before the next frame", () => {
+		// `hits` describes the listing the host is painting. If the model already moved on (a click
+		// entered a folder, a key reloaded a listing) the map answers for rows that are no longer in
+		// the state, and the same index means a different entry. The screen is stale, so the stale
+		// frame decides nothing; the next render brings a new map.
+		let state = card();
+		const seen: PointerEvent[] = [];
+		const component = createCardComponent({
+			state: () => state,
+			theme: () => plain,
+			options: () => options,
+			height: () => 8,
+			onKey: () => {},
+			onPointer: (event) => seen.push(event),
+		});
+
+		component.render(90);
+		const line = rowLine(state, BLUE.title);
+		state = reduce(state, { kind: "folder-loaded", path: `${ROOT}/Other`, entries: [] }).state;
+
+		assert.equal(
+			component.handleMouse?.(mouse({ type: "click", button: "left", y: line })),
+			undefined,
+			"a frame of the previous listing cannot be resolved against the new one",
+		);
+		assert.deepEqual(seen, [], "and nothing is handed to the model");
+
+		component.render(90);
+		component.handleMouse?.(mouse({ type: "click", button: "left", y: line }));
+		assert.deepEqual(seen, [], "the new listing is empty, so that line has no row either");
+	});
+
+	it("stays live while the rows stay put: a highlight does not make the frame stale", () => {
+		// The narrowing is the point (T24): only what MOVES the rows invalidates the map. Hovering
+		// changes the state without moving anything, so the next gesture on the same frame must still
+		// resolve -- otherwise the pointer would answer one event per repaint.
+		const { component, seen, state } = interactive(card());
+		component.render(90);
+		const line = rowLine(card(), BLUE.title);
+
+		component.handleMouse?.(mouse({ type: "move", y: line }));
+		component.handleMouse?.(mouse({ type: "click", button: "left", y: line }));
+
+		assert.deepEqual(
+			seen.map((event) => event.kind),
+			["hover", "click"],
+			"the click resolves even though the hover already changed the state",
+		);
+		assert.equal(state().playing?.id, BLUE.id);
+	});
+
+	it("decides whether a row was hit once, before the repeat-click rule", () => {
+		const { component, seen } = interactive(card());
+		component.render(90);
+		const line = rowLine(card(), BLUE.title);
+
+		// No row on that line: the answer is "not mine", never "handled".
+		assert.equal(
+			component.handleMouse?.(mouse({ type: "click", button: "left", y: 99 })),
+			undefined,
+			"a click that hit no row is not handled",
+		);
+		assert.deepEqual(seen, []);
+
+		// A repeat click on a painted row is answered so the host stops, and never reduced twice.
+		assert.deepEqual(component.handleMouse?.(mouse({ type: "click", button: "left", y: line, clickCount: 2 })), {
+			handled: true,
+			render: false,
+		});
+		assert.deepEqual(seen, [], "the hit map is consulted before the repeat rule, and the repeat decodes to nothing");
+	});
+});
+
 describe("the pointer trace (S17)", () => {
 	it("reports every dispatched pointer event before deciding anything, so an absent line means it never arrived", () => {
 		// Mouse input exists only in Pi's fullscreen TUI. When the card ignores a click, the difference

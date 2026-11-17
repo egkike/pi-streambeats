@@ -1065,3 +1065,19 @@ informativos y su receipt sigue en pie.
    **in-range del listado anterior**; la guarda del reducer evita el fuera de rango, no la fila equivocada.
 2. `R3-002` (SUGGESTION, `lib/host/component.ts:176-180`): el caso `click` con `clickCount > 1` no consulta el hit
    map, así que las dos guardas no coinciden sobre cuál manda. Hoy es benigno porque el `press` ya declinó.
+
+L54 (T24, autorizada por el dueño: "Dale a T24 y luego vemos las dudas"). Los dos hallazgos no bloqueantes de la
+review de #52 quedan cerrados en el host, no en el core.
+
+1. **`R4-hit-map-staleness`.** El mapa de `hits` es geometría de un arreglo concreto de filas. La corrección no
+   compara el estado entero: eso hubiera dejado al puntero sordo un frame cada vez que el hover cambiaba el estado.
+   Lo que invalida el mapa es **lo que mueve las filas**: listado, filtro, cursor (el scroll que implica) y tamaño.
+   Todo lo demás —el track sonando, el reloj, el propio highlight— deja las filas donde están. Con eso, un click que
+   cae entre el cambio de listado y el próximo frame **no se resuelve**, que es la falla segura: se descarta el gesto
+   en vez de activar una fila que nadie clickeó.
+2. **`R3-002`.** Una sola guarda decide si hubo fila: el `click` sin hit devuelve `undefined` (no es nuestro) y el
+   click repetido se contesta recién después, sin despachar nada. Antes las dos ramas no coincidían sobre cuál manda.
+
+Tres tests nuevos, primero en rojo: la ventana entre el cambio de listado y el frame (con el mapa viejo, el índice
+seguía siendo válido y activaba la fila equivocada), la guarda única del click, y la contracara del estrechamiento
+—un hover no vuelve obsoleto el frame— para que nadie "simplifique" de vuelta a comparar el estado entero.
