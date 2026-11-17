@@ -274,7 +274,7 @@ Requisitos, todos verificables:
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | abierta — hallazgos no bloqueantes de la review de #52: `R4-hit-map-staleness` (WARNING) y `R3-002` (L53) | — |
 | T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
-| T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help` y tabla del README | worker | **implementado** — falta la prueba del dueño en el host (L58) | — |
+| T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help` y tabla del README | worker | **hecho** — verificado por el dueño en el host (L59) | `08ba81d` (PR #59) |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
@@ -1244,3 +1244,13 @@ teclado al elegir un tema» (desde L31 lo conserva mientras está enfocada).
 `pi -e ./extensions/sb-music.ts`, `/sb-music --keys`, `/sb-music --help`, `/sb-music --keys overlay=ctrl+alt+m`, y
 ver que la tecla vieja sigue andando hasta reiniciar Pi y la nueva después—, más si Pi acepta la combinación nueva sin
 chocar con un binding suyo.
+
+L59 (T26 cerrada, y el hub se va al final). Verificación del dueño, verbatim: "Perfecto, funciona todo". El ciclo S22
+queda completo: las cuatro teclas registradas (T25), `/sb-music --keys` leyendo y reescribiendo con las cuatro
+validaciones, `--help`, y el README documentando lo que existe.
+
+Decisión de producto del dueño sobre la publicación en el hub de Gentle, verbatim: "La Publicación en el hub de Gentle
+recien la haremos cuando el proyecto se encuentre totalmente listo. Dejalo para lo ultimo eso". El disparador que
+estaba escrito en `AGENTS.md` —"que exista un slice que corra de verdad"— ya se había cumplido, así que quedaba
+vencido; se reemplazó por **el backlog de v1 cerrado** (sin tareas abiertas y sin hallazgos de review pendientes),
+que es observable. Un riesgo aceptado sin disparador vigente no está aceptado: está olvidado.
