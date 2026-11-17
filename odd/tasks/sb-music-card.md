@@ -887,11 +887,11 @@ unidad revisable.
    `void`; un `socket.write` que tiraba escapaba como rechazo no observado y la política de Node decidía. Ahora pasan
    por `guard()`, que avisa al usuario. En `play` además se limpia el reloj y se despacha `track-failed`: un play que
    nunca cargó no deja un reloj corriendo.
-3. **`ctrl+c`** — intenté devolvérselo al host y **la review lo paró con un BLOCKER** (`R4-001`), con razón:
-   `Component.handleInput` devuelve `void`, así que un componente enfocado **no puede declinar una tecla**. Pasar
-   `ctrl+c` al host no es implementable desde acá; mi `return` dejaba la tecla sin hacer **nada**, peor que antes. La
-   card vuelve a cerrarse con `ctrl+c`, y eso no es una preferencia: cerrar libera el teclado, y la pulsación siguiente
-   sí llega a Pi — el único camino de interrupción que una card puede ofrecer. Ver **L47**.
+3. **`ctrl+c` — fuera de este ciclo.** La review paró el primer intento con un BLOCKER real (`R4-001`), y al corregirlo
+   el validador dictaminó que el criterio original **no es alcanzable**: `Component.handleInput` devuelve `void`, así
+   que una card enfocada no puede reenviar la tecla. `lib/host/component.ts` y su test **quedaron en la línea base**
+   (comportamiento actual: cerrar la card, que libera el teclado), y la intención original pasa a **T22**, que necesita
+   un cambio en el host. Ver **L48**.
 4. **Tick ocioso.** `refresh()` forzaba un frame completo **cada segundo durante toda la sesión**, incluso con la card
    oculta y sin música. Ahora sólo repinta si hay overlay o algo sonando.
 

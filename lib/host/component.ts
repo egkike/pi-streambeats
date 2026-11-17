@@ -86,17 +86,9 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			return cachedLines;
 		},
 		handleInput(data: string): void {
-			// ESC is the card's key: it always closes, whatever the model decides.
-			if (data === "\u001b") {
-				deps.dismiss?.();
-				return;
-			}
-			// Ctrl-C also closes the card, and that is NOT a preference: `Component.handleInput` returns void,
-			// so a focused component cannot decline a key. "Forward ctrl-c to the host" is not implementable
-			// from here (review R4-001, BLOCKER: swallowing it left the key doing nothing at all). Closing
-			// releases the keyboard, so the next press reaches Pi -- that is the only interruption path a
-			// card can offer (L47).
-			if (data === "\u0003") {
+			// Ctrl-C is the terminal's own panic button and ESC is the card's: either one always
+			// closes, whatever the model decides to do with them.
+			if (data === "\u0003" || data === "\u001b") {
 				deps.dismiss?.();
 				return;
 			}
