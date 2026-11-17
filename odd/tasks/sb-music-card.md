@@ -1244,3 +1244,9 @@ teclado al elegir un tema» (desde L31 lo conserva mientras está enfocada).
 `pi -e ./extensions/sb-music.ts`, `/sb-music --keys`, `/sb-music --help`, `/sb-music --keys overlay=ctrl+alt+m`, y
 ver que la tecla vieja sigue andando hasta reiniciar Pi y la nueva después—, más si Pi acepta la combinación nueva sin
 chocar con un binding suyo.
+
+L60 (`R3-001` cerrado: con un `settings.json` malformado, `--keys` imprimía los defaults en memoria sin decir una
+palabra, mientras que guardar sí se negaba por el mismo motivo). Era el peor momento para callarse: el usuario
+pregunta qué teclas tiene justamente cuando quiere entender por qué no le guarda. El reporte ahora imprime el aviso
+del loader y aclara que la tabla son defaults en memoria; sigue sin escribir nada, sin abrir la card, y entra en el
+tope de diez líneas del widget (nueve).

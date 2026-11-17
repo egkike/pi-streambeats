@@ -676,6 +676,25 @@ describe("/sb-music --keys reads and edits the keys (S22)", () => {
 		assert.ok(lines.length <= 10, `the report is ${lines.length} lines, which the host would truncate`);
 	});
 
+	it("says the file could not be read, instead of presenting defaults as the keys (R3-001)", async () => {
+		// The one moment a user asks "what keys do I have?" is exactly when a broken file is the reason
+		// their change will not save. The save path already refuses; the read path used to stay silent,
+		// so the table looked like the truth on disk while it was the loader's fallback (S2).
+		const h = harness();
+		h.options.warning = `${SETTINGS_FILE} is not valid JSON, using defaults`;
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--keys", h.ctx);
+
+		const lines = report(h);
+		const text = lines.join("\n");
+		assert.match(text, /is not valid JSON/, "the loader's own warning is printed");
+		assert.match(text, /defaults in memory/i, "and it says what the table is showing");
+		assert.ok(lines.length <= 10, `the report is ${lines.length} lines, which the host would truncate`);
+		assert.deepEqual(h.saved, [], "reading still writes nothing");
+		assert.deepEqual(h.overlays, [], "and opens no card");
+	});
+
 	it("prints the syntax with --help", async () => {
 		const h = harness();
 		register(h);
