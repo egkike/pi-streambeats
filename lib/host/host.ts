@@ -635,7 +635,17 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	/** `/sb-music --keys` with no pairs reads; with pairs it validates and saves all of them or none (S22). */
 	function reportKeys(commandCtx: ExtensionCommandContext, assignments: readonly string[]): void {
 		if (assignments.length === 0) {
-			printLines(commandCtx, keysLines());
+			// A file the loader could not read leaves the defaults in memory (S2), and the read report is
+			// exactly where the user asks "what keys do I have" — usually because a change will not save.
+			// Staying silent here hid the reason, while the save path refuses for the same warning (R3-001).
+			printLines(
+				commandCtx,
+				keysLines(
+					deps.warning === undefined
+						? []
+						: [deps.warning, "these are the defaults in memory: the file above could not be used"],
+				),
+			);
 			return;
 		}
 

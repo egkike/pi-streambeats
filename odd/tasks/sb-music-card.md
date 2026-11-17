@@ -1254,3 +1254,8 @@ recien la haremos cuando el proyecto se encuentre totalmente listo. Dejalo para 
 estaba escrito en `AGENTS.md` —"que exista un slice que corra de verdad"— ya se había cumplido, así que quedaba
 vencido; se reemplazó por **el backlog de v1 cerrado** (sin tareas abiertas y sin hallazgos de review pendientes),
 que es observable. Un riesgo aceptado sin disparador vigente no está aceptado: está olvidado.
+L60 (`R3-001` cerrado: con un `settings.json` malformado, `--keys` imprimía los defaults en memoria sin decir una
+palabra, mientras que guardar sí se negaba por el mismo motivo). Era el peor momento para callarse: el usuario
+pregunta qué teclas tiene justamente cuando quiere entender por qué no le guarda. El reporte ahora imprime el aviso
+del loader y aclara que la tabla son defaults en memoria; sigue sin escribir nada, sin abrir la card, y entra en el
+tope de diez líneas del widget (nueve).
