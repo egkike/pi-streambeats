@@ -22,6 +22,8 @@ export interface Glyphs {
 	readonly expanded: string;
 	/** The filter input's caret (S18): `▏` geometric, `|` ASCII. */
 	readonly caret: string;
+	/** The hairlines that divide the card (artboard `.hd`/`.ft` borders): `─` geometric, `-` ASCII. */
+	readonly rule: string;
 	readonly bar: {
 		/** The part already played (S3). */
 		readonly fill: string;
@@ -38,6 +40,7 @@ const GEOMETRIC: Glyphs = {
 	cursor: "▸",
 	expanded: "▾",
 	caret: "▏",
+	rule: "─",
 	bar: { fill: "━", head: "╸", rest: "─" },
 };
 
@@ -47,6 +50,7 @@ const ASCII: Glyphs = {
 	cursor: ">",
 	expanded: "v",
 	caret: "|",
+	rule: "-",
 	bar: { fill: "=", head: "=", rest: "-" },
 };
 
@@ -128,10 +132,14 @@ function expandedFrame(
 	const hits = new Map<number, EntryHit>();
 	const entries = visibleEntries(state);
 	const footerRows = height >= 2 ? 1 : 0;
-	const listRows = Math.max(0, height - 1 - footerRows);
+	// The artboard divides the header from the list and the list from the footer (`01-lista-unica.html`:
+	// `.hd{border-bottom}` and `.ft{border-top}`). Without them the footer read as one more list row.
+	const ruleRows = height >= 5 ? 2 : 0;
+	const listRows = Math.max(0, height - 1 - footerRows - ruleRows);
 	const durationWidth = widestDuration(entries);
 
 	lines.push(headerLine(state, theme, width, options));
+	if (ruleRows > 0) lines.push(ruleLine(theme, width, glyphs));
 
 	// An empty listing with a term is a state, not a blank card (S18): the row says why it is empty.
 	const noResults = state.filter !== "" && entries.length === 0;
@@ -150,6 +158,7 @@ function expandedFrame(
 		lines.push(entryLine(entry, index, state, theme, width, glyphs, durationWidth));
 	}
 
+	if (ruleRows > 1) lines.push(ruleLine(theme, width, glyphs));
 	if (footerRows > 0) {
 		// The input takes the footer's row (S18): the key hints would lie while the keys are text.
 		lines.push(
@@ -157,6 +166,11 @@ function expandedFrame(
 		);
 	}
 	return { lines, hits };
+}
+
+/** One hairline across the card in the `border` role; no padding, so it meets both edges. */
+function ruleLine(theme: ViewTheme, width: number, glyphs: Glyphs): string {
+	return width > 0 ? paint(theme, "border", glyphs.rule.repeat(width)) : "";
 }
 
 function headerLine(state: CardState, theme: ViewTheme, width: number, options: ViewOptions): string {

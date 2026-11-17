@@ -377,7 +377,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		debug("cycle", "presence=", state.presence, "size=", state.size, "ctx=", Boolean(ctx));
 		if (!ctx) return;
 		if (state.presence === "hidden") {
-			show("corner", false);
+			// Nothing playing means the corner has nothing to read: it would sit there saying
+			// `nothing playing` and need a second press to be useful. Go straight to the list.
+			show(state.playing === undefined ? "expanded" : "corner", state.playing === undefined);
 			return;
 		}
 		if (state.size === "corner") {

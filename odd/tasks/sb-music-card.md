@@ -114,8 +114,10 @@ sólo glifo de estado y tiempo con su barra de progreso — el título lo posee 
 **Expandida:** la lista completa de S3, sin perder cursor ni carpeta.
 
 `ctrl+alt+z` (tecla `overlay`) **cicla los tres estados en orden fijo**, y funciona igual desde el editor que con
-la card enfocada: oculta → esquina → expandida → oculta. La primera pulsación llega siempre a la esquina, aunque la
-card se haya ocultado estando expandida; la segunda expande y toma el teclado; la tercera oculta.
+la card enfocada: oculta → esquina → expandida → oculta. La primera pulsación llega a la esquina **cuando hay algo
+sonando**, porque ahí está su única lectura; **sin música abre directo la lista**, porque la esquina sólo mostraría
+`nothing playing` y obligaría a una segunda pulsación para llegar a lo útil. La siguiente pulsación expande y toma el
+teclado; la última oculta.
 
 `l` no existe. El tamaño dejó de ser una tecla aparte porque dependía de un foco que la esquina no tiene: al colapsar,
 el teclado vuelve al editor, así que `l` no podía ejecutarse de nuevo y la card quedaba sin forma de volver a
@@ -125,8 +127,8 @@ una sesión de Pi la card arranca **oculta**.
 La esquina es pasiva y no toma el teclado; la expandida sí, y el editor lo recupera cuando la card se oculta.
 
 S16 — Glifos. Una sola familia geométrica: `●` reproduciendo, `○` pausado, `▸` cursor, `▾` expandido, `━`/`─`
-progreso. Nunca emoji en el chrome. `settings.asciiGlyphs: true` cambia la familia a ASCII (`*`, `-`, `>`, `v`,
-`=`) para terminales donde los geométricos ocupen dos celdas. **No hay detección automática**: es una decisión
+progreso, `─` la línea de separación. Nunca emoji en el chrome. `settings.asciiGlyphs: true` cambia la familia a
+ASCII (`*`, `-`, `>`, `v`, `=`, `-`) para terminales donde los geométricos ocupen dos celdas. **No hay detección automática**: es una decisión
 del usuario, no una adivinanza del código.
 
 S17 — Mouse. Un click sobre una fila la selecciona y la activa: carpeta → entra, archivo → reproduce. La rueda
@@ -240,7 +242,8 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
-| T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | abierta (L38) | — |
+| T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | corregida (L39) — **falta la prueba en el host** | `77ce72f` |
+| T18 | — | Decidir la política de runners macOS en `gate`: hoy cada push a `main` puede quedar rojo por cola | inline | abierta — decisión del dueño (L39) | — |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -679,3 +682,38 @@ dependencia de foco en lugar de parchearla, mantiene la esquina pasiva, y conser
 esquina". Costo declarado y aceptado: S15 se reescribe (el tamaño ya no es una tecla aparte), `l` sale de S13 y del
 pie, y tres tests que pinan el comportamiento viejo se reescriben a propósito —`model.test.ts:179`,
 `host.test.ts:413` y `:559`— porque borrarlos destruiría la evidencia de que el cambio fue deliberado.
+
+L39 (segunda prueba en el host, verbatim del dueño): "Funciona bien las 3 secuencias pero hay un detalle: La primera
+vez que presiono ctrl+alt+z no hay ventana expandida y me sale en la esquina: ○ nothing playing, luego la segunda vez
+que presiono ctrl+alt+z ya sale la ventana expandida... y tercero oculta. Otro detalle es que la fila de botones del
+pié se confunde con toda la ventana [...] quizás valga la pena que tengan una linea por arriba o recuadro, colores en
+las teclas quizás... Qué te parece?"
+
+**El pie se confundía porque el artboard tiene tres bordes y el frame no dibujaba ninguno.** `01-lista-unica.html`:
+`.card{border}`, `.hd{border-bottom}`, `.ft{border-top}`. L1 declara el artboard spec visual, así que no era una
+opinión de diseño: era una desviación. Se dibujan los **dos internos** (`─` en rol `border`, ancho completo, sin
+padding; glifo `rule` en la misma familia S16, con su versión ASCII). El **borde exterior no**: cuesta 2 filas + 2
+columnas de cada frame y a la esquina de 46 celdas le come 4 de contenido. Las **teclas con color propio tampoco**:
+el artboard pone todo el pie en `muted`, y en este proyecto el artboard cambia primero.
+
+Costo declarado y aceptado: los divisores salen del alto del frame, no lo agrandan. En 15 filas, la lista pasa de 13
+renglones a 11. La alternativa —crecer la card 2 filas— se la come el editor, y se descartó.
+
+**El ciclo ahora es consciente del contenido**: sin música, `ctrl+alt+z` abre directo la lista; con algo sonando
+empieza en la esquina. Sin esa regla la primera pulsación mostraba `nothing playing` y obligaba a una segunda para
+llegar a lo útil.
+
+**Defecto que la revisión del padre atrapó y el worker había tapado subiendo alturas**: con alto 4 —el piso de
+`overlayHeight`— los dos divisores dejaban `listRows = 0`, o sea header, separador, separador, pie, sin fila de lista
+y sin poder mostrar el estado de "sin coincidencias" de S18. Ahora los divisores exigen una fila de lista entre ellos
+(`height >= 5`) y hay un test que pina que en 4 filas no se dibuja ninguno.
+
+Verificación: `pnpm check` exit 0 — **305 tests / 72 suites**, `biome` 33 archivos, `tsc` limpio. La actualización de
+las líneas exactas de `view.test.ts` la hizo un worker con instrucción explícita de no borrar ni aflojar aserciones:
+censo 77 → 79 asserts (los dos nuevos son del glifo `rule`), 0 borradas.
+
+Operativo, y es la tercera vez en la sesión: `main` volvió a quedar **rojo por cola de runners macOS**, no por código.
+Los dos jobs de `macos-26` se cancelaron a los 15m01s (`abandoned`) y `gate` falló por regla; los tres de ubuntu
+pasaron, y en el run del PR #33 el `ipc probe` probó que la imagen funciona. Se resolvió con rerun las tres veces.
+Queda como **T18**: decidir si `gate` debe exigir los tres nodos de macOS o alcanza el `ipc probe`, que es el único
+que ejercita macOS de verdad.
