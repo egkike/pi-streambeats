@@ -46,6 +46,9 @@ const SETTINGS: Settings = {
 	asciiGlyphs: false,
 };
 
+/** The resolved file `--keys` prints (S22); a fake path, like everything else the adapter receives. */
+const SETTINGS_FILE = `${HOME}/.config/pi-streambeats/settings.json`;
+
 const EDITOR: Component = { render: () => [], invalidate: () => {} };
 
 const THEME = {
@@ -82,12 +85,18 @@ interface Harness {
 	readonly handlers: Map<string, (event: unknown, ctx: ExtensionContext) => Promise<void> | void>;
 	readonly statuses: [string, string | undefined][];
 	readonly notices: [string, string | undefined][];
+	/** Every `setWidget` call, in order: the multi-line surface `--keys` prints into (S22). */
+	readonly widgets: [string, string[] | undefined][];
+	/** Every settings object the adapter asked to write (S22). */
+	readonly saved: Settings[];
 	readonly overlays: OverlayCall[];
 	readonly player: Player;
 	readonly playerCalls: string[];
 	/** How many players the adapter built: the session is the only thing that creates one (S6). */
 	readonly created: { players: number };
 	readonly scanCalls: string[];
+	/** Knobs a test sets before `register` runs, for the paths that only start from a broken file. */
+	readonly options: { warning?: string };
 	readonly report: (report: PlayerReport) => void;
 	readonly tick: () => void;
 	readonly closed: () => number;
@@ -169,10 +178,13 @@ function harness(editor: Component | null = EDITOR): Harness {
 	const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => Promise<void> | void>();
 	const statuses: [string, string | undefined][] = [];
 	const notices: [string, string | undefined][] = [];
+	const widgets: [string, string[] | undefined][] = [];
+	const saved: Settings[] = [];
 	const overlays: OverlayCall[] = [];
 	const scanCalls: string[] = [];
 	const created = { players: 0 };
 	const now = { value: 1_000 };
+	const options: { warning?: string } = {};
 	const reportHandler: (report: PlayerReport) => void = () => {};
 	let tickFn: (() => void) | undefined;
 	let closedCount = 0;
@@ -193,6 +205,9 @@ function harness(editor: Component | null = EDITOR): Harness {
 		},
 		notify: (message: string, type?: string) => {
 			notices.push([message, type]);
+		},
+		setWidget: (key: string, content: string[] | undefined) => {
+			widgets.push([key, content]);
 		},
 		custom: (
 			factory: (tui: TUI, theme: Theme, keybindings: unknown, done: (result: unknown) => void) => Component,
@@ -264,11 +279,14 @@ function harness(editor: Component | null = EDITOR): Harness {
 		handlers,
 		statuses,
 		notices,
+		widgets,
+		saved,
 		overlays,
 		player,
 		playerCalls,
 		created,
 		scanCalls,
+		options,
 		report: (report) => reportHandler(report),
 		tick: () => tickFn?.(),
 		closed: () => closedCount,
@@ -285,6 +303,12 @@ function register(
 	registerSbMusic(h.pi, {
 		settings: SETTINGS,
 		ceiling: HOME,
+		settingsFile: SETTINGS_FILE,
+		warning: h.options.warning,
+		saveSettings: (next) => {
+			h.saved.push(next);
+			return { ok: true };
+		},
 		scan: (path) => {
 			h.scanCalls.push(path);
 			return scan(path);
@@ -619,6 +643,126 @@ describe("the transport shortcuts are registered and alive (S22)", () => {
 		assert.equal(h.created.players, 0, "no session, no player");
 		assert.deepEqual(h.overlays, []);
 		assert.deepEqual(h.statuses, []);
+	});
+});
+
+describe("/sb-music --keys reads and edits the keys (S22)", () => {
+	/** The multi-line surface `--keys` prints into, reduced to its lines. */
+	function report(h: Harness): string[] {
+		const last = h.widgets.at(-1);
+		assert.equal(last?.[0], "sb-music-keys", "the report goes to the multi-line widget surface");
+		return last?.[1] ?? [];
+	}
+
+	it("prints the effective keys, the resolved file and the card's own keys, and opens nothing", async () => {
+		const h = harness();
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--keys", h.ctx);
+
+		const lines = report(h);
+		const text = lines.join("\n");
+		assert.equal(lines[0], `sb-music keys · ${SETTINGS_FILE}`);
+		assert.match(text, /overlay\s+ctrl\+alt\+m .*cycle hidden → corner → expanded · registered/);
+		assert.match(text, /playPause\s+ctrl\+alt\+space .*pause or resume · registered/);
+		assert.match(text, /next\s+ctrl\+alt\+n .*next track · registered/);
+		assert.match(text, /prev\s+ctrl\+alt\+p .*previous track · registered/);
+		// The card's own keys come from the one table the footer renders (S13), not from a second list.
+		assert.match(text, /inside the card · ↑ move · enter open · space pause/);
+		assert.deepEqual(h.overlays, [], "reading opens no card");
+		assert.equal(h.created.players, 0, "and builds no session");
+		assert.deepEqual(h.saved, [], "reading writes nothing");
+		// The host caps a string widget at ten lines and appends "… truncated"; this stays under it.
+		assert.ok(lines.length <= 10, `the report is ${lines.length} lines, which the host would truncate`);
+	});
+
+	it("prints the syntax with --help", async () => {
+		const h = harness();
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--help", h.ctx);
+
+		const text = report(h).join("\n");
+		assert.match(text, /\/sb-music\s+open the card/);
+		assert.match(text, /\/sb-music --keys\s+print the keys in effect; writes nothing/);
+		assert.match(text, /--keys overlay=<key>/);
+		assert.match(text, /=default/);
+		assert.match(text, /overlay\s+ctrl\+alt\+m/, "the table travels with the syntax");
+		assert.deepEqual(h.overlays, []);
+		assert.deepEqual(h.saved, []);
+	});
+
+	it("saves once with the expected settings and says where and when it applies", async () => {
+		const h = harness();
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--keys overlay=ctrl+alt+k", h.ctx);
+
+		assert.equal(h.saved.length, 1, "exactly one write");
+		assert.deepEqual(h.saved[0]?.shortcuts, { ...SETTINGS.shortcuts, overlay: "ctrl+alt+k" });
+		assert.equal(h.saved[0]?.libraryRoot, ROOT, "the rest of the settings travels with it");
+		const text = report(h).join("\n");
+		assert.match(text, /saved · .*settings\.json/, "the resolved path is printed");
+		assert.match(text, /overlay\s+ctrl\+alt\+m → ctrl\+alt\+k/, "what changed is printed");
+		assert.match(text, /next session/);
+		assert.deepEqual(h.overlays, [], "editing keys never opens the card");
+
+		// The card keeps the key it was bound to at session start, so a second read must not claim otherwise.
+		await h.commands.get("sb-music")?.handler("--keys", h.ctx);
+		assert.match(report(h).join("\n"), /overlay\s+ctrl\+alt\+m .*file ctrl\+alt\+k, next session/);
+	});
+
+	it("writes nothing when one pair is refused, and names the pair", async () => {
+		const h = harness();
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--keys overlay=ctrl+alt+k next=j", h.ctx);
+
+		assert.deepEqual(h.saved, [], "all or nothing");
+		const text = report(h).join("\n");
+		assert.match(text, /nothing written/);
+		assert.match(text, /"next=j"/);
+		assert.match(text, /modifier/);
+	});
+
+	it("prints instead of refusing in a mode that cannot host the card", async () => {
+		const h = harness();
+		register(h);
+		const printCtx = { ...h.ctx, mode: "print", hasUI: false } as ExtensionCommandContext;
+
+		await h.commands.get("sb-music")?.handler("--keys", printCtx);
+
+		assert.deepEqual(h.widgets, [], "a mode without a UI has no widget to set");
+		assert.equal(h.notices.length, 1);
+		assert.match(h.notices[0]?.[0] ?? "", /overlay\s+ctrl\+alt\+m/);
+		assert.match(h.notices[0]?.[0] ?? "", /inside the card/);
+		assert.deepEqual(h.saved, []);
+	});
+
+	it("will not overwrite a settings file it could not read", async () => {
+		// S2 leaves a broken file on disk untouched so the user can fix it; a save must not be the way
+		// around that rule, or the text they were about to repair is gone.
+		const h = harness();
+		h.options.warning = "/home/kike/.config/pi-streambeats/settings.json is not valid JSON, using defaults";
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--keys", h.ctx);
+		assert.deepEqual(h.saved, [], "reading never writes");
+
+		await h.commands.get("sb-music")?.handler("--keys overlay=ctrl+alt+k", h.ctx);
+
+		assert.deepEqual(h.saved, []);
+		assert.match(report(h).join("\n"), /not valid JSON/);
+	});
+
+	it("refuses an argument it does not know instead of opening the card", async () => {
+		const h = harness();
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--key", h.ctx);
+
+		assert.deepEqual(h.overlays, [], "an unknown argument does not open the card");
+		assert.match(report(h).join("\n"), /"--key" is not a \/sb-music argument/);
 	});
 });
 

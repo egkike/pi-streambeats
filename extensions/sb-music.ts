@@ -14,7 +14,7 @@ import { registerSbMusic } from "../lib/host/host.ts";
 import { ceilingFor } from "../lib/library/paths.ts";
 import { scanFolder } from "../lib/library/scan.ts";
 import { createMpvPlayer, type PlayerSocket, type SpawnedProcess } from "../lib/player/mpv.ts";
-import { loadSettings, type Platform, settingsPath } from "../lib/settings.ts";
+import { loadSettings, type Platform, saveSettings, settingsPath } from "../lib/settings.ts";
 import type { ResolveResult, Track, TrackResolver } from "../lib/types.ts";
 
 /** The three platforms S19 promises; every other Node platform is treated as POSIX/Linux. */
@@ -47,7 +47,11 @@ export default function sbMusic(pi: ExtensionAPI): void {
 	registerSbMusic(pi, {
 		settings,
 		ceiling,
+		// The resolved path is printed by `--keys`, and that report is the only place the user sees it (S22).
+		settingsFile,
 		warning: loaded.warning,
+		// The adapter asks; this file is the only one that writes (S8, S22).
+		saveSettings: (next) => saveSettings(context, next),
 		scan: (path: string) => scanFolder(path, { libraryRoot: settings.libraryRoot, settingsPath: settingsFile }),
 		createPlayer: (onReport) =>
 			createMpvPlayer({

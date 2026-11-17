@@ -11,12 +11,20 @@
  */
 import { appendFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { Component, KeyId, OverlayHandle, OverlayOptions, TUI } from "@earendil-works/pi-tui";
+import {
+	type Component,
+	Key,
+	type KeyId,
+	type OverlayHandle,
+	type OverlayOptions,
+	type TUI,
+} from "@earendil-works/pi-tui";
 import {
 	type CardEvent,
 	type CardSize,
 	type CardState,
 	type Effect,
+	footerHints,
 	initialState,
 	reduce,
 	type TransportAction,
@@ -24,7 +32,7 @@ import {
 import { statusSegment } from "../core/now-playing.ts";
 import type { ScanResult } from "../library/scan.ts";
 import type { Player, PlayerReport } from "../player/mpv.ts";
-import type { Settings } from "../settings.ts";
+import { editShortcuts, type SaveResult, type Settings, SHORTCUT_NAMES, type ShortcutName } from "../settings.ts";
 import type { Track } from "../types.ts";
 import { createCardComponent, overlayHeight } from "./component.ts";
 import { matchesOverlayKey } from "./keys.ts";
@@ -45,11 +53,49 @@ const EXPANDED_MIN_WIDTH = 60;
 /** The overlay's own margin, in cells on each side. */
 const OVERLAY_MARGIN = 1;
 
+/** The widget key of the `--keys` report: one block above the editor, replaced on every run (S22). */
+const REPORT_KEY = "sb-music-keys";
+
+/**
+ * The base keys Pi can produce (S22). It is the host's own vocabulary: `Key` is the table the host
+ * builds its key-id schema from, plus the single letters and digits that schema adds. `lib/settings.ts`
+ * receives this list as a parameter, because only `lib/host/` may import a host package (S8).
+ */
+const HOST_KEYS: readonly string[] = [
+	..."abcdefghijklmnopqrstuvwxyz",
+	..."0123456789",
+	...Object.values(Key)
+		.filter((value) => typeof value === "string")
+		.map((value) => String(value)),
+];
+
+type CommandArgs =
+	| { readonly kind: "open" }
+	| { readonly kind: "keys"; readonly assignments: readonly string[] }
+	| { readonly kind: "help" }
+	| { readonly kind: "unknown"; readonly argument: string };
+
+/** `/sb-music` with no argument opens the card; `--keys` and `--help` are the two text modes (S22). */
+function parseCommandArgs(raw: string): CommandArgs {
+	const [first, ...rest] = raw
+		.trim()
+		.split(/\s+/)
+		.filter((token) => token !== "");
+	if (first === undefined) return { kind: "open" };
+	if (first === "--help") return { kind: "help" };
+	if (first === "--keys") return { kind: "keys", assignments: rest };
+	return { kind: "unknown", argument: first };
+}
+
 /** Everything the adapter needs from the process, injected so tests never touch mpv or disk. */
 export interface SbMusicDeps {
 	readonly settings: Settings;
 	/** The highest folder `u` may reach (S14), resolved by the entry point. */
 	readonly ceiling: string;
+	/** The resolved `settings.json` path, printed by `--keys` (S22). */
+	readonly settingsFile: string;
+	/** The atomic writer `--keys` saves through (S22), injected like every other side effect here. */
+	readonly saveSettings: (settings: Settings) => SaveResult;
 	/** The folder scanner (S5). Synchronous by contract; a failure is data, never an exception. */
 	readonly scan: (path: string) => ScanResult;
 	/** The player for one session (S6), created on `session_start`, never in the factory. */
@@ -92,6 +138,10 @@ interface PlaybackClock {
 export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	const clock = deps.now ?? (() => Date.now());
 	const schedule = deps.tick ?? defaultTick;
+	/** What this session actually bound, with the words the host prints: the `--keys` report reads it (S22). */
+	const registeredShortcuts = new Map<ShortcutName, { readonly key: string; readonly help: string }>();
+	/** The last save of this session, so `--keys` can show what the file holds and the session does not. */
+	let savedSettings: Settings | undefined;
 
 	let state: CardState = initialState({ libraryRoot: deps.settings.libraryRoot, ceiling: deps.ceiling });
 	let ctx: ExtensionContext | undefined;
@@ -525,14 +575,145 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		await current?.quit();
 	}
 
+	/* --- the keys report (S22) ---------------------------------------------------------------- */
+
+	function shortcutRow(name: ShortcutName): string {
+		const registered = registeredShortcuts.get(name);
+		const onFile = (savedSettings ?? deps.settings).shortcuts[name];
+		const key = registered?.key ?? onFile;
+		const help = registered === undefined ? "" : `${registered.help} · `;
+		const where = registered === undefined ? "not registered" : "registered";
+		// A saved change is on disk while this session still answers to the old key: Pi binds shortcuts
+		// when the session starts, so both truths are printed instead of pretending they are one (S22).
+		const pending = onFile === key ? "" : ` · file ${onFile}, next session`;
+		return `  ${name.padEnd(9)} ${key.padEnd(16)}${help}${where}${pending}`;
+	}
+
+	function insideCardKeys(): string {
+		// The card's own keys, from the one table its footer renders (S13): a second list could lie.
+		return footerHints()
+			.map((hint) => `${hint.key} ${hint.help}`)
+			.join(" · ");
+	}
+
+	function keysLines(notes: readonly string[] = []): string[] {
+		return [
+			`sb-music keys · ${deps.settingsFile}`,
+			...notes,
+			...SHORTCUT_NAMES.map(shortcutRow),
+			`inside the card · ${insideCardKeys()}`,
+			"change · /sb-music --keys overlay=ctrl+alt+m (or =default) · /sb-music --help",
+		];
+	}
+
+	function helpLines(): string[] {
+		return [
+			"sb-music · keys and syntax",
+			"  /sb-music                        open the card",
+			"  /sb-music --keys                 print the keys in effect; writes nothing",
+			"  /sb-music --keys overlay=<key>   change one or more keys; all or nothing, =default restores",
+			"  /sb-music --help                 this text",
+			...SHORTCUT_NAMES.map(shortcutRow),
+			`inside the card · ${insideCardKeys()}`,
+		];
+	}
+
+	/**
+	 * The only multi-line, non-interactive surface `ExtensionUIContext` has is a widget above the editor.
+	 * `notify` is one status line and would mangle a table; `custom` is an interactive overlay, which is
+	 * exactly what `--keys` must not build. Print and JSON modes install a no-op UI context — no surface
+	 * for several lines at all — so the closest thing there is a single notify (S22).
+	 */
+	function printLines(commandCtx: ExtensionCommandContext, lines: readonly string[]): void {
+		if (commandCtx.hasUI) {
+			commandCtx.ui.setWidget(REPORT_KEY, [...lines], { placement: "aboveEditor" });
+			return;
+		}
+		commandCtx.ui.notify(lines.join(" · "), "info");
+	}
+
+	/** `/sb-music --keys` with no pairs reads; with pairs it validates and saves all of them or none (S22). */
+	function reportKeys(commandCtx: ExtensionCommandContext, assignments: readonly string[]): void {
+		if (assignments.length === 0) {
+			printLines(commandCtx, keysLines());
+			return;
+		}
+
+		const edit = editShortcuts(deps.settings, assignments, HOST_KEYS);
+		if (!edit.ok) {
+			// Nothing was written and nothing will be: the offending pair is the whole message.
+			printLines(commandCtx, ["sb-music keys · nothing written", `  ${edit.error}`, "syntax · /sb-music --help"]);
+			return;
+		}
+		if (edit.changes.length === 0) {
+			printLines(commandCtx, keysLines(["nothing to change"]));
+			return;
+		}
+		if (deps.warning !== undefined) {
+			// The loader leaves a file it could not use untouched on purpose (S2); an explicit save must not
+			// be the way around that, or the broken text the user was about to fix disappears under them.
+			printLines(commandCtx, ["sb-music keys · nothing written", `  ${deps.warning}`, "syntax · /sb-music --help"]);
+			return;
+		}
+
+		const saved = deps.saveSettings(edit.settings);
+		if (!saved.ok) {
+			printLines(commandCtx, ["sb-music keys · nothing written", `  ${saved.error}`, "syntax · /sb-music --help"]);
+			return;
+		}
+
+		savedSettings = edit.settings;
+		printLines(commandCtx, [
+			`sb-music keys saved · ${deps.settingsFile}`,
+			...edit.changes.map((change) => `  ${change.key.padEnd(9)} ${change.from} → ${change.to}`),
+			"takes effect at the next session: Pi binds shortcuts when the session starts",
+			"read them back · /sb-music --keys",
+		]);
+	}
+
 	/* --- the Pi registrations (S1) ----------------------------------------------------------- */
+
+	/**
+	 * One shape for the four global keys: register it and record it, so the `--keys` report prints what
+	 * this session actually bound instead of a second hand-written list that could drift (S22).
+	 */
+	function registerShortcut(
+		name: ShortcutName,
+		description: string,
+		handler: (shortcutCtx: ExtensionContext) => Promise<void>,
+	): void {
+		const key = deps.settings.shortcuts[name];
+		registeredShortcuts.set(name, { key, help: description.replace(/^Music card: /, "") });
+		pi.registerShortcut(key as KeyId, { description, handler });
+	}
 
 	pi.registerCommand("sb-music", {
 		// The command still opens the card (S22 requirement 2): it is the rescue path for a terminal
 		// where the shortcut is unavailable, so it announces the key that owns the cycle instead of
 		// describing itself as the only way in.
 		description: `Open the music card · ${deps.settings.shortcuts.overlay} cycles it`,
-		handler: async (_args: string, commandCtx: ExtensionCommandContext) => {
+		handler: async (args: string, commandCtx: ExtensionCommandContext) => {
+			const parsed = parseCommandArgs(args);
+			if (parsed.kind === "help") {
+				printLines(commandCtx, helpLines());
+				return;
+			}
+			if (parsed.kind === "keys") {
+				// No `mode !== "tui"` guard here: this path is text, and text is all a print mode has (S22).
+				reportKeys(commandCtx, parsed.assignments);
+				return;
+			}
+			if (parsed.kind === "unknown") {
+				// Quietly opening the card would ignore what the user typed, and silently ignoring an
+				// argument is the same defect as silently ignoring a key.
+				printLines(commandCtx, [
+					`"${parsed.argument}" is not a /sb-music argument`,
+					"  /sb-music           open the card",
+					"  /sb-music --keys    read or change the keys",
+					"  /sb-music --help    the syntax and the table",
+				]);
+				return;
+			}
 			if (commandCtx.mode !== "tui") {
 				commandCtx.ui.notify("/sb-music needs Pi's interactive TUI, not print or JSON mode", "error");
 				return;
@@ -544,15 +725,10 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		},
 	});
 
-	pi.registerShortcut(deps.settings.shortcuts.overlay as KeyId, {
-		// Three states, not a show/hide (S15, L38): Pi prints this string wherever it lists the
-		// shortcuts it knows, so it has to describe what the key actually does.
-		description: "Music card: cycle hidden → corner → expanded",
-		handler: async (shortcutCtx: ExtensionContext) => {
-			if (shortcutCtx.mode !== "tui") return;
-			startSession(shortcutCtx);
-			cyclePresence();
-		},
+	registerShortcut("overlay", "Music card: cycle hidden → corner → expanded", async (shortcutCtx) => {
+		if (shortcutCtx.mode !== "tui") return;
+		startSession(shortcutCtx);
+		cyclePresence();
 	});
 
 	/**
@@ -560,22 +736,19 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	 * forget the session: a shortcut pressed before `/sb-music` ever ran has to build the model and
 	 * the player itself, or the key would answer to nothing.
 	 */
-	function registerTransport(key: string, action: TransportAction, description: string): void {
-		pi.registerShortcut(key as KeyId, {
-			description,
-			handler: async (shortcutCtx: ExtensionContext) => {
-				if (shortcutCtx.mode !== "tui") return;
-				startSession(shortcutCtx);
-				// Through the model, never around it: the reducer returns the effects the card already
-				// uses, so a global key and the card's own `space`/`n`/`p` cannot drift apart (S22).
-				dispatch({ kind: "transport", action });
-			},
+	function registerTransport(name: ShortcutName, action: TransportAction, description: string): void {
+		registerShortcut(name, description, async (shortcutCtx) => {
+			if (shortcutCtx.mode !== "tui") return;
+			startSession(shortcutCtx);
+			// Through the model, never around it: the reducer returns the effects the card already
+			// uses, so a global key and the card's own `space`/`n`/`p` cannot drift apart (S22).
+			dispatch({ kind: "transport", action });
 		});
 	}
 
-	registerTransport(deps.settings.shortcuts.playPause, "toggle-pause", "Music card: pause or resume");
-	registerTransport(deps.settings.shortcuts.next, "next", "Music card: next track");
-	registerTransport(deps.settings.shortcuts.prev, "previous", "Music card: previous track");
+	registerTransport("playPause", "toggle-pause", "Music card: pause or resume");
+	registerTransport("next", "next", "Music card: next track");
+	registerTransport("prev", "previous", "Music card: previous track");
 
 	pi.on("session_start", (_event, sessionCtx) => {
 		startSession(sessionCtx);
