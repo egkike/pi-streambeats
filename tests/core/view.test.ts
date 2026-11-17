@@ -634,6 +634,57 @@ describe("the click map (S17)", () => {
 	});
 });
 
+describe("the highlight under the pointer (S17)", () => {
+	it("marks the row under the pointer with weight instead of a second background", () => {
+		// The cursor already owns the elevated surface and `▸`; a hover that used it too would put two
+		// identical highlights on screen and make the click target the less predictable of the two. So
+		// the pointer changes the row's weight and nothing else -- a signal that is not another colour.
+		const frame = renderFrame(card({ cursor: 4, playing: B, hover: 2 }), marked, 90, 12, options());
+
+		assert.equal(
+			frame.lines[5],
+			framed(
+				`  {success}●{text} [b]{success}02 - Blue Hour.mp3{text}[/b]${" ".repeat(78 - "02 - Blue Hour.mp3".length)} {muted}4:05{text} `,
+				marked,
+			),
+		);
+	});
+
+	it("does not move a single cell of the row it highlights", () => {
+		const plainRow = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 12, options());
+		const hovered = renderFrame(card({ cursor: 4, playing: B, hover: 2 }), plain, 90, 12, options());
+
+		assert.deepEqual(hovered.lines, plainRow.lines, "same lines, same width: the highlight adds no cell");
+		for (const line of hovered.lines) assert.equal([...line].length, 90);
+	});
+
+	it("highlights exactly one row, and never the cursor row's own marker", () => {
+		const frame = renderFrame(card({ cursor: 0, playing: B, hover: 2 }), marked, 90, 12, options());
+		const weighted = frame.lines.filter((line) => line.includes("[b]"));
+
+		assert.equal(weighted.length, 2, "the command in the header plus the row under the pointer");
+		assert.match(frame.lines[3] ?? "", /▸/, "the cursor keeps its own marker untouched");
+	});
+
+	it("keeps the cursor's surface when the pointer is on the cursor's own row", () => {
+		const frame = renderFrame(card({ cursor: 2, playing: B, hover: 2 }), marked, 90, 12, options());
+		const line = frame.lines[5] ?? "";
+
+		assert.ok(line.startsWith(`${frameSide(marked)}{bg:surface}`), "the elevated surface is still there");
+		assert.ok(line.endsWith(`{/bg:surface}${frameSide(marked)}`), "and it still closes inside the frame");
+		assert.ok(line.includes("[b]"), "with the pointer's weight on top of it");
+	});
+
+	it("highlights a row in the windowed listing, not its slot on screen", () => {
+		// `hover` is an index into the listing, not a line: a card that fits two of six rows starts the
+		// window at index 3, so row 4 is drawn on line 3 and row 3 on line 2.
+		const frame = renderFrame(card({ cursor: 4, hover: 4 }), marked, 90, 6, options());
+
+		assert.match(frame.lines[3] ?? "", /\[b\].*04 - Paper Planes\.mp3/);
+		assert.equal((frame.lines[2] ?? "").includes("[b]"), false);
+	});
+});
+
 describe("the card's own frame (S3, S16)", () => {
 	it("paints the frame in the border role", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), marked, 90, 10, options({ elapsedMs: 47_000 }));

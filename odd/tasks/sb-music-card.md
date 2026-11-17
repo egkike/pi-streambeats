@@ -245,7 +245,7 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | abierta — frontera hecha, falta el host falso | `872d5c2` (parcial) |
 | T11 | S9 | Suite completa verde y reporte | inline | **hecho** — 320 tests / 79 suites, `pnpm check` verde y `gate` verde en `main` (L51) | — |
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
-| T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | abierta | — |
+| T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — pendiente de verificación del dueño en el host; el mouse del host no se puede probar desde CI (L52) | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
@@ -983,3 +983,69 @@ lista). T14 todavía no"). No cambia código: corrige lo que el documento afirma
 4. **Handoff de diseño.** `01-lista-unica.html` queda implementado: la card real existe en `lib/core/view.ts` y
    `lib/host/component.ts`. `03-mini-card.html` sigue en `sent` a propósito: la card de esquina existe, pero el
    artboard no se comparó contra ella, y marcarlo implementado sin esa comparación afirmaría algo que nadie miró.
+
+L52 (**T13 implementado**, S17: click, rueda y hover cableados de punta a punta). No hay verificación en el host
+todavía: el mouse es lo único que CI no puede tocar, así que la fila queda `hecho` con esa deuda escrita.
+
+1. **El contrato del host, leído y no adivinado.** `@earendil-works/pi-tui` expone `Component.handleMouse?
+   (event: TuiMouseEvent)`, con `type` `press|release|move|drag|click|wheel` y coordenadas **locales al
+   componente**. `TuiBase.dispatchMouseToOverlay` resta `layout.col`/`layout.row` antes de entregar, así que `y`
+   es el índice de línea del frame que devolvimos. Y el `click` **se sintetiza**: `handleMouseEvent` en
+   `tui-alt-screen.js` sólo lo construye si el `press` anterior fue contestado, y lo reenvía al target del press
+   con `retargetMouseEvent`. Consecuencia de diseño: el componente acepta el `press` (aunque no haga nada con él)
+   porque si no, el click nunca llega. Verificado contra el código real de dispatch, no contra la firma.
+2. **La traducción vive en el adaptador (S17).** `lib/host/component.ts` guarda el `HitMap` del frame que está
+   pintando y resuelve `event.y → EntryHit.index`; el núcleo recibe eventos de datos (`PointerEvent`: `hover`,
+   `click`, `wheel`) con un índice de `visibleEntries` y nunca una coordenada. `renderFrame` no cambió: ya devolvía
+   `hits` desde T6, incluido el corrimiento de una fila por el borde (issue #36).
+3. **El reducer (S17).** `click` selecciona y después activa: es exactamente el par `cursor + enter`, así que
+   carpeta entra, archivo reproduce con la cola de S11 y sin una segunda regla de activación. `wheel` mueve el
+   cursor como las flechas, con tope en los dos extremos y sin tocar la reproducción. `hover` guarda el índice de
+   la fila bajo el puntero en el estado, que es lo único que hace que el frame se invalide solo: la caché del
+   componente compara identidad de estado, así que un hover que no llegara al estado no podría repintar nunca.
+4. **Hover = peso, no un segundo fondo.** El cursor ya es dueño de `surface` + `▸`; un hover con el mismo fondo
+   habría dejado dos filas idénticas y hecho impredecible cuál abre `enter`. El puntero cambia **solo el peso del
+   nombre** (`theme.bold`): es una señal que no es otro color, no agrega ni mueve una celda (los tests lo
+   verifican con líneas exactas y con la misma línea en tema plano), y no toca las celdas de marcador, así que las
+   tres combinaciones de S3 siguen leyéndose igual.
+5. **El hover se apaga cuando deja de ser cierto.** Con una tecla (el teclado manda), con la rueda (las filas se
+   mueven debajo de un puntero quieto), cuando llega otra carpeta y cuando la card se oculta. Límite conocido y
+   escrito: el host no emite “el puntero salió del componente”, así que salir de la card sin pasar por otra fila
+   deja el resaltado hasta el siguiente evento; se apaga con la próxima tecla o movimiento.
+6. **Decisiones que S17 no toma, y por eso no se inventaron.** Un click en la **card de esquina** se ignora: S15
+   la declara readout pasivo y no dibuja filas ni `hits`, así que no hay nada que activar. Un click **no pide
+   foco**: S17 habla de selección y activación, no del teclado, y S4/S15 piden que la card no se lo quite al
+   editor. Queda abierto, para que lo decida el dueño: (a) si el click debería enfocar la card, (b) qué hace el
+   mouse en **modo filtro** —acá rige la regla literal de S17, un click activa la fila donde cae—, (c) si la
+   esquina debería hacer algo con un click.
+7. **Un click repetido se consume.** El segundo click de un doble click se contesta y no se reduce: la lista bajo
+   el puntero ya puede ser otra (se entró a una carpeta), y reducir el repetido activaría una fila que nadie
+   eligió.
+8. **En tmux/zellij/screen el hover se degrada solo.** `tui-alt-screen.js` habilita `1003h` (todo movimiento) sólo
+   fuera de multiplexores; adentro pide `1002h` (movimiento con botón apretado), así que ahí el hover no llega y
+   click y rueda sí. No es una decisión nuestra y no se compensa desde acá.
+
+9. **Dónde vive el mouse del host, verificado en pi-coding-agent.** `createInteractiveTui`
+   (`dist/modes/interactive/tui-renderer.js`) construye `TuiAltScreen` con `tuiMode: "fullscreen"` —el **default** de
+   `settings-defaults.js`— y `TuiMainScreen` con `"regular"`. El dispatch de mouse (`dispatchMouseToOverlay`,
+   `handleMouseEvent`, el `1003h` de tracking) vive **sólo** en el alt-screen: en modo `regular` el host ni siquiera
+   habilita el reporte de mouse, así que S17 se cumple en el modo por defecto de Pi y no en el otro, sin que la card
+   pueda hacer nada al respecto. Lo que sí se verificó es que las secuencias de mouse no se convierten en teclas:
+   `translateKeys` no las matchea con ningún binding y no llega nada al reducer.
+
+Evidencia: 351 tests / 83 suites, `pnpm check` verde, y la verificación del dispatch real (press → click
+retargeteado → índice de fila) hecha con el código de pi-tui, no con un fake. La prueba en Pi queda pendiente:
+`pi -e ./extensions/sb-music.ts`, card expandida, click sobre una carpeta y sobre un tema, rueda sobre la lista,
+puntero sobre una fila.
+
+Cierre de dos preguntas abiertas, verbatim del dueño (misma sesión que T13):
+
+1. **T23 no se hace.** "Este No lo vamos a hacer: T23 (ctrl+c oculta también la card en esquina), no es necesario."
+   La card en esquina es un readout pasivo sin teclado: ocultarla con `ctrl+c` no aporta, y agregarle un listener
+   sin foco sería superficie nueva para nada. T23 nunca llegó a ser fila de la tabla; queda como decisión, no como
+   pendiente.
+2. **Hallazgo, todavía sin decidir:** `settings.shortcuts` declara `playPause`, `next` y `prev`, el parser las
+   acepta como claves válidas, y **nada las registra**: sólo `overlay` llega a `pi.registerShortcut`. Son config
+   muerta. La decisión —implementarlas o retirarlas— queda abierta, y con ella si `/sb-music --keys` sirve para
+   leerlas, escribirlas, o las dos cosas. Motivo del hallazgo: el dueño preguntó "¿no las utilizamos para nada? Es
+   así?" revisando las teclas que íbamos a documentar en el README.

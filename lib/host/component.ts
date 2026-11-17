@@ -7,10 +7,10 @@
  * array of lines a component returns is its height. The corner card is two rows (S15); the expanded
  * list gets the terminal's usable rows, clamped so a tiny terminal still shows a valid frame.
  */
-import type { Component } from "@earendil-works/pi-tui";
+import type { Component, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { matchesKey } from "@earendil-works/pi-tui";
-import type { CardSize, CardState } from "../core/model.ts";
-import { renderFrame, type ViewOptions } from "../core/view.ts";
+import type { CardSize, CardState, PointerEvent } from "../core/model.ts";
+import { type HitMap, renderFrame, type ViewOptions } from "../core/view.ts";
 import type { ViewTheme } from "../types.ts";
 import { translateKeys } from "./keys.ts";
 
@@ -26,6 +26,11 @@ export interface CardComponentDeps {
 	/** A translated key identifier; the host reduces it into the model. */
 	readonly onKey: (id: string) => void;
 	/**
+	 * Pointer input already resolved to a row of the listing (S17). It is optional because a component
+	 * with no model to reduce into has nothing to decide, and the corner never reports any.
+	 */
+	readonly onPointer?: (event: PointerEvent) => void;
+	/**
 	 * Close the surface without going through the model. Pi hands the component raw input, so this
 	 * is the guaranteed exit: a key that the model mishandles must not leave a terminal with no
 	 * keyboard (that is exactly what the first smoke produced).
@@ -40,6 +45,12 @@ export interface CardComponentDeps {
 	 * or from CI, so this is the only way to learn what the terminal actually sent.
 	 */
 	readonly trace?: (data: string) => void;
+	/**
+	 * A trace of the pointer event as the host dispatched it, under the same flag. Mouse input exists
+	 * only in Pi's fullscreen TUI, so "nothing happened" has two very different causes and the log is
+	 * the only thing that tells them apart: no line means the event never arrived.
+	 */
+	readonly tracePointer?: (event: TuiMouseEvent) => void;
 }
 
 /** The rows an expanded card asks for, leaving room for the editor and the footer. */
@@ -64,6 +75,12 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 	let cachedHeight = -1;
 	let cachedElapsed = Number.NaN;
 	let cachedLines: string[] | undefined;
+	/**
+	 * The click map of the frame that is on screen (S17): line index inside the overlay → the row it
+	 * draws. It is the renderer's own answer, so no coordinate reaches the core and no geometry is
+	 * re-derived here.
+	 */
+	let cachedHits: HitMap | undefined;
 
 	return {
 		render(width: number): string[] {
@@ -89,6 +106,8 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			cachedHeight = height;
 			cachedElapsed = elapsed;
 			cachedLines = [...frame.lines];
+			// Stored with the lines: a hit is only meaningful for the frame the host is painting.
+			cachedHits = frame.hits;
 			return cachedLines;
 		},
 		handleInput(data: string): void {
@@ -115,6 +134,50 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			cachedHeight = -1;
 			cachedElapsed = Number.NaN;
 			cachedLines = undefined;
+			cachedHits = undefined;
+		},
+		handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+			deps.tracePointer?.(event);
+			if (!deps.onPointer) return undefined;
+			// Only the expanded card draws rows (S17): the corner is a passive readout with no list, no
+			// hit zones and no keyboard, so a click there has nothing to mean. It is ignored on purpose
+			// rather than given a rule S17 never wrote.
+			if (deps.state().size !== "expanded") return undefined;
+			const hits = cachedHits;
+			// No painted frame means no row on screen to point at: the host dispatches pointer events
+			// against what it rendered, so this is the seam saying "nothing to hit yet".
+			if (!hits) return undefined;
+
+			// `y` is local to this component, which is the line index of the frame it returned: the
+			// overlay is positioned by the host and never by us, so screen coordinates are not read.
+			const hit = hits.get(event.y);
+
+			switch (event.type) {
+				case "move": {
+					// Hover (S17). Every row change is a new frame, and the frame is cached by state
+					// identity, so the highlight is compared against the model instead of a local copy.
+					const render = hit?.index !== deps.state().hover;
+					deps.onPointer({ kind: "hover", index: hit?.index });
+					return { handled: true, render };
+				}
+				case "press":
+					// The host only hands the synthesized `click` to the component that handled the press
+					// (pi-tui `handleMouseEvent`), so accepting it is what makes a click arrive at all.
+					return hit ? { handled: true, render: false } : undefined;
+				case "click":
+					// A repeat is the same click again, and by then the listing may already be another one
+					// (a folder was entered): it is answered so the host stops, and never reduced twice.
+					if (!hit || (event.clickCount ?? 1) > 1) return { handled: true, render: false };
+					deps.onPointer({ kind: "click", index: hit.index });
+					return { handled: true };
+				case "wheel":
+					// One notch, one row: the same step the arrows take, and the sign is the wheel's.
+					deps.onPointer({ kind: "wheel", delta: (event.wheelDelta ?? 0) < 0 ? -1 : 1 });
+					return { handled: true };
+				default:
+					// `release` and `drag` belong to the host's gesture bookkeeping, not to the card.
+					return undefined;
+			}
 		},
 	};
 }

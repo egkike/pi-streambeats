@@ -343,6 +343,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 							}),
 							height: () => overlayHeight(state.size, tui.terminal.rows),
 							onKey: (id) => dispatch({ kind: "key", id }),
+							// The pointer arrives already resolved to a row of this frame's hit map (S17): the core
+							// never learns a screen coordinate, and the adapter never guesses a row.
+							onPointer: (event) => dispatch(event),
 							// The exit goes through the model, not around it: closing the overlay without
 							// reducing `presence` left the model saying "visible", so the next overlay
 							// shortcut hid nothing and the card looked dead (R4-001).
@@ -354,6 +357,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 							// ctrl-c is `\u0003` on a terminal that ignores the Kitty protocol and CSI-u on one
 							// that answers it (L49). Writes nothing unless SB_MUSIC_DEBUG is set.
 							trace: (data) => debug("input", JSON.stringify(data)),
+							// `pointer` with no line at all is the answer to "the mouse does nothing": the event never
+							// reached the card, which is what Pi's regular (non-fullscreen) TUI does with it.
+							tracePointer: (event) => debug("pointer", event.type, event.button, event.x, event.y, event.wheelDelta),
 						});
 						return component;
 					},
