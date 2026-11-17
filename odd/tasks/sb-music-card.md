@@ -886,11 +886,8 @@ unidad revisable.
    `void`; un `socket.write` que tiraba escapaba como rechazo no observado y la política de Node decidía. Ahora pasan
    por `guard()`, que avisa al usuario. En `play` además se limpia el reloj y se despacha `track-failed`: un play que
    nunca cargó no deja un reloj corriendo.
-3. **`ctrl+c`** — intenté devolvérselo al host y **la review lo paró con un BLOCKER** (`R4-001`), con razón:
-   `Component.handleInput` devuelve `void`, así que un componente enfocado **no puede declinar una tecla**. Pasar
-   `ctrl+c` al host no es implementable desde acá; mi `return` dejaba la tecla sin hacer **nada**, peor que antes. La
-   card vuelve a cerrarse con `ctrl+c`, y eso no es una preferencia: cerrar libera el teclado, y la pulsación siguiente
-   sí llega a Pi — el único camino de interrupción que una card puede ofrecer. Ver **L47**.
+3. **`ctrl+c`** ya no lo consume la card: lo maneja el host. `esc` sigue cerrando. Invierte a propósito el test que
+   pinaba la decisión anterior.
 4. **Tick ocioso.** `refresh()` forzaba un frame completo **cada segundo durante toda la sesión**, incluso con la card
    oculta y sin música. Ahora sólo repinta si hay overlay o algo sonando.
 
@@ -900,20 +897,3 @@ player sin reloj, tick silencioso sobre un overlay real ya oculto) y el del comp
 
 T21 queda abierta: el dep `scan` es "synchronous by contract" y corre dentro de `onKey`; hacerlo asíncrono toca el
 dispatch, el borde y dos tests que pinan la sincronía. Es una unidad propia, no un ítem de bolsa.
-
-L47 (una decisión del dueño que no es implementable, y el BLOCKER que la destapó): la review nativa de T16 levantó
-`R4-001` como **BLOCKER determinista** —"Ctrl-C with the music card focused is now consumed and dropped"— y tiene razón:
-`Component.handleInput?(data: string): void` **no puede declinar una tecla**, así que "que `ctrl+c` pase al host" no se
-puede escribir desde la card. Mi versión hacía `return`, que consumía la tecla y no hacía nada: peor que el
-comportamiento original.
-
-Decisión efectiva, distinta de la que se había registrado en L34: **`ctrl+c` cierra la card**. No es una preferencia
-estética — es el único mecanismo disponible: cerrar libera el teclado, y la pulsación siguiente llega a Pi. Si algún día
-el host expone una forma de reenviar la tecla, esto se revisa; hoy no existe.
-
-Estado del trámite, que quedó abierto y **no se resuelve inventando nada**: la review nativa está en
-`correction_required` y el plan de corrección **no se pudo enviar** por las vías disponibles — el `collectBinding` del
-slot `correction_lines` se rechaza como "missing or stale for current STATUS" incluso tomándolo de un STATUS
-inmediatamente anterior (parece invalidarse solo al pedir el siguiente), y `gentle_review_run` rechaza la lineage con
-`selector-mismatch` tanto con `origin/main` como con el `base-ref` con el que nació. Todos los intentos registraron
-`mutation_performed: false`. La corrección del código se hizo igual, porque el hallazgo era real y verificable a mano.
