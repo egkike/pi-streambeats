@@ -152,6 +152,29 @@ describe("the frame height the host gives the component (S15)", () => {
 		component.handleInput?.("\u0003");
 		assert.equal(dismissed, 2, "ctrl-c is the terminal's panic button and also closes");
 	});
+
+	it("closes on the ctrl-c a Kitty-encoding terminal sends, which is not the raw byte (L49)", () => {
+		let dismissed = 0;
+		const keys: string[] = [];
+		const component = createCardComponent({
+			state: () => card(),
+			theme: () => plain,
+			options: () => options,
+			height: () => 8,
+			onKey: (id) => keys.push(id),
+			dismiss: () => {
+				dismissed += 1;
+			},
+		});
+
+		// Pi negotiates the Kitty keyboard protocol, so ctrl-c arrives as CSI-u on a terminal that
+		// answers it. Comparing the chunk to the raw byte made the key vanish with the card still on
+		// screen (L49): the host asks `matchesKey`, which knows every encoding the terminal may send.
+		component.handleInput?.("\u001b[99;5u");
+
+		assert.equal(dismissed, 1, "the CSI-u ctrl-c closes the card too");
+		assert.deepEqual(keys, [], "and it is never handed to the model as a key");
+	});
 });
 
 describe("the overlay component's cache (S3, S8)", () => {

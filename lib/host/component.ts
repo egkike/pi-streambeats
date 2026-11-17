@@ -8,6 +8,7 @@
  * list gets the terminal's usable rows, clamped so a tiny terminal still shows a valid frame.
  */
 import type { Component } from "@earendil-works/pi-tui";
+import { matchesKey } from "@earendil-works/pi-tui";
 import type { CardSize, CardState } from "../core/model.ts";
 import { renderFrame, type ViewOptions } from "../core/view.ts";
 import type { ViewTheme } from "../types.ts";
@@ -34,6 +35,11 @@ export interface CardComponentDeps {
 	readonly isOverlayKey?: (data: string) => boolean;
 	/** Show or hide the card, the same thing the host's own shortcut handler does. */
 	readonly togglePresence?: () => void;
+	/**
+	 * A trace of the raw chunk, when the host has tracing on. The card cannot be opened from a test
+	 * or from CI, so this is the only way to learn what the terminal actually sent.
+	 */
+	readonly trace?: (data: string) => void;
 }
 
 /** The rows an expanded card asks for, leaving room for the editor and the footer. */
@@ -86,9 +92,13 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			return cachedLines;
 		},
 		handleInput(data: string): void {
+			deps.trace?.(data);
 			// Ctrl-C is the terminal's own panic button and ESC is the card's: either one always
-			// closes, whatever the model decides to do with them.
-			if (data === "\u0003" || data === "\u001b") {
+			// closes, whatever the model decides to do with them. The question goes to the host, never
+			// to a raw byte: Pi negotiates the Kitty keyboard protocol, and a terminal that answers with
+			// it sends ctrl-c as CSI-u (`\u001b[99;5u`), so comparing the chunk to `\u0003` left the key
+			// doing nothing at all with the card still on screen (L49).
+			if (matchesKey(data, "ctrl+c") || matchesKey(data, "escape")) {
 				deps.dismiss?.();
 				return;
 			}

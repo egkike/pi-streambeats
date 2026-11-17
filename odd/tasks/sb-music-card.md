@@ -248,12 +248,12 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | abierta | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
-| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso | inline | corregida (L46) — **falta la prueba en el host** | sin commit |
+| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick) + sin commit (cierre por `ctrl+c`, L49) |
 | T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | worker | abierta — unidad propia, cambia el contrato (L46) | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | worker | abierta — bloqueada por la API del host (L48) | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
-| T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | corregida (L42) — **falta la prueba en el host** | sin commit |
+| T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | **hecho** — verificado por el dueño en el host (L49) | `c857843` (PR #39) |
 | T20 | S3, S12 | La card no pide más ancho del que entra, y las filas aprenden la duración del player sin `--:--` | inline | **hecho** — verificado por el dueño en el host (L44) | `b3023c1` |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
@@ -943,3 +943,29 @@ Lo que haría falta para cumplir la intención original es un cambio **en el hos
 
 Estado del código al detenerse: `pnpm check` verde, **318 tests**, `ctrl+c` cierra la card con el motivo escrito, y el
 resto de T16 (latch del scan, rechazos del player, tick ocioso) sin observaciones de la review más allá del BLOCKER.
+
+L49 (la prueba en el host de T16 y T19, verbatim del dueño: "T16 con la ventana de sb-music abierta hice ctrl+c y
+nada... no hace nada. T19: el borde exterior está perfecto y todo está en su lugar").
+**T19 cerrada** con esa verificación. **T16 no**: `ctrl+c` con la card enfocada no producía ningún efecto.
+
+1. **Causa, y por qué la suite no la vio.** `Component.handleInput` comparaba el chunk con el byte crudo
+   (`data === "\u0003"`). Pi **negocia el protocolo de teclado de Kitty** (`\x1b[>…u` en `pi-tui/dist/terminal.js`), y
+   un terminal que lo responde manda `ctrl+c` como CSI-u, `\x1b[99;5u`. El byte nunca era `\u0003`, así que la rama de
+   cierre no se tomaba; después `translateKeys` lo traducía a `interrupt` —el id que el adaptador declara para `ctrl+c`—
+   y la tabla de teclas **no conocía ese id**, así que el reducer lo descartaba en silencio. El test no lo vio porque
+   presionaba el byte literal: verificaba la codificación que el código ya asumía, no la que el host manda.
+2. **Arreglo.** El componente pregunta al host, que conoce todas las codificaciones: `matchesKey(data, "ctrl+c")` y
+   `matchesKey(data, "escape")` (verificado: las flechas `\x1b[A`/`\x1b[B` no matchean `escape`, y `\x1b[27u` sí). Y
+   `interrupt` recibe su binding `hide` en `KEY_BINDINGS`, para que el id deje de ser un callejón sin acción.
+3. **Traza, para que la próxima ronda diagnostique en vez de adivinar.** Con `SB_MUSIC_DEBUG` la card registra ahora
+   cada chunk tal como llegó (`input "<crudo>"`), sin escribir nada cuando la variable no está.
+4. **Lo que sigue sin ser alcanzable:** al cerrarse, la card consume la tecla. Reenviar `ctrl+c` a Pi cuando la card
+   tiene el foco sigue necesitando un camino del host → **T22**, sin cambios.
+
+L50 (T16 cerrada en el host, verbatim del dueño: "Ya hice la prueba y con ctrl+c se cierra la ventana de
+sb-music"). El diagnóstico de L49 era el correcto: la tecla no se reconocía por la codificación, no por el camino del
+host. `ctrl+c` cierra la card y libera el teclado, que es el efecto que S21 buscaba de este lado de la frontera.
+
+Queda abierto, sin confundirlo con esto: **T22** (reenviar `ctrl+c` a Pi con la card enfocada necesita un camino del
+host) y una pregunta de alcance que el dueño todavía no decidió: si la card en **esquina** —pasiva, sin teclado—
+debería ocultarse también con `ctrl+c`, lo que exigiría un listener de input sin foco.

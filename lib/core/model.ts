@@ -129,6 +129,9 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
 	{ id: "-", label: "-", action: "volume-down", help: "vol", hint: true },
 	{ id: "z", label: "z", action: "toggle-shuffle", help: "shuffle", hint: true },
 	{ id: "escape", label: "esc", action: "hide", help: "hide", hint: true },
+	// The host adapter maps ctrl-c to `interrupt`; it shares the one hide action, and it is not a
+	// footer hint because `esc` already announces that action (S13).
+	{ id: "interrupt", label: "ctrl+c", action: "hide", help: "hide", hint: false },
 ];
 
 /** The action a key identifier carries, or undefined when the card does not bind it. */
