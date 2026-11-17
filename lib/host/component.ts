@@ -91,9 +91,15 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 				deps.dismiss?.();
 				return;
 			}
-			// Ctrl-C is the terminal's panic button and belongs to the host, not to a music card: it used
-			// to dismiss the card, so with the card focused Pi could not be interrupted (T16, L34).
-			if (data === "\u0003") return;
+			// Ctrl-C also closes the card, and that is NOT a preference: `Component.handleInput` returns void,
+			// so a focused component cannot decline a key. "Forward ctrl-c to the host" is not implementable
+			// from here (review R4-001, BLOCKER: swallowing it left the key doing nothing at all). Closing
+			// releases the keyboard, so the next press reaches Pi -- that is the only interruption path a
+			// card can offer (L47).
+			if (data === "\u0003") {
+				deps.dismiss?.();
+				return;
+			}
 			// A focused overlay swallows the global shortcut, so the card answers it here.
 			if (deps.isOverlayKey?.(data)) {
 				deps.togglePresence?.();
