@@ -102,8 +102,14 @@ describe("the overlay component's input (S13)", () => {
 describe("the frame height the host gives the component (S15)", () => {
 	it("uses two rows for the corner and a clamped window for the expanded list", () => {
 		assert.equal(overlayHeight("corner", 24), 2);
-		assert.equal(overlayHeight("expanded", 24), 18);
-		assert.equal(overlayHeight("expanded", 5), 4);
+		// The expanded card pays two rows for its own frame (issue #36) and grows for them instead of
+		// squeezing the list.
+		assert.equal(overlayHeight("expanded", 24), 20);
+		// ...but it never asks for more rows than the terminal has (R3-001): on a five-row screen the
+		// seven-row floor would put the overlay outside the screen.
+		assert.equal(overlayHeight("expanded", 8), 7, "eight rows is the smallest framed card");
+		assert.equal(overlayHeight("expanded", 6), 6);
+		assert.equal(overlayHeight("expanded", 5), 5);
 		assert.equal(overlayHeight("expanded", 100), 30);
 	});
 	it("misses the cache when only the clock moved (R4-001)", () => {

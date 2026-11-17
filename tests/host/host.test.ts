@@ -380,7 +380,10 @@ describe("the /sb-music command (S1, S4)", () => {
 		// the keyboard back to Pi's own pre-focus.
 		assert.ok((call?.handle.calls.focus ?? 0) >= 1);
 		assert.deepEqual(h.scanCalls, [ROOT]);
-		assert.match(call?.component.render(90)[0] ?? "", /sb-music/);
+		// The frame's first line is the card's top border now (issue #36): the header is the line under it.
+		const frame = call?.component.render(90) ?? [];
+		assert.match(frame[0] ?? "", /^┌─+┐$/);
+		assert.match(frame[1] ?? "", /sb-music/);
 	});
 
 	it("never takes the keyboard even when no editor can be captured (S4)", async () => {
@@ -407,6 +410,8 @@ it("rebuilds the overlay when the cycle changes the size (S15)", async () => {
 	register(h);
 	await start(h);
 	await open(h);
+	// Something has to be PLAYING for the cycle to pass through the corner at all (S15, L39), so the
+	// seed drives the cursor to the second track and plays it: `j j` then `enter`.
 	h.overlays[0]?.component.handleInput?.("j");
 	h.overlays[0]?.component.handleInput?.("j");
 	h.overlays[0]?.component.handleInput?.("\r");
@@ -473,6 +478,7 @@ describe("the overlay shortcut cycles the three states (S4, S15)", () => {
 		await start(h);
 		await open(h);
 		const component = h.overlays[0]?.component;
+		// Silence skips the corner, so a track must be playing for this test to see the corner state.
 		component?.handleInput?.("j");
 		component?.handleInput?.("j");
 		component?.handleInput?.("\r");

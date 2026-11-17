@@ -126,9 +126,16 @@ una sesión de Pi la card arranca **oculta**.
 
 La esquina es pasiva y no toma el teclado; la expandida sí, y el editor lo recupera cuando la card se oculta.
 
+La card expandida **lleva su propio contorno** (una celda por lado, rol `border`), porque sin él se lee como fondo
+de la terminal. El contorno va **por fuera del padding**, como el artboard anida `.hd{padding:0 1ch}` dentro del
+borde de la card: el contenido pierde dos columnas y las filas pierden dos, que las paga el alto de la card y no la
+lista (`overlayHeight`). Una card demasiado chica para enmarcarse no dibuja contorno — nunca uno apilado sobre el
+contenido. La esquina no lleva contorno: mide dos filas y el recuadro se comería la superficie.
+
 S16 — Glifos. Una sola familia geométrica: `●` reproduciendo, `○` pausado, `▸` cursor, `▾` expandido, `━`/`─`
-progreso, `─` la línea de separación. Nunca emoji en el chrome. `settings.asciiGlyphs: true` cambia la familia a
-ASCII (`*`, `-`, `>`, `v`, `=`, `-`) para terminales donde los geométricos ocupen dos celdas. **No hay detección automática**: es una decisión
+progreso, `─` la línea de separación, y `┌ ┐ └ ┘ │` el contorno de la card. Nunca emoji en el chrome.
+`settings.asciiGlyphs: true` cambia la familia a ASCII (`*`, `-`, `>`, `v`, `=`, `-`, `+`, `|`) para terminales
+donde los geométricos ocupen dos celdas. **No hay detección automática**: es una decisión
 del usuario, no una adivinanza del código.
 
 S17 — Mouse. Un click sobre una fila la selecciona y la activa: carpeta → entra, archivo → reproduce. La rueda
@@ -244,6 +251,7 @@ recorte; (1), (2) y (3) son los que tienen respaldo directo.
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
+| T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | corregida (L42) — **falta la prueba en el host** | sin commit |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -762,3 +770,39 @@ Estado de entrega de esta unidad, para que quede el rastro completo: PR #35 con 
 (`review-fbb7a8f275cb211b`, lentes readability + reliability, 7 hallazgos no bloqueantes), y el delta que trajo la
 fusión de `main` revisado aparte (`review-8618d72c78675310`, lentes risk + readability) porque mover la base mueve el
 candidato. `main` en `601f713`, CI verde.
+
+L42 (borde exterior de la card, decisión del dueño, verbatim): "Hice mi prueba y todo funciona bien. Algo que
+agregaría es linea de contorno o bordes de la ventana expandida... para que no se mezcle con el fondo de pi."
+
+Implementado en `lib/core/view.ts`: `Glyphs.edge` (esquinas y vertical; `+`/`|` en ASCII) y `expandedFrame` enmarca
+cuando `width >= 6 && height >= 8`. El marco va **por fuera del padding**, como el artboard anida `.hd{padding:0 1ch}`
+dentro del borde de la card: el contenido pierde dos columnas y las filas pierden dos, y esas dos filas **las paga el
+alto** (`overlayHeight` expandida pasa a `rows - 4` con piso 7), no la lista. Los `hits` del render se desplazan una
+fila por el borde superior. La esquina no lleva marco: mide dos filas.
+
+**Corrección a la propia issue.** El texto decía que el borde *reemplazaba* el padding y el ancho no cambiaba. Falso:
+con el contenido pegado al borde (`│sb-music`) se lee mal, y el artboard mantiene su padding adentro. El comentario
+del código dice la versión correcta.
+
+**Regresión atrapada revisando el trabajo del worker.** Al unificar el padding en un solo umbral, en frames de 4-5
+columnas la fila perdía el nombre, porque `entryLine` usaba `>= 6` y el resto `>= 4`. El worker acomodó el test de 4 a
+6 columnas; eso documenta el defecto en lugar de arreglarlo. Como el padding quedaba adentro del borde, el threading
+de `pad` no hacía falta: se retiró y cada línea volvió a su umbral. El test de 4 columnas volvió a su expectativa
+original.
+
+Hallazgos de review cerrados acá: `R3-rule-width-empty` (test: en 4×12 no se dibuja ningún glifo de marco, y en
+ancho 0 el frame es una lista vacía, no una fila de strings vacíos), `R2-001` y `R2-002` (la invariante de los dos
+separadores ahora está nombrada: `listRowFits` y `ruleRows === 2`), `R2-003` (la asimetría `show`/`dispatch` en
+`cyclePresence` explicada), `R2-004` (los dos seeds de test dicen por qué hace falta una pista sonando) y
+`R2-jargon-refs` (el comentario del workflow expande qué es S19).
+
+Los cuatro hallazgos de la review de esta unidad también se cerraron acá: `R3-001` era un **bug real** —el piso de 7
+filas de `overlayHeight` pedía un overlay más alto que la terminal en pantallas de 5-6 filas—, corregido con un tope
+en `rows` y fijado por test en 5, 6 y 8 filas; `R3-002` sumó una aserción de geometría en el frame mínimo (6×7, cada
+línea exactamente 6 celdas); `R2-frame-thresholds` cambió los números mágicos por constantes derivadas de la misma
+invariante que usan los separadores; `R2-underscore-names` renombró `width_`/`rows_` a `contentWidth`/`contentRows`.
+
+Las líneas exactas de `tests/core/view.test.ts` las realineó un worker con instrucción de no borrar ni aflojar
+aserciones: censo 81 → 90 (los nuevos son del marco), alturas +2 donde había que conservar las filas de lista. Tests
+nuevos: marco en rol `border`, marco ASCII, y card demasiado chica sin marco. `pnpm check` verde: **308 tests / 73
+suites**, `biome` 33 archivos, `tsc` limpio.
