@@ -273,8 +273,8 @@ Requisitos, todos verificables:
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | abierta — hallazgos no bloqueantes de la review de #52: `R4-hit-map-staleness` (WARNING) y `R3-002` (L53) | — |
-| T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **implementada** — falta la prueba del dueño en el host (L56) | — |
-| T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help`, descripciones honestas y tabla del README | worker | abierta (issue #57) | — |
+| T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
+| T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help` y tabla del README | worker | en curso (issue #57) | — |
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
@@ -1166,3 +1166,11 @@ hay tecla duplicada que lo obligue.
 Pendiente para cerrar T25: la prueba del dueño en el host —`pi -e ./extensions/sb-music.ts`, reproducir algo, ocultar
 la card con `ctrl+alt+z` y probar `ctrl+alt+space`/`n`/`p` desde el editor—, más la verificación de que Pi las acepta
 como claves válidas.
+
+L57 (T25 cerrada con la verificación del dueño, verbatim: "Hice la prueba y funciona perfecto"). Las tres teclas
+funcionan desde el editor con el modelo y mpv vivos aunque la card nunca se haya abierto, que es justo lo que la
+guarda de presencia de `pressKey` habría impedido si el shortcut se hubiera despachado como key id.
+
+Queda abierto de T25, declarado y no verificado: si Pi acepta esas tres combinaciones sin chocar con un binding suyo
+y si las despacha con el overlay enfocado. La respuesta a lo primero la va a dar T26 (validación y cambio de teclas);
+lo segundo sigue siendo del host.
