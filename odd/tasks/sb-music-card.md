@@ -1037,3 +1037,15 @@ Evidencia: 351 tests / 83 suites, `pnpm check` verde, y la verificación del dis
 retargeteado → índice de fila) hecha con el código de pi-tui, no con un fake. La prueba en Pi queda pendiente:
 `pi -e ./extensions/sb-music.ts`, card expandida, click sobre una carpeta y sobre un tema, rueda sobre la lista,
 puntero sobre una fila.
+
+Cierre de dos preguntas abiertas, verbatim del dueño (misma sesión que T13):
+
+1. **T23 no se hace.** "Este No lo vamos a hacer: T23 (ctrl+c oculta también la card en esquina), no es necesario."
+   La card en esquina es un readout pasivo sin teclado: ocultarla con `ctrl+c` no aporta, y agregarle un listener
+   sin foco sería superficie nueva para nada. T23 nunca llegó a ser fila de la tabla; queda como decisión, no como
+   pendiente.
+2. **Hallazgo, todavía sin decidir:** `settings.shortcuts` declara `playPause`, `next` y `prev`, el parser las
+   acepta como claves válidas, y **nada las registra**: sólo `overlay` llega a `pi.registerShortcut`. Son config
+   muerta. La decisión —implementarlas o retirarlas— queda abierta, y con ella si `/sb-music --keys` sirve para
+   leerlas, escribirlas, o las dos cosas. Motivo del hallazgo: el dueño preguntó "¿no las utilizamos para nada? Es
+   así?" revisando las teclas que íbamos a documentar en el README.
