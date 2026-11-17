@@ -145,6 +145,75 @@ que ya son dueños de I/O — sin puerto ni módulo nuevo.
 **Verificado en Windows 11, mpv 0.42.0, Node 22.23.2**: spawn con `--input-ipc-server=\\.\pipe\<name>` + JSON por
 líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión necesitó un reintento de 100 ms.
 
+S20 — Catálogo StreamBeats como segunda fuente. El proyecto replica `streambeats-player` como extensión, y eso
+fueron **dos** fuentes desde el principio: L2 dice "Lo que ya tenemos en streambeats-player (catalogo streambeats +
+biblioteca local)". S1–S19 cubren sólo la biblioteca local; esta spec cierra ese hueco.
+
+Alcance **dentro**: navegar el catálogo de `streambeats.bandcamp.com` desde la misma card y reproducir una pista con
+el mismo `mpv` (S6), con la identidad de pista de S3 y el now-playing de S12 funcionando igual que con archivos
+locales.
+
+Alcance **fuera**, por decisión del dueño en L2 ("Mi idea es solo navegar, entrar a una carpeta local y darle play a
+las músicas que hay ahí… no pensaba en ningún sync"): `sync`, descargas y caché de **audio**. La caché de
+**metadatos** del catálogo sí entra: es redescargable y se guarda en `$XDG_CACHE_HOME/pi-streambeats/catalog.json`
+(dir 0750, archivo 0600, tmp+rename), **sin ninguna URL de audio adentro**. Escritura de cualquier tipo en la
+biblioteca sigue prohibida: la extensión escribe `settings.json`, el socket y esa caché, nada más.
+
+Invariantes que ya obligan y no se renegocian: las URLs firmadas se resuelven **antes de cada play** y **jamás se
+persisten** (`AGENTS.md`, Security); todo lo que llega de la red es entrada no confiable (parseo estricto, fallo como
+estado humano en la UI, la card nunca crashea por red); los caracteres de control se neutralizan antes de renderizar,
+igual que un nombre de archivo.
+
+Decisiones **abiertas**: sólo queda (c) cómo se presenta en la card la mezcla de dos fuentes sin romper la
+navegación de una sola lista (S3/S15); el precedente del proyecto de referencia es catálogo como lista principal y
+biblioteca local como modo aparte, y se decide al abrir T14.
+
+**Mecanismo resuelto** (investigado en `egkike/streambeats-player`, `internal/catalog/`, L33). Bandcamp embeda el
+catálogo en el HTML; no hace falta API ni selectores:
+
+1. Listado: `GET https://streambeats.bandcamp.com/music` y una regex `href="/album/([a-z0-9-]+)"` sobre el HTML,
+deduplicada por slug. El slug es la identidad del álbum.
+2. Pistas: `GET /album/<slug>`, se aísla el atributo `data-tralbum="…"`, se des-escapa y se parsea **como JSON**:
+`trackinfo[]` trae `title`, `duration`, `title_link` (`/track/<slug>`) y `file["mp3-128"]`, la URL de audio con token.
+`duration` llega gratis en el mismo payload.
+3. Token fresco **por play**: antes de cada reproducción se re-baja la página del álbum y se busca la pista por slug.
+Una URL cacheada es una URL vencida. Un reintento único a 150 ms cubre el blip de red.
+4. Refresh tolerante: un álbum 404 o una página malformada se saltea; falla sólo si no se scrapeó **cero** álbumes.
+Timeout total 30 s, `dial` acotado a 5 s.
+5. **Nuestro contrato manda sobre el de referencia**: `fetch` se **inyecta** (no hay `http.Client` dentro del
+módulo), los dos HTML reales de referencia se copian como fixtures de test, y el módulo vive en `lib/catalog/` con
+las mismas reglas de pureza que `library/`. Sin red en los tests.
+
+Riesgo declarado: las dos regexes son acoplamiento al HTML de Bandcamp y pueden romperse en silencio. Mitigación
+obligatoria: fixtures que fijan el contrato, error explícito `no albums found` en vez de lista vacía, y el caso
+"el catálogo no está disponible" como estado humano en la card — nunca un crash ni una card vacía sin explicación.
+
+S21 — Endurecimiento. Cinco defectos distintos, verificados en código, que no se juntan en una sola unidad
+revisable porque tienen respaldo y costo desiguales. Nada de esto es una feature: son incumplimientos y bordes.
+
+1. **Latch del primer scan** (`lib/host/host.ts`): `show()` marca `loaded = true` antes de escanear y
+   `loadFolder` en fallo sólo avisa; `loaded` nunca vuelve a `false`. Con `libraryRoot` inexistente o sin permiso
+   al abrir, la card queda **vacía toda la sesión** con un toast efímero. **Incumple S5**, que pide el estado con
+   su ruta, y no hay tecla de recarga en `KeyAction`.
+2. **Rechazos del player** (`applyEffects`): `play`, `pause`, `resume`, `stop`, `setVolume`, `quit` se invocan con
+   `void` y sin `.catch`. `#request` resuelve siempre (no rechaza), pero un `socket.write` que tira escapa como
+   rechazo no observado y la política de Node decide, no la card. El reloj además arranca antes de que la promesa
+   resuelva.
+3. **`ctrl+c`** (`lib/host/component.ts:79-90`): la card consume `\u0003` y lo convierte en un `escape`, así que
+   con la card enfocada **Pi no puede interrumpirse**. Decisión del dueño (L34): **`ctrl+c` pasa al host**; `esc`
+   sigue siendo la tecla que oculta la card. El test `tests/host/component.test.ts:126` pina la intención vieja y
+   se invierte junto con el código.
+4. **Tick permanente** (`host.ts`, `defaultTick`): el `setInterval` de 1 s se agenda siempre y `refresh()` no
+   filtra nada salvo `!ctx || closing`, así que fuerza `requestRender(true)` **cada segundo durante toda la
+   sesión**, incluso sin música y sin overlay. Defecto de costo, no de correctitud: no tiene `S#` que lo respalde.
+5. **Scanner sincrónico** (`scan` es "synchronous by contract" y usa `realpathSync`/`readdirSync`/`statSync`):
+   se ejecuta dentro de `onKey` y de `show()`, en el camino de input del host. Una carpeta grande o un mount de
+   red congelan el editor. Arreglarlo **cambia el contrato** del dep y rompe dos tests que pinan la sincronía
+   (`tests/host/host.test.ts`): es una unidad propia, no un ítem de bolsa.
+
+Orden decidido (L34): este ciclo es **sólo T15**. Endurecimiento es T16, en su propio ciclo y con su propio
+recorte; (1), (2) y (3) son los que tienen respaldo directo.
+
 ## Tasks
 
 | ID | S# | Tarea | Ruta | Estado | Commit |
@@ -163,6 +232,9 @@ líneas responde `{"error":"success"}` a `get_property` y a `quit`; la conexión
 | T11 | S9 | Suite completa verde y reporte | inline | abierta — el gate está verde, la suite es de 4 tests | — |
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | abierta | — |
+| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
+| T15 | S12, S15 | Duración total desde el player: `get_property duration` tras el `loadfile` y transporte a las tres superficies | inline | hecho — 5 tests nuevos, `pnpm check` verde | sin commit (AGENTS.md) |
+| T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` al host, tick ocioso, scanner asíncrono | worker | abierta — ciclo propio (L34) | — |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` marca `01-lista-unica.html` en
 `in_progress` y `03-mini-card.html` en `sent`; se cierran cuando T6 y T9 produzcan la card real.
@@ -444,3 +516,89 @@ con un contrato que ya nadie cumple. Detectado a mano, no por la suite: **295/29
 dentro**, y el único test que "cubría" la liberación de teclado pasaba por un `unfocus` que el overlay hace igual al
 abrirse. Pendiente declarado y con decisión propia: la duración total, que mpv conoce apenas carga el archivo y que
 daría barra de progreso en la esquina, `m:ss/m:ss` completo en la barra y el total en el header.
+
+L32 (hueco de tracking: el catálogo StreamBeats nunca fue tarea; pedido del dueño, verbatim): "No veo entre los
+pendientes agregar lo de streambeats-player... se supone que el proyecto es replicar lo mismo que
+https://github.com/egkike/streambeats-player pero como una extension para gentle-shell/pi. Donde quedó eso?"
+
+El pedido no era un error de memoria: era un **defecto de la ficha**. L2 registró la decisión de producto (dos
+fuentes: catálogo + biblioteca local) y `README.md` la prometió ("later slice"), pero ninguna de las dos se tradujo
+en spec ni en tarea, y la tabla de `## Tasks` se arma desde los `S#` — sin `S#` no hay `T#`, y sin `T#` el pendiente
+no existe para nadie que lea la tabla o el resumen de sesión. `AGENTS.md` lo tenía en "Fuera de alcance (v1)" con la
+frase correcta ("una decisión pendiente, no una omisión"), que es exactamente el lugar donde una decisión **sí** se
+vuelve una omisión cuando no tiene tarea ni disparador.
+
+Corrección aplicada: nueva **S20** con el alcance que L2 ya había fijado (catálogo dentro, `sync`/descargas fuera,
+URLs firmadas resueltas por play y nunca persistidas) y sus tres decisiones técnicas abiertas declaradas en vez de
+inventadas; nueva **T14** en la tabla, `abierta`. Prioridad elegida por el dueño: **después de la duración y del
+endurecimiento**, no antes.
+
+Lección de proceso: una decisión de producto sin `S#` no está registrada, está perdida con buena letra. El test es
+mecánico y va antes de cerrar cualquier ciclo — ¿cada `L#` con contenido de alcance tiene su `S#`, y cada `S#` su
+`T#`?
+
+L33 (investigación pedida por el dueño, verbatim): "En el proyecto https://github.com/egkike/streambeats-player ya
+resolvimos eso, podrías ver o investigar como hacerlo de ahí?"
+
+Hallazgo, en `internal/catalog/` del proyecto de referencia (lectura del repo público, no de memoria):
+
+- `parse.go`: el catálogo **no** requiere API ni scraping de DOM. `ParseMusicPage` saca los slugs de álbum con una
+  regex `href="/album/([a-z0-9-]+)"` sobre `/music`; `ParseAlbum` aísla el atributo `data-tralbum`, lo des-escapa y
+  lo parsea como **JSON**: `trackinfo[]` con `title`, `duration`, `title_link` y `file["mp3-128"]` (URL con token).
+- `stream.go`: `ResolveStream` re-baja la página del álbum **antes de cada play** y busca por slug. El token de
+  Bandcamp expira; nunca se confía en una URL cacheada. Un reintento a 150 ms.
+- `store.go`: caché en `$XDG_CACHE_HOME/streambeats/catalog.json`, tmp+rename, 0750/0600, y **vacía todos los
+  `StreamURL` antes de guardar**. `Refresh` saltea álbumes 404 o malformados y falla sólo si scrapeó cero álbumes.
+- `client.go`: timeout total 30 s con `dial` acotado a 5 s (issue #62: un SYN perdido colgaba ~7,5 s).
+
+Correcciones que esto impuso a S20: (1) **error mío** — había puesto "caché en disco" en el alcance fuera; la caché
+de metadatos entra, la de audio (`sync`) sigue afuera; (2) la decisión abierta (b) la resuelve nuestro propio
+`AGENTS.md`, que ya lista `catalog/` como módulo de I/O hermano de `library/`; (3) queda abierta sólo (c), la
+presentación de dos fuentes, con el precedente de referencia (catálogo = lista principal, biblioteca = modo `l`).
+
+Diferencia deliberada: el proyecto de referencia usa `http.Client` dentro del paquete y se testea con fixtures; acá
+`fetch` se **inyecta** por contrato, los dos HTML de `testdata/` se copian como fixtures y los tests no tocan red.
+Riesgo declarado en S20: las regexes acoplan al HTML de Bandcamp y pueden romperse en silencio; se mitiga con
+fixtures y con el fallo como estado humano en la card.
+
+L34 (recorte del ciclo, decisiones del dueño, verbatim): "1. ¿Qué entra en este ciclo? — Sólo A: la duración";
+"2. ¿Qué hace ctrl+c con la card enfocada? — Pasa al host: Pi manda, la card no lo consume".
+
+Se registran cinco defectos de endurecimiento que **sólo vivían en un resumen de sesión**: mismo defecto de
+proceso que el catálogo (L32). Ahora son S21 + T16, con su recorte y su ciclo.
+
+Verificación de los cinco antes de decidir, con `path:line`: el latch está en `show()` (`loaded = true` antes de
+escanear) y en la rama de fallo de `loadFolder`; los seis `void player?.…` están en `applyEffects`; `ctrl+c` se
+consume en `component.ts:79-90` y su test lo pina; el tick es un `setInterval` incondicional en `startSession` y
+`refresh()` fuerza un frame completo cada segundo; el scanner es sincrónico por contrato del dep y corre dentro de
+`onKey`.
+
+Corrección de una afirmación previa mía: dije que el tick "estaba atado a la reproducción" y era al revés — está
+siempre agendado y repinta de más. Sólo B1 cambia de naturaleza (costo, no correctitud); B2 tampoco era "un ítem
+más": cambia el contrato del dep `scan` y rompe dos tests que pinan la sincronía, por eso va a T16 y no a este
+ciclo.
+
+**T15 implementado** (S12, S15). El renderer ya sabía dibujar el total y la barra (`view.ts` `totalOf`, corner y
+pie expandido, `SegmentOptions.totalMs`); lo que faltaba era el productor. `Track.durationMs` viene del scanner, que
+lee nombres y no tags, así que en producción siempre era `undefined` y las cinco superficies decían `--:--`.
+
+Cambio, en dos módulos y **sin tocar `lib/core/`**:
+- `lib/host/host.ts`: `PlaybackClock.durationMs`; `readDuration()` consulta `["get_property", "duration"]` por el
+  `command()` que ya existía con correlación de `request_id` (sin tocar `#handleEvent`), **después** de que el
+  `loadfile` se confirma — bajo `--idle` mpv no tiene la propiedad antes de cargar nada; se pide en cada play
+  porque el total es del tema; una respuesta tardía para un tema que ya no suena se descarta; y `resume` conserva el
+  total en vez de reconstruir el reloj sin él. El dato llega al segmento de estado y a las opciones de la vista.
+- Fallback intacto: player sin mpv, timeout o propiedad no expuesta dejan el total desconocido y las superficies
+  siguen imprimiendo lo que ya imprimían.
+
+**Prueba contra mpv real** (la que los tests unitarios no pueden dar, y que valida las dos premisas del cambio):
+con `--idle` y un WAV de 2.000 s generado al efecto, `get_property duration` **antes** del `loadfile` responde
+`{"error":"property unavailable"}` y **después** responde `{"data":2.0,"error":"success"}`. Es decir: la consulta
+tiene que ir después del load, y el `error` no-success del fallback es el caso real, no una precaución teórica.
+
+Cinco tests nuevos en `tests/host/host.test.ts` (uno por regla): la consulta se emite y el segmento dice
+`0:00/4:05`; la esquina dibuja `0:00 / 4:05` con su barra; una respuesta de error conserva `--:--`; una respuesta
+tardía de otro tema se ignora; el total sobrevive pausa y resume. `pnpm check` verde: 300 tests (eran 295), 71
+suites, `biome` 33 archivos, `tsc` limpio.
+
+Sin commit: AGENTS.md pide pedido explícito del dueño, y el carril de código exige issue aprobada antes de la rama.

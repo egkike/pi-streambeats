@@ -216,8 +216,10 @@ aceptado: está olvidado.
 
 ## Fuera de alcance (v1)
 
-Catálogo Bandcamp en streaming, `sync`/descargas, temas propios, pantalla de settings dentro de la
-card. Cada uno es una decisión pendiente, no una omisión.
+`sync`/descargas, temas propios y pantalla de settings dentro de la card. Cada uno es una decisión pendiente, no
+una omisión. El **catálogo Bandcamp en streaming** salió de esta lista: es la **S20 / T14** del documento de tareas
+y su ciclo arranca después de la duración y del endurecimiento. Toda decisión de producto que viva acá necesita
+un disparador que la reabra; si no lo tiene, no está fuera de alcance, está olvidada.
 
 El **mouse no está acá**: S17 lo pide (click sobre una fila la selecciona y activa, rueda recorre la
 lista, hover resalta), `L12` registró la decisión del dueño ("Mouse completo") y `T6` ya entrega el
