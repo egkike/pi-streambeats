@@ -376,6 +376,11 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	function cyclePresence(): void {
 		debug("cycle", "presence=", state.presence, "size=", state.size, "ctx=", Boolean(ctx));
 		if (!ctx) return;
+		// Two ways out of a state, and they are not interchangeable: `show(size, focus)` builds (or
+		// rebuilds) the overlay for a size and records the focus intent, while dispatching `overlay`
+		// runs the reducer, which finds the card visible and hides it -- and hiding is what finishes
+		// the overlay. So the two visible targets go through `show`, and only hiding goes through the
+		// model event.
 		if (state.presence === "hidden") {
 			// Nothing playing means the corner has nothing to read: it would sit there saying
 			// `nothing playing` and need a second press to be useful. Go straight to the list.

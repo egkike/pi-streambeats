@@ -24,6 +24,14 @@ export interface Glyphs {
 	readonly caret: string;
 	/** The hairlines that divide the card (artboard `.hd`/`.ft` borders): `─` geometric, `-` ASCII. */
 	readonly rule: string;
+	/** The card's own frame (artboard `.card{border}`). The sides reuse `rule`. */
+	readonly edge: {
+		readonly topLeft: string;
+		readonly topRight: string;
+		readonly bottomLeft: string;
+		readonly bottomRight: string;
+		readonly vertical: string;
+	};
 	readonly bar: {
 		/** The part already played (S3). */
 		readonly fill: string;
@@ -41,6 +49,7 @@ const GEOMETRIC: Glyphs = {
 	expanded: "▾",
 	caret: "▏",
 	rule: "─",
+	edge: { topLeft: "┌", topRight: "┐", bottomLeft: "└", bottomRight: "┘", vertical: "│" },
 	bar: { fill: "━", head: "╸", rest: "─" },
 };
 
@@ -51,6 +60,7 @@ const ASCII: Glyphs = {
 	expanded: "v",
 	caret: "|",
 	rule: "-",
+	edge: { topLeft: "+", topRight: "+", bottomLeft: "+", bottomRight: "+", vertical: "|" },
 	bar: { fill: "=", head: "=", rest: "-" },
 };
 
@@ -131,41 +141,80 @@ function expandedFrame(
 	const lines: string[] = [];
 	const hits = new Map<number, EntryHit>();
 	const entries = visibleEntries(state);
-	const footerRows = height >= 2 ? 1 : 0;
+	// The artboard's third border (`.card{border:1px solid}`): without an outline the card reads as the
+	// terminal background. It sits OUTSIDE the padding, exactly as the artboard nests `.hd{padding:0 1ch}`
+	// inside the card's border, so the content loses two columns and the rows lose two -- the card grows
+	// for the rows (`overlayHeight`) rather than handing them to the list.
+	//
+	// The minimum comes from the same invariant the hairlines use, not from a taste for round numbers:
+	// two cells of frame, and enough rows for header + both hairlines + one list row + footer. Too small
+	// to frame means NO frame, never a frame stacked on the content.
+	const MIN_FRAMED_WIDTH = 2 + 4; // frame cells + one padding cell, a marker cell and a name cell
+	const MIN_FRAMED_ROWS = 2 + 1 + 2 + 1 + 1; // both frame rows, header, both hairlines, a list row, footer
+	const edged = width >= MIN_FRAMED_WIDTH && height >= MIN_FRAMED_ROWS;
+	const contentWidth = edged ? width - 2 : width;
+	const contentRows = edged ? height - 2 : height;
+	const footerRows = contentRows >= 2 ? 1 : 0;
 	// The artboard divides the header from the list and the list from the footer (`01-lista-unica.html`:
 	// `.hd{border-bottom}` and `.ft{border-top}`). Without them the footer read as one more list row.
-	const ruleRows = height >= 5 ? 2 : 0;
-	const listRows = Math.max(0, height - 1 - footerRows - ruleRows);
+	// They come as a pair and only when a list row fits between them: `contentRows - 1 - footerRows - 2 >= 1`,
+	// i.e. five rows. Below that the two hairlines would sit one over the other and the card would lose
+	// the row that explains an empty listing (S18).
+	const listRowFits = contentRows - 1 - footerRows - 2 >= 1;
+	const ruleRows = listRowFits ? 2 : 0;
+	const listRows = Math.max(0, contentRows - 1 - footerRows - ruleRows);
 	const durationWidth = widestDuration(entries);
 
-	lines.push(headerLine(state, theme, width, options));
-	if (ruleRows > 0) lines.push(ruleLine(theme, width, glyphs));
+	lines.push(headerLine(state, theme, contentWidth, options));
+	// Top and bottom hairline, decided together by `ruleRows`: they exist as a pair or not at all.
+	if (ruleRows > 0) lines.push(ruleLine(theme, contentWidth, glyphs));
 
 	// An empty listing with a term is a state, not a blank card (S18): the row says why it is empty.
 	const noResults = state.filter !== "" && entries.length === 0;
 	const rows = noResults ? Math.max(0, listRows - 1) : listRows;
-	if (noResults && listRows > 0) lines.push(noResultsLine(state, theme, width));
+	if (noResults && listRows > 0) lines.push(noResultsLine(state, theme, contentWidth));
 
 	const start = windowStart(entries.length, rows, state.cursor);
 	for (let slot = 0; slot < rows; slot++) {
 		const index = start + slot;
 		const entry = entries[index];
 		if (!entry) {
-			lines.push(spaces(width));
+			lines.push(spaces(contentWidth));
 			continue;
 		}
 		hits.set(lines.length, { index, entry });
-		lines.push(entryLine(entry, index, state, theme, width, glyphs, durationWidth));
+		lines.push(entryLine(entry, index, state, theme, contentWidth, glyphs, durationWidth));
 	}
 
-	if (ruleRows > 1) lines.push(ruleLine(theme, width, glyphs));
+	// Same pair decision as above, spelled as `=== 2` so it cannot be read as a spacing rule.
+	if (ruleRows === 2) lines.push(ruleLine(theme, contentWidth, glyphs));
 	if (footerRows > 0) {
 		// The input takes the footer's row (S18): the key hints would lie while the keys are text.
 		lines.push(
-			state.filtering ? filterLine(state, theme, width, glyphs) : footerLine(state, theme, width, options, glyphs),
+			state.filtering
+				? filterLine(state, theme, contentWidth, glyphs)
+				: footerLine(state, theme, contentWidth, options, glyphs),
 		);
 	}
-	return { lines, hits };
+
+	if (!edged) return { lines, hits };
+
+	// The frame is added last so the inside keeps the geometry it always had. `hits` are line indexes,
+	// so they move down by the one row the top border occupies.
+	const side = paint(theme, "border", glyphs.edge.vertical);
+	const top = paint(
+		theme,
+		"border",
+		`${glyphs.edge.topLeft}${glyphs.rule.repeat(contentWidth)}${glyphs.edge.topRight}`,
+	);
+	const bottom = paint(
+		theme,
+		"border",
+		`${glyphs.edge.bottomLeft}${glyphs.rule.repeat(contentWidth)}${glyphs.edge.bottomRight}`,
+	);
+	const shifted = new Map<number, EntryHit>();
+	for (const [line, hit] of hits) shifted.set(line + 1, hit);
+	return { lines: [top, ...lines.map((line) => side + line + side), bottom], hits: shifted };
 }
 
 /** One hairline across the card in the `border` role; no padding, so it meets both edges. */

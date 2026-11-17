@@ -37,10 +37,19 @@ export interface CardComponentDeps {
 }
 
 /** The rows an expanded card asks for, leaving room for the editor and the footer. */
+/** Rows a framed card needs at minimum: both frame rows, header, rules, one list row, footer (S15). */
+const FRAME_MIN_ROWS = 7;
+
 export function overlayHeight(size: CardSize, terminalRows: number): number {
 	if (size === "corner") return 2;
 	const rows = Number.isFinite(terminalRows) ? Math.floor(terminalRows) : 0;
-	return Math.min(30, Math.max(4, rows - 6));
+	// The expanded card spends two rows on its own frame (S15, issue #36). The card grows instead of
+	// handing those cells to the list: it exists to be distinguishable from the background, so shrinking
+	// its content to pay for the outline would defeat the point. The floor of 7 is what still fits a
+	// frame, header, rules, one list row and a footer -- but it can never exceed the terminal, or the
+	// overlay would be taller than the screen it lives in (R3-001).
+	const wanted = Math.max(FRAME_MIN_ROWS, rows - 4);
+	return Math.max(1, Math.min(30, rows, wanted));
 }
 
 export function createCardComponent(deps: CardComponentDeps): Component {
