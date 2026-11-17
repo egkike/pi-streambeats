@@ -506,6 +506,85 @@ describe("end-file (S11)", { skip: unixSockets }, () => {
 	});
 });
 
+describe("file-loaded (S12)", { skip: unixSockets }, () => {
+	it("asks mpv for the duration once the file is loaded and reports it with its track", async () => {
+		const h = createHarness();
+		await h.mpv.listen(h.target);
+		h.mpv.handle = (received, socket) => {
+			const data = received.command[1] === "duration" ? 245.4 : undefined;
+			send(
+				socket,
+				data === undefined
+					? { error: "success", request_id: received.request_id }
+					: { error: "success", request_id: received.request_id, data },
+			);
+		};
+
+		await h.player.play(track);
+		// The `loadfile` reply is not a load fact: it lands before the file is decodable and
+		// `duration` is still unavailable then, which is how the real card ended up saying `--:--`.
+		assert.deepEqual(
+			h.mpv.allCommands().filter((command) => command[0] === "get_property"),
+			[],
+			"nothing is asked before mpv says the file is loaded",
+		);
+
+		h.mpv.emit({ event: "file-loaded" });
+		await waitFor(() => h.reports.length === 2);
+
+		assert.ok(
+			h.mpv.allCommands().some((command) => command[0] === "get_property" && command[1] === "duration"),
+			"the loaded file is where the total comes from",
+		);
+		assert.deepEqual(h.reports[1], { kind: "duration", trackId: track.id, durationMs: 245_400 });
+	});
+
+	it("reports nothing when the loaded file belongs to no track of ours", async () => {
+		const h = createHarness();
+		await h.mpv.listen(h.target);
+		await h.player.play(track);
+		await h.player.stop();
+
+		// Our own stop forgets the track on purpose, so the load that follows is not about anything.
+		h.mpv.emit({ event: "file-loaded" });
+		await delay(50);
+
+		assert.deepEqual(h.reports, [{ kind: "ready" }]);
+		assert.deepEqual(
+			h.mpv.allCommands().filter((command) => command[0] === "get_property"),
+			[],
+			"a stopped player does not ask for a total it would have nowhere to put",
+		);
+	});
+
+	it("drops a duration answered for a track that was replaced meanwhile", async () => {
+		const h = createHarness();
+		await h.mpv.listen(h.target);
+		const held: { socket: net.Socket; requestId: number }[] = [];
+		h.mpv.handle = (received, socket) => {
+			if (received.command[0] === "get_property") {
+				held.push({ socket, requestId: received.request_id });
+				return;
+			}
+			send(socket, { error: "success", request_id: received.request_id });
+		};
+
+		await h.player.play(track);
+		h.mpv.emit({ event: "file-loaded" });
+		await waitFor(() => held.length === 1);
+
+		// Another track takes over before mpv answers: that total describes the one already gone.
+		const next: Track = { ...track, id: "/music/Chillhop/02 - Dusk.mp3", title: "Dusk" };
+		await h.player.play(next);
+		const first = held[0];
+		assert.ok(first);
+		send(first.socket, { error: "success", request_id: first.requestId, data: 2 });
+		await delay(50);
+
+		assert.deepEqual(h.reports, [{ kind: "ready" }]);
+	});
+});
+
 describe("connecting to the socket (S19)", { skip: unixSockets }, () => {
 	it("retries until mpv has created the socket", async () => {
 		const h = createHarness({ retryMs: 20, connectTimeoutMs: 2000 });
