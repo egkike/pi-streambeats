@@ -1949,3 +1949,27 @@ anotados como **T34**.
 **Una consecuencia honesta sobre la tabla de arriba:** con T14 cerrada, la fila `abierta` que queda es **T12** (Windows,
 congelada por el dueño) y **T34** (el re-escaneo de una carpeta vacía). El disparador del hub —«no quede ninguna fila
 `abierta`»— **no se cumple todavía**, y no se cumple por decisiones pendientes del dueño, no por trabajo trabado.
+
+L87 (AGENTS.md suelta el gate de commit, y conserva la higiene del árbol). Pedido del dueño, verbatim: **"En la
+seccion Git & Branch Rules quita - Nunca se commitea sin pedido explícito del dueño. Esto no corresponde porque ya
+tenemos defindo el Git Governance que es para eso."** Después de la revisión eligió, también verbatim: **"Que quede en
+silencio sobre commitear (y que el arnés haga su trabajo). Dale al ajuste"**.
+
+**Qué se fue y por qué estaba de más:** esa línea era un tercer enunciado del mismo límite. **Git Governance** ya
+decide quién puede qué —`status:approved` antes de la rama, `Closes #N`, checks verdes, **merge del dueño**— y la
+sección de RDD ya fija el orden del delivery: `commit → assess → review nativa si debida → push → pr create`. Además
+contradecía al arnés: ODD pide commits por unidad de trabajo, y la línea obligaba a pedir permiso por cada uno.
+
+**Lo que se conservó, y es lo importante de esta entrada:** la línea tenía **dos** reglas metidas en un renglón. La
+segunda —`node_modules/`, binarios y sockets nunca entran— no dependía de la primera y no se toca: queda como
+**«Nada generado entra al repo»**. Borrar el bullet entero se la habría llevado sin que nadie lo notara, que es
+justamente cómo un archivo de reglas pierde una guarda.
+
+**Lo que NO se agregó:** ninguna frase de reemplazo en Git Governance. Fue decisión del dueño: el archivo no habla de
+permisos de commit, y el único límite que queda escrito es el que existe de verdad —`main` protegido, PR y merge del
+dueño—. Consecuencia asumida: para un agente que sólo lea `AGENTS.md`, el repo queda en silencio sobre commitear
+cambios chicos; el arnés sigue teniendo su propia regla para eso.
+
+**Y una aclaración que este documento se debe:** L34 cita la regla retirada («Sin commit: AGENTS.md pide pedido
+explícito del dueño»). Es historia y **no se reescribe**: un `L` que cita una regla vigente en su momento sigue siendo
+cierto como registro; lo que no puede pasar es que el archivo de reglas la siga mostrando.

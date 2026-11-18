@@ -152,7 +152,7 @@ abierta, o si se agregó una dependencia de runtime sin decisión explícita.
 - Un commit = una unidad de trabajo revisable (~400 líneas autoradas), con **tests y docs del mismo
   comportamiento adentro**.
 - Unidad que toque un ítem de riesgo alto va en commit propio, para que la review nativa la tome sola.
-- Nunca se commitea sin pedido explícito del dueño. `node_modules/`, binarios y sockets nunca entran.
+- **Nada generado entra al repo**: `node_modules/`, binarios y sockets nunca se commitean.
 - Los cambios de comportamiento actualizan `odd/tasks/<feature>.md`: `L<n>` nuevo y `S<n>` afectados.
 
 ## Git Governance (issue-first, owner merge)
