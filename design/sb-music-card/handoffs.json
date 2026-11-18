@@ -9,13 +9,6 @@
       "startedAt": "2026-11-10T18:44:42.081Z",
       "implementedAt": "2026-11-17T21:26:21.588Z",
       "note": "The shipped card lives in lib/core/view.ts and lib/host/component.ts (T6, T9). Rows learn duration, the expanded card has the outline of the artboard."
-    },
-    "03-mini-card.html": {
-      "status": "sent",
-      "queued": false,
-      "sentAt": "2026-11-10T23:05:59.467Z",
-      "startedAt": null,
-      "implementedAt": null
     }
   }
 }
