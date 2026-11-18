@@ -200,9 +200,9 @@ recuerda pero sí persiste su `libraryRoot`.
 - **Sin caché y sin red:** la card **cae a la biblioteca local y lo avisa en el pie**, en vez de quedarse en un
   catálogo vacío. Con caché presente el arranque no toca la red en absoluto. Es una divergencia deliberada con el de
   referencia, que se queda, dice `scraping catalog…` y espera un reintento.
-- **La superficie (fila de pestañas vs una tecla anunciada) queda diferida**: el estado se modela con `source` para
-  que las pestañas sean después una decisión de vista y no un cambio de modelo. Con mouse en el host (S17) y sin él
-  en el de referencia, una tecla sin chrome no se puede clickear; eso se decide al dibujar.
+- **Cambio de fuente: una tecla, ida y vuelta — decidido en L79.** `l` lleva **una** acción (`switch-source`) y por lo tanto **un solo hint** en el pie: `l source`. El encabezado dice dónde estás —`StreamBeats` o el breadcrumb de la biblioteca—, así que el hint no cambia de texto según el lado y no hay dos teclas para aprender. Cada fuente recuerda **su propia carpeta y su propio cursor**: volver te devuelve donde estabas, nunca al tope, que es la misma regla de identidad de S3 aplicada a la navegación.
+  Se descartó la **fila de pestañas** por costo —una fila de alto y un tipo de hit nuevo para el mouse de S17— y las
+  **dos teclas** (`l` biblioteca, `c` catálogo) por gramática: dos slots en un pie de 78 columnas que ya lleva doce.
 
 **Carga y refresco del catálogo — decidido en L75.** El catálogo reusa el molde de lectura que dejó T21: mientras se
 lee, el pie lo dice; nunca se pinta una lista vacía sin explicación (S20). Sin spinner animado, sin el error crudo
@@ -340,7 +340,7 @@ Requisitos, todos verificables:
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
 | T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
 | T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help` y tabla del README | worker | **hecho** — verificado por el dueño en el host (L59) | `08ba81d` (PR #59) |
-| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — **especificada y congelada por el dueño** (L74): no arranca hasta que la descongele | — |
+| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | **en curso** — descongelada por el dueño (L78), issue #72; entra en tres rebanadas | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
 | T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | inline | **hecho** — verificado por el dueño en el host (L64) | `0f8baed` (PR #66) |
@@ -1712,3 +1712,78 @@ el feedback loop. Eso es «cómo trabajamos» y está bien donde está.
 nombraba cuatro tareas. Con el disparador real, hoy quedan abiertas **T12 y T14**, y las dos están congeladas por el
 dueño. O sea que el riesgo del hub está más cerca de lo que la lista hacía creer — que es exactamente lo que pasa
 cuando el estado se guarda en el lugar equivocado.
+
+L78 (T14 descongelada: el catálogo arranca). Pedido del dueño, verbatim: **"Vamos con T14 (catálogo)"**. Es el
+descongelamiento que L74 dejó explícitamente fuera: la spec ya estaba escrita y congelada, así que este ciclo
+**implementa, no re-debate**. Issue del carril de código: **#72** (`feat: the StreamBeats catalog as a second
+source (T14)`), con `status:approved` pre-marcado porque el dueño autorizó este ciclo en la conversación.
+
+Lo que NO se reabre, porque ya está decidido y escrito en S20: navegación con la misma gramática (`enter`/`u`),
+`top of the catalog` (L76) en vez de silencio, filtro sobre el listado visible (S18) que se limpia al cambiar de
+nivel, identidad `origin + id` y cola que lleva su fuente, la cola no mezcla fuentes, caché de metadatos con TTL de
+24 h y sin ninguna URL de audio adentro, caída a local con aviso nombrando el gesto, y `fetch` inyectado con los dos
+HTML reales como fixtures.
+
+Rebanadas, porque el total pasa la heurística de ~400 líneas autoradas del archivo de reglas y una sola unidad no es
+revisable: **(1)** `lib/catalog/` — parseo del índice y del tralbum, `fetch` inyectado, caché atómica `0600` con TTL,
+fixtures; **(2)** modelo — `source`, niveles `albums → tracks`, `top of the catalog`, cola con fuente, `origin + id`;
+**(3)** host — carga con progreso honesto, caída a local con aviso, revalidación en segundo plano conservando el
+cursor por slug. Docs (README y S14/S20) viajan con la rebanada que las vuelve falsas.
+
+**La única decisión que queda abierta es la que L74 difirió a propósito**: cómo se cambia de fuente en pantalla
+(fila de pestañas vs una tecla anunciada en el pie). El estado ya modela `source`; sin ninguna de las dos, la
+biblioteca local queda inalcanzable, así que se decide al dibujar la rebanada 3, no antes.
+
+L79 (el cambio de fuente, decidido: una tecla, ida y vuelta). Pregunta del dueño, verbatim: **"Hay una duda que me
+quedó: Para pasar del catalogo a la Lib de musicas creo que sería con la tecla l... y para volver de la lib al
+catalogo como sería?"**. Es exactamente la decisión que L74 había diferido, y llega cuando tenía que llegar: antes de
+dibujar, no después.
+
+**La respuesta a "cómo se vuelve" es la misma tecla.** `l` lleva **una** acción (`switch-source`), no dos: el pie
+anuncia `l source` y el encabezado dice dónde estás, así que el hint no cambia de texto según el lado. Dos teclas
+habrían gastado dos slots en un pie de 78 columnas que ya lleva doce, y habrían dado dos gramáticas para una sola
+pregunta —volver es cambiar de fuente otra vez, no ir a otro lado—. La fila de pestañas se descartó por costo: una
+fila de alto y un tipo de hit nuevo en el mouse de S17. Queda escrito en **S20**, no acá al lado, porque una enmienda
+al lado es cómo el documento se contradice a sí mismo (L76).
+
+**Lo que la tecla arrastra, y hay que decir:** cada fuente recuerda **su propia carpeta y su propio cursor**, así que
+el viaje de ida y vuelta no pierde el lugar —volver te devuelve donde estabas, nunca al tope—. La cola sigue pegada a
+su fuente, que ya lo decía S20. Y una advertencia de historia: **`l` ya existió** y se retiró en T17, cuando el ciclo
+de tamaño dejó de depender del foco (L41); vuelve con otro trabajo. Una tecla que cambia de significado se confunde
+sólo si el documento no lo dice, y esto lo dice.
+
+L80 (T14, rebanada 1 cerrada: el catálogo se lee, se parsea y se cachea). Código nuevo en `lib/catalog/`:
+`parse.ts` (índice y tralbum, puro), `http.ts` (puerto de red con `fetch` **inyectado**) y `cache.ts` (metadatos,
+tmp+rename, `0750`/`0600`, TTL de 24 h). Vocabulario en `lib/types.ts` (`CatalogAlbum`, `CatalogTrack`,
+`CatalogAlbumListing`, `CatalogCache`, `CatalogFailure`, `CatalogResult`). `451` tests / `102` suites en verde,
+`pnpm check` completo en verde (lint + typecheck + test).
+
+**Cuatro decisiones que la rebanada tuvo que tomar, y por qué:**
+
+1. **`neutralizeName` se mudó de `lib/library/names.ts` a `lib/core/names.ts`.** El título de un álbum llega de
+   la red y es tan no confiable como un nombre de archivo (S5, AGENTS.md); `catalog` es hermano de `library`, no su
+   hijo, así que importar el helper de un hermano era una flecha de dependencia que no existe. Ahora `catalog` y
+   `library` bajan a `core`, que es donde vive la regla de texto. `tests/library/names.test.ts` pasó a
+   `tests/core/names.test.ts`.
+2. **La URL de audio se parsea en una función aparte** (`parseTrackUrl`) de la que produce metadatos
+   (`parseAlbumPage`). No es cosmética: la caché no tiene *forma* donde guardar un token, así que la invariante
+   «jamás se persiste» deja de depender de que alguien se acuerde y pasa a ser estructural. Un test la pina sobre el
+   archivo escrito.
+3. **La tolerancia es por ítem, no por página.** Un álbum sin título cae al slug humanizado —perder el nombre lindo
+   es menos grave que perder el álbum—; una pista sin `mp3-128` se saltea porque nada podría resolverla nunca; y un
+   índice con **cero** álbumes es `scrape`, nunca una lista vacía (la mitigación que S20 ya había declarado).
+4. **Los fixtures son extractos reales, no páginas enteras** (187 KB y 311 KB): bytes verbatim de
+   `streambeats.bandcamp.com`, con el wrapper reconstruido y documentado en `tests/fixtures/catalog/README.md`.
+   `biome ci` los ignora (`files.includes` con `"!tests/fixtures"`), porque un HTML no se lintea con reglas de JS.
+   Dos guardas nuevas en `tests/boundary.test.ts`: `lib/catalog/{parse,http}.ts` no importan I/O de Node, y nadie
+   fuera de `extensions/` llama a un `fetch` ambiente.
+
+**Hallazgo de plataforma, que costó un test colgado:** `mkdirSync(recursive: true)` sobre un filesystem virtual
+(`/proc`) **no falla rápido, gira**. El test que probaba «una caché que no se puede escribir devuelve `false`» usaba
+`/proc/inexistente/...` y colgó el runner 120 s sin una línea de salida. Se arregló con un fallo real y barato —el
+padre es un **archivo**, así que es `ENOTDIR` inmediato— y de paso destapó un bug de la implementación: el `rmSync`
+del temporal, con `force: true`, **también tira `ENOTDIR`**, así que la limpieza ahora está guardada y la función
+igual contesta `false`. La lección es de test, no de producto: un caso de falla tiene que fallar rápido.
+
+**Siguiente (rebanada 2):** el modelo con `source`, los niveles `albums → tracks`, `top of the catalog`, la cola con
+su fuente y la identidad `origin + id`. La superficie de cambio de fuente ya está decidida (L79): `l`, ida y vuelta.

@@ -65,6 +65,51 @@ export interface TrackResolver {
 }
 
 /**
+ * One album of the catalog, as the index page announces it (S20). `slug` is its identity; a title is
+ * decoration the site may change without changing which album the row is.
+ */
+export interface CatalogAlbum {
+	readonly slug: string;
+	/** Display title, already neutralized: it arrived from the network, not from a disk we chose. */
+	readonly title: string;
+}
+
+/** One track of a catalog album (S20). Its `slug` identifies it inside its album, never across albums. */
+export interface CatalogTrack {
+	readonly slug: string;
+	readonly title: string;
+	readonly durationMs?: number;
+}
+
+/** An album together with the tracks its own page announced: what the card lists and the cache stores. */
+export interface CatalogAlbumListing extends CatalogAlbum {
+	readonly tracks: readonly CatalogTrack[];
+}
+
+/**
+ * The catalog's metadata cache (S20). It is redownloadable and it carries **no audio URL**: a signed
+ * URL is a token, and a token on disk outlives the play that paid for it.
+ */
+export interface CatalogCache {
+	/** Bumped when the shape changes: an older file is a missing cache, never a half-read one. */
+	readonly version: 1;
+	/** Epoch milliseconds of the read that filled it; the 24 h TTL of L75 is measured from here. */
+	readonly fetchedAt: number;
+	readonly albums: readonly CatalogAlbumListing[];
+}
+
+/**
+ * Why the catalog could not be read (S20). `not-found` is one album that is gone, `scrape` is markup we
+ * no longer recognize, and `network` is the world not answering. Each gets its own message.
+ */
+export type CatalogFailure = "network" | "not-found" | "scrape";
+
+/** A catalog read as data, never as a rejection: the card has nowhere to catch an exception. */
+export type CatalogResult<T> =
+	| { readonly ok: true; readonly value: T }
+	| { readonly ok: false; readonly failure: CatalogFailure };
+
+/**
  * Semantic colour roles, mapped from the host theme (S3, D8).
  * No palette lives in this project: a role is a job, not a colour.
  */

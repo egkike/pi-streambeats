@@ -270,6 +270,7 @@ const LIB_FILES = tsFiles(LIB);
  * anything under them.
  */
 const MAY_IMPORT: Record<string, readonly string[]> = {
+	catalog: ["catalog", "core", "settings", "types"],
 	core: ["core", "types"],
 	host: ["core", "host", "library", "player", "settings", "types"],
 	library: ["core", "library", "settings", "types"],
@@ -410,8 +411,8 @@ describe("module boundaries", () => {
 		const offenders: string[] = [];
 		for (const file of LIB_FILES) {
 			const allowed = MAY_IMPORT[unitOf(file)];
-			// A module this map does not know (the catalog of S20) is a decision nobody took yet: the guard
-			// refuses to invent its row instead of silently demanding one, and says nothing about it.
+			// A module this map does not know is a decision nobody took yet: the guard refuses to invent its row
+			// instead of silently demanding one, and says nothing about it.
 			if (allowed === undefined) continue;
 			for (const declaration of declarations(file)) {
 				const specifier = declaration.specifier;
@@ -421,6 +422,29 @@ describe("module boundaries", () => {
 			}
 		}
 		assert.deepEqual(offenders, [], "an inner layer may not import an outer one");
+	});
+
+	it("keeps the catalog's network injected: no I/O import in its parser or its HTTP port", () => {
+		// S20's contract over the reference implementation's: `fetch` arrives as a parameter. A `node:http(s)`
+		// import here would make the module own a socket, and the tests that drive it with a fake would lie.
+		const offenders: string[] = [];
+		for (const name of ["parse.ts", "http.ts"]) {
+			const file = join(LIB, "catalog", name);
+			for (const declaration of declarations(file)) {
+				if (NODE_IO.test(declaration.specifier)) offenders.push(`${relative(ROOT, file)} → ${declaration.specifier}`);
+			}
+		}
+		assert.deepEqual(offenders, [], "lib/catalog must not import node I/O outside its cache");
+	});
+
+	it("never reaches the ambient fetch outside the composition root", () => {
+		// The network is a dependency the root injects (S20): a bare `fetch(` anywhere else is a module that went
+		// looking for the world by itself, and `extensions/` is the only place allowed to know it exists.
+		const offenders: string[] = [];
+		for (const file of LIB_FILES) {
+			if (/(?<![\w.$])fetch\s*\(/.test(readFileSync(file, "utf8"))) offenders.push(relative(ROOT, file));
+		}
+		assert.deepEqual(offenders, [], "only the composition root may call fetch");
 	});
 
 	it("lets the entry point import the host only as types (S8)", () => {
