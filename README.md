@@ -97,6 +97,17 @@ file next to it.
 - **No system theme.** Colours come from the host's theme, so the card belongs to your terminal instead
   of fighting it.
 
+## Limits worth knowing
+
+These are properties of the terminal or of the host, not bugs waiting to be fixed:
+
+| Limit | Why |
+| --- | --- |
+| The hover highlight can stay on the last row the pointer touched | The host reports motion and clicks, but never that the pointer *left* the card |
+| Hover degrades inside tmux or zellij | Those multiplexers do not forward mouse motion the way a fullscreen TUI expects |
+| Clicking the corner card does nothing | It is a passive readout with no rows; navigation happens in the expanded card |
+| `ctrl+c` with the card focused closes the card instead of interrupting Pi | The host's component interface returns nothing for a key, so the card cannot forward it. Closing the card gives the keyboard back, and the next `ctrl+c` reaches Pi |
+
 ## Requirements
 
 | Requirement | Why |
