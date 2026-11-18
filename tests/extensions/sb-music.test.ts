@@ -245,15 +245,45 @@ function report(h: Host): string[] {
 }
 
 /**
+ * How long `settle()` is willing to wait, in wall-clock milliseconds. The scanner really reads the
+ * temporary tree below — that is the whole point of this test — so the ceiling has to survive a loaded
+ * CI runner and a cold filesystem, not just the few milliseconds a warm local run takes. Five seconds is
+ * hundreds of times the observed cost — a three-entry temporary tree answers in single digits of
+ * milliseconds — and a wait that succeeds returns as soon as the row appears, so the margin is only ever
+ * paid by a genuine failure. It is a fixed budget, not a race that sometimes passes: when it runs out, the
+ * wait stops and says it was a timeout.
+ */
+const SETTLE_BUDGET_MS = 5_000;
+
+/** Short enough to notice the row promptly, long enough not to spin a core for the whole budget. */
+const SETTLE_POLL_MS = 10;
+
+/**
  * Let the real scanner answer. `scanFolder` really reads the temporary folder, so the listing arrives a
  * few turns later; this waits on the observable — the row appearing — instead of on a fixed delay.
+ *
+ * The budget is measured on the clock and not counted in turns, because the slow part on a loaded runner
+ * is the disk, not this loop. When it runs out the failure is reported as what it is — a timeout naming
+ * the budget and the row it was waiting for — and not left to the caller's assertion, which would blame
+ * the listing and send whoever reads a red CI log to the scanner instead of to the wait.
  */
 async function settle(component: Component | undefined, needle = "Chillhop/"): Promise<string[]> {
 	assert.ok(component, "the card never opened");
-	let frame = component.render(COLUMNS);
-	for (let attempt = 0; attempt < 200 && !frame.join("\n").includes(needle); attempt += 1) {
-		await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		frame = component.render(COLUMNS);
+	const card = component;
+	const deadline = Date.now() + SETTLE_BUDGET_MS;
+	let frame = card.render(COLUMNS);
+	while (!frame.join("\n").includes(needle)) {
+		if (Date.now() >= deadline) {
+			assert.fail(
+				`settle timed out after ${SETTLE_BUDGET_MS} ms: the card never showed ${JSON.stringify(needle)}\n` +
+					"this waits for the real scanFolder to answer over the temporary tree, not for a stub, so the\n" +
+					"budget running out means the answer did not arrive in time — it does not by itself mean the\n" +
+					"listing is wrong. The frame below is what the card had when the wait gave up:\n" +
+					frame.join("\n"),
+			);
+		}
+		await new Promise<void>((resolve) => setTimeout(resolve, SETTLE_POLL_MS));
+		frame = card.render(COLUMNS);
 	}
 	return frame;
 }
@@ -353,12 +383,11 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 				await command(h, "");
 
 				const component = h.overlays.at(-1);
+				// `settle` only returns once `Chillhop/` is on the frame, and that default needle is the proof the
+				// scanner and the configured root are wired. The assertion that used to stand here re-checked the
+				// same row and could never fail once the wait succeeded (T32), so it says its intent and leaves
+				// the proof to `settle`.
 				const frame = await settle(component);
-				// The listing is what `scanFolder` found in the configured root: the scanner and the root are wired.
-				assert.ok(
-					frame.join("\n").includes("Chillhop/"),
-					`the folder in ${f.library} is listed, got:\n${frame.join("\n")}`,
-				);
 				assert.ok(frame.join("\n").includes("Arcade Dreams"), "the track in the root is listed");
 				// `asciiGlyphs: true` from the file reaches the frame's own outline (S16).
 				assert.match(frame[0] ?? "", /^\+-+\+$/, "the frame uses the ASCII family the file asked for");
