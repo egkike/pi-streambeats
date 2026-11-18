@@ -340,7 +340,7 @@ Requisitos, todos verificables:
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
 | T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
 | T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help` y tabla del README | worker | **hecho** — verificado por el dueño en el host (L59) | `08ba81d` (PR #59) |
-| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | **implementada** en cuatro rebanadas (L78-L85) — **falta la prueba del dueño en el host**, que este documento exige para cerrar cualquier fila | `8a03144`, `c780e39`, `e27ba6d`, `fb6c50e`, `851816a`, `cdd312e`, `7403a0c` |
+| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | **hecho** — cuatro rebanadas y **verificado por el dueño en el host** (L86) | `8a03144`, `c780e39`, `e27ba6d`, `fb6c50e`, `851816a`, `cdd312e`, `7403a0c` |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
 | T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | inline | **hecho** — verificado por el dueño en el host (L64) | `0f8baed` (PR #66) |
@@ -1931,3 +1931,21 @@ apertura no toca la red.
 **Dos cosas quedan declaradas y abiertas, ninguna bloqueante:** T34 (una carpeta local vacía se re-escanea en cada
 viaje de ida y vuelta) y la frase `catalog unavailable · reopen to retry`, que después de la caída es más amplia que
 el gesto real —la card queda en la biblioteca y el reintento ocurre con `l`— aunque las dos vías reintentan.
+
+L86 (T14 cerrada: la prueba del dueño en el host, y el delivery). Pedido del dueño, verbatim: **"Ya hice las pruebas y
+funcionaron perfecto"**. Con eso se cumple la condición que este documento exige para cerrar cualquier fila —`AGENTS.md`,
+Feedback Loop: la integración no está lista cuando el gate está verde sino cuando abre en Pi— y la fila T14 pasa a
+**hecho**. La prueba fue la que quedó escrita en L85: abrir la card y que traiga el catálogo con su progreso, `l` a la
+biblioteca y `l` de vuelta al mismo álbum, entrar a un álbum, reproducir una pista con el álbum en la línea de estado, y
+reabrir con la caché tibia sin tocar la red.
+
+Delivery: rama `feat/catalog-source`, **ocho commits** de unidades revisables, un solo PR con `size:exception` y
+`Closes #72` porque el total (3574 líneas autoradas) pasa la heurística de carga de review del archivo de reglas. Las dos
+rebanadas grandes tienen **review nativa aprobada y quemada** (`review-46860454c775ab26` con tres lentes,
+`review-631300eb4aef6a86` con dos); el candidato completo dio `reviewDue: false` (`medium`, `under_budget`) y el dueño
+eligió probar en el host antes del PR. Sus nueve más tres hallazgos advisory están saldados, aceptados con disparador o
+anotados como **T34**.
+
+**Una consecuencia honesta sobre la tabla de arriba:** con T14 cerrada, la fila `abierta` que queda es **T12** (Windows,
+congelada por el dueño) y **T34** (el re-escaneo de una carpeta vacía). El disparador del hub —«no quede ninguna fila
+`abierta`»— **no se cumple todavía**, y no se cumple por decisiones pendientes del dueño, no por trabajo trabado.
