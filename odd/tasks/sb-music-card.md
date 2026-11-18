@@ -299,6 +299,10 @@ Requisitos, todos verificables:
 | T27 | S5, S15 | El fallo de carpeta nombra la ruta como el breadcrumb, nunca una ruta absoluta de HOME | inline | **hecho** — la falla es dato (`failure` + evento `folder-failed`) y el pie la formatea (L66) | — |
 | T28 | S22 | `--help` de `/sb-music --keys`: el sufijo pendiente y el tope de diez líneas del widget, sin test | inline | **hecho** — el sufijo se rechaza por decisión del dueño (L68) y el tope quedó pinneado | — |
 | T29 | S22 | `R3-003`: el dedupe "inalcanzable" de `identityOf` | inline | **cerrada sin cambio de código** — el hallazgo era falso y la guarda quedó pinneada por test (L67) | — |
+| T30 | S8 | `R3-001` + `R2-001`: el parser de `declarations()` sólo ve el import cuando el `from` está en la misma línea física, así que la guarda de dirección puede no disparar | worker | **hecho** — el mecanismo del hallazgo era falso pero la ceguera era real (L72) | — |
+| T33 | S8 | `importSpecifiers()` (el otro helper de frontera) no ve especificadores entre comillas simples, así que dos guardas viejas son ciegas a `import "node:fs"` escrito así | inline | **hecho** — se borró el segundo parser en vez de parchearlo (L73) | — |
+| T31 | S22 | `R2-002`: el tope de diez líneas de `modeLines()` vive sólo en los tests; quien lea `host.ts` no ve que `--help` está justo en el borde | inline | **hecho** — se quitó la falta de holgura en vez de etiquetarla: 8 de 10, dos de margen (L73) | — |
+| T32 | S8 | `R3-002`: `settle()` polléa ~1 s y, si el disco tarda más, el test falla con un mensaje que culpa al listado en vez de reportar el timeout | inline | **hecho** — falla como timeout que nombra presupuesto, fila y frame; 5 s (L73) | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
@@ -1476,3 +1480,76 @@ módulos hacen I/O**", cuando `settings.ts` es el quinto desde siempre y `extens
 el socket, resuelve HOME). El propio archivo pide corregirlo en vez de ignorarlo, así que se corrigió.
 
 `pnpm check` verde: **412 tests / 93 suites**, biome 36 archivos, `tsc` limpio.
+L71 (los cuatro hallazgos de la review de #68, registrados). La review nativa aprobó el candidato y devolvió cuatro
+hallazgos **no bloqueantes**: ninguno abrió corrección ni reabre el candidato. Se registran igual, y no por
+formalismo: el lote anterior existió porque cinco hallazgos vivieron en un resumen de sesión. Repetir eso con otros
+cuatro sería no haber aprendido nada.
+
+| ID | Lente | Dónde | Disposición |
+|---|---|---|---|
+| `R3-001` (WARNING) | reliability | `tests/boundary.test.ts:36-62` | **T30**, arreglar: el parser sólo reconoce el import cuando el `from` está en la misma línea física, así que la guarda de dirección y la de `import type` pueden pasar en silencio sobre un archivo que viola la frontera |
+| `R2-001` | readability | `tests/boundary.test.ts:38-55` | **T30**, mismo defecto que `R3-001` mirado desde el otro lado: regexes hechas a mano sobre código TS que pueden no matchear imports multilínea |
+| `R2-002` | readability | `lib/host/host.ts:686-696` | **T31**, arreglar: el comentario de `modeLines()` afirma que entra en el tope, pero el tope sólo lo sostienen los tests; quien lea el archivo no tiene señal de que `--help` está exactamente en diez, sin holgura |
+| `R3-002` | reliability | `tests/extensions/sb-music.test.ts:216-228` | **T32**, arreglar: `settle()` polléa 200 veces cada 5 ms; en un runner lento el listado puede tardar más y el test falla culpando al listado en vez de reportar el timeout |
+
+**Por qué `R3-001` va primero:** es el único que debilita una garantía en vez de una comodidad. Una guarda que no
+dispara es peor que no tener guarda, porque además tranquiliza: el repo cree tener la invariante de dirección
+cubierta y puede no tenerla para una clase entera de sintaxis. Y la ironía sirve de lección: la review lo encontró
+en código escrito **en este mismo lote**, y las mutaciones que probé mostraban que la guarda muerde en un formato,
+no que muerda en todos. Un test de mutación prueba lo que probás, no lo que creés que probás.
+L72 (T30 cerrado, y el hallazgo estaba mal explicado). El parser de `declarations()` pasó de tres regexes a un
+tokenizador chico que saltea comentarios, strings, template literals y regexes, y lee cada declaración del flujo de
+tokens: 233 líneas en `tests/boundary.test.ts`, con tres tests nuevos.
+
+**El mecanismo que reportó la review no reproduce, y hay que decirlo.** `R3-001` decía que la guarda se pierde
+cuando el `from` o el especificador están en su propia línea. No es así: la clase negada vieja (`[^"';]`) matchea
+saltos de línea, así que esos casos ya se leían. Lo que sí escapaba era más chico y más real: **cualquier `'` o `;`
+entre `import` y `from`** —un apóstrofo dentro de un comentario del clause alcanza—, los especificadores entre
+comillas simples, y toda declaración cuyo `import` heredó una comilla mal cerrada de texto anterior en el archivo.
+La mutación lo prueba sin ambigüedad: el import que viola la frontera, metido en el core, era invisible para el
+parser viejo (devolvía dos especificadores en un texto que tiene tres) y el nuevo lo ve y hace fallar la guarda.
+
+**Dos cosas más que salieron del fix:** el parser estricto **no destapó ninguna violación real** en el árbol —14
+archivos, 54 declaraciones comparadas contra el parser viejo, cero diferencias de especificador o de bandera de
+runtime—; y de paso arregló un **falso positivo** que nadie había reportado: un import escrito dentro de un comentario
+o de un string se contaba como dependencia real.
+
+**Hallazgo nuevo, no arreglado (T33):** `importSpecifiers()`, el otro helper de frontera, sigue ciego a los
+especificadores entre comillas simples, así que “keeps I/O out of every module that is not an I/O owner” e “imports the
+Pi host only from lib/host” no ven un `import "node:fs"` escrito con `'`. `biome` con `quoteStyle: double` hace que
+ese archivo falle el lint primero, así que la severidad es baja, pero una guarda no debería depender de que el linter
+llegue antes.
+
+`pnpm check` verde: **415 tests / 94 suites**, biome 36 archivos, `tsc` limpio.
+L73 (T31, T32 y T33 cerrados: la review de #68 queda saldada).
+
+**T31 — se quitó el riesgo, no se lo etiquetó.** `R2-002` pedía que el tope de diez líneas fuera visible desde
+`host.ts`. Una constante que diga "el tope es diez" hace visible el problema pero no crea lugar: la próxima línea
+que alguien agregue se sigue perdiendo en silencio, sólo que ahora con un comentario al lado. Se gastaron dos líneas
+de chrome puro —el título suelto `sb-music · keys and syntax`, y la fila `/sb-music --help  this text`, que es una
+tautología porque el usuario acaba de correrlo— y el modo sin argumentos se mudó al header. `helpLines()` pasó de
+**10 a 8**, con dos de holgura. El test sigue siendo exacto y ahora fija las dos cosas: el conteo y que está
+estrictamente por debajo del tope. Mutación verificada: una línea más falla sólo ese test.
+
+**T32 — el fallo dice qué falló.** `settle()` contaba 200 sondeos de 5 ms y dejaba el veredicto a la aserción del
+llamador, que culpaba al listado. Ahora la espera vence contra un **reloj** y falla como timeout que nombra el
+presupuesto, la fila esperada y el frame del momento. Subió a 5 s no por maquillaje: en el camino que pasa el margen
+no se paga —la espera retorna apenas aparece la fila— así que el margen sólo lo paga un fallo real, y el hallazgo
+era justamente sobre un runner cargado con el filesystem frío. El mensaje no afirma que el escaneo esté roto: dice
+que el presupuesto se agotó y adjunta lo que la card tenía entonces, que es lo que distingue "nunca respondió" de
+"respondió sin la fila". Se plegó además una aserción que quedó **inalcanzable**: `settle()` sólo devuelve con la fila
+en el frame, así que el `assert.ok` que la re-chequeaba no podía fallar nunca.
+
+**T33 — se borró el segundo parser.** `importSpecifiers()` seguía usando regex y no veía comillas simples, así que las
+guardas de I/O y de "el host sólo desde `lib/host`" eran ciegas a `import 'node:fs'`. Parchear la regex habría
+garantizado un tercer parser: ahora las dos guardas leen por `parseDeclarations`, el tokenizador de T30, con un solo
+seam compartido. RED observado en los dos tests nuevos (`actual: []` para un import entre comillas simples, es decir
+la guarda pasaba en silencio), y **cuatro mutaciones** sobre el árbol real, cada una verificada presente en el diff
+antes de correr y restaurada con md5 comprobado después. Ninguna violación real apareció: `offendingSpecifiers`
+devuelve `[]` para las dos guardas en todo el árbol.
+
+**Un riesgo de proceso, reportado por un worker y no callado:** `tests/extensions/sb-music.test.ts` cambió mientras
+el de T31 trabajaba (era el pliegue de T32), así que su `pnpm check` pudo compilar una versión a medio escribir.
+Pasó, pero lo declaró. Dos escritores en el mismo worktree es un riesgo de review real, y el verde no lo cancela.
+
+`pnpm check` verde: **417 tests / 94 suites**, biome 36 archivos, `tsc` limpio.
