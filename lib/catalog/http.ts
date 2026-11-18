@@ -49,6 +49,9 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 150;
 const ATTEMPTS = 2;
 
+/** A status that is the server having a bad minute, not the page having changed. */
+const TRANSIENT_STATUS = /^(408|425|429|5\d\d)$/;
+
 function defaultSleep(ms: number): Promise<void> {
 	return new Promise((resolve) => {
 		setTimeout(resolve, ms);
@@ -64,17 +67,29 @@ export function createCatalogHttp(options: CatalogHttpOptions): CatalogHttp {
 	const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
 	const sleep = options.sleep ?? defaultSleep;
 
-	/** One request and its one retry; `not-found` and `scrape` are answers and are never retried. */
+	/**
+	 * One request and its one retry. Three different things answer "the page did not arrive", and only one of
+	 * them deserves the retry:
+	 *
+	 * - **Our own timeout is final.** The timeout *is* the ceiling on how long the card waits; retrying it
+	 *   doubles the ceiling and hands the reader twice the wait for the same nothing.
+	 * - **A transient status is the blip the retry exists for** (429, 5xx). Calling it `scrape` would send the
+	 *   reader to "the site changed its markup", which is the wrong cause and skips the retry.
+	 * - **A transport failure** is retried once, because that is the blip in its purest form.
+	 */
 	async function readPage(url: string): Promise<Page> {
 		for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
 			if (attempt > 0) await sleep(retryDelayMs);
+			const signal = AbortSignal.timeout(timeoutMs);
 			try {
-				const response = await options.fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+				const response = await options.fetch(url, { signal });
 				if (response.status === 404) return { ok: false, failure: "not-found" };
+				if (TRANSIENT_STATUS.test(String(response.status))) continue;
 				if (response.status !== 200) return { ok: false, failure: "scrape" };
 				return { ok: true, text: response.text };
 			} catch {
-				// Transport failure or our own timeout: the next attempt is the last one.
+				// Our own abort is a decision, not a blip: do not spend the retry on it.
+				if (signal.aborted) return { ok: false, failure: "network" };
 			}
 		}
 		return { ok: false, failure: "network" };
@@ -103,6 +118,10 @@ export function createCatalogHttp(options: CatalogHttpOptions): CatalogHttp {
 
 			const tracks = parseAlbumPage(page.text);
 			if (!tracks) return { ok: false, failure: "scrape" };
+			// An album page whose every track is unplayable did not have "no tracks": it had tracks we could not
+			// read. An empty array is truthy, so without this rule the failure is never raised and a hole gets
+			// cached for 24 h.
+			if (tracks.length === 0) return { ok: false, failure: "scrape" };
 			return { ok: true, value: tracks };
 		},
 

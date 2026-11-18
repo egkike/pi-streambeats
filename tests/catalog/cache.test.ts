@@ -6,9 +6,18 @@
  * missing cache, never a crash — the card has to open either way.
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import {
 	CATALOG_TTL_MS,
@@ -119,6 +128,72 @@ describe("writeCatalogCache and readCatalogCache (S20)", () => {
 			const halfAlbums = join(dir, "half.json");
 			writeFileSync(halfAlbums, JSON.stringify({ version: 1, fetchedAt: 1, albums: [{ title: "no slug" }] }));
 			assert.equal(readCatalogCache(halfAlbums), undefined);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects a duration no parser could have produced, because a cache is a file other things can edit", () => {
+		// The parser admits only finite seconds above zero; a cache carrying zero or a negative is not a duration,
+		// it is a corrupted file, and the whole cache is treated as missing rather than half trusted.
+		const dir = scratch();
+		try {
+			for (const durationMs of [0, -5]) {
+				const path = join(dir, `cache-${durationMs}.json`);
+				writeFileSync(
+					path,
+					JSON.stringify({
+						version: 1,
+						fetchedAt: 1,
+						albums: [
+							{ slug: "electric", title: "Electric", tracks: [{ slug: "electric", title: "Electric", durationMs }] },
+						],
+					}),
+				);
+
+				assert.equal(readCatalogCache(path), undefined, `durationMs ${durationMs} must not be trusted`);
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses to write a cache it could not read back", () => {
+		// `JSON.stringify` turns a non-finite number into `null`, so a cache written blind would be guaranteed
+		// unreadable on the next start. Writing is the cheap place to find that out.
+		const dir = scratch();
+		try {
+			const path = join(dir, "catalog.json");
+			const unreadable = {
+				version: 1,
+				fetchedAt: 1,
+				albums: [{ slug: "electric", title: "Electric", tracks: [{ slug: "e", title: "E", durationMs: Number.NaN }] }],
+			} as CatalogCache;
+
+			assert.equal(writeCatalogCache(path, unreadable), false);
+			assert.equal(readCatalogCache(path), undefined);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("never writes through a temporary name another file could already own", () => {
+		// A predictable `catalog.json.<pid>.tmp` is a name anyone who can write in the cache directory can
+		// pre-create as a symlink, and `writeFileSync` would follow it. The temporary is named after a random
+		// value, so the stray link is neither followed nor replaced.
+		const dir = scratch();
+		try {
+			const path = join(dir, "pi-streambeats", "catalog.json");
+			mkdirSync(dirname(path), { recursive: true });
+			const victim = join(dir, "victim.txt");
+			writeFileSync(victim, "untouched");
+			const predictable = `${path}.${process.pid}.tmp`;
+			symlinkSync(victim, predictable);
+
+			assert.equal(writeCatalogCache(path, sampleCache(5)), true);
+			assert.equal(readFileSync(victim, "utf8"), "untouched", "the stray link must not be written through");
+			assert.deepEqual(readCatalogCache(path), sampleCache(5));
+			assert.equal(existsSync(predictable), true, "and it is left alone, not replaced");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

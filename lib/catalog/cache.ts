@@ -9,6 +9,7 @@
  * The TTL lives here as one constant and one predicate because L75 decided it once: a warm cache does
  * not touch the network, and 24 h is when it stops being warm.
  */
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, posix, win32 } from "node:path";
 import type { SettingsContext } from "../settings.ts";
@@ -57,7 +58,15 @@ function albumOf(value: unknown): CatalogAlbumListing | undefined {
 		if (!isRecord(track)) return undefined;
 		const { slug: trackSlug, title: trackTitle, durationMs } = track;
 		if (typeof trackSlug !== "string" || typeof trackTitle !== "string") return undefined;
-		if (durationMs !== undefined && typeof durationMs !== "number") return undefined;
+		// Only a finite, positive duration is a duration. The parser admits nothing else, so anything else here
+		// is a file someone else edited, and the whole cache is treated as missing rather than half trusted:
+		// a zero would render as `0:00` and a negative as nonsense, with nothing to say where it came from.
+		if (
+			durationMs !== undefined &&
+			(typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0)
+		) {
+			return undefined;
+		}
 		parsed.push(
 			durationMs === undefined
 				? { slug: trackSlug, title: trackTitle }
@@ -114,7 +123,13 @@ export function readCatalogCache(path: string): CatalogCache | undefined {
  * cache that is not there, and the card still opens.
  */
 export function writeCatalogCache(path: string, cache: CatalogCache): boolean {
-	const temporary = `${path}.${process.pid}.tmp`;
+	// Writing a cache that cannot be read back is a promise broken one start later: `JSON.stringify` turns a
+	// non-finite number into `null`, and the reader rejects it. Refusing here is cheap and honest.
+	if (!cacheOf(cache)) return false;
+
+	// The temporary is named after a random value, not the pid: `catalog.json.<pid>.tmp` is a name anyone who
+	// can write in this directory could pre-create as a symlink, and the write would follow it.
+	const temporary = `${path}.${randomUUID()}.tmp`;
 	try {
 		mkdirSync(dirname(path), { recursive: true, mode: 0o750 });
 		writeFileSync(temporary, `${JSON.stringify(cache)}\n`, { mode: 0o600 });

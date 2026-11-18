@@ -139,4 +139,59 @@ describe("createCatalogHttp (S20)", () => {
 
 		assert.deepEqual(await http.readTrackUrl("better-when-im-high-remix", "gone"), { failure: "not-found", ok: false });
 	});
+
+	it("treats a server blip as a network failure, and spends its one retry on it", async () => {
+		// A 503 is the server having a bad minute, not the markup changing. Calling it `scrape` would send the
+		// reader to the wrong cause and would skip the retry that exists exactly for this.
+		const slept: number[] = [];
+		const fake = fakeFetch([() => Promise.resolve({ status: 503, text: "" })]);
+		const http = createCatalogHttp({
+			fetch: fake.fetch,
+			sleep: (ms) => {
+				slept.push(ms);
+				return Promise.resolve();
+			},
+		});
+
+		assert.deepEqual(await http.readIndex(), { failure: "network", ok: false });
+		assert.equal(fake.calls.length, 2);
+		assert.deepEqual(slept, [150]);
+	});
+
+	it("does not retry its own timeout: waiting twice for a page nobody has is worse than failing once", async () => {
+		// The whole point of a timeout is the ceiling on how long the card waits. Retrying it doubles the
+		// ceiling and hands the user 60 s of nothing.
+		const calls: string[] = [];
+		const http = createCatalogHttp({
+			fetch: (url, init) => {
+				calls.push(url);
+				return new Promise((_resolve, reject) => {
+					init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+				});
+			},
+			retryDelayMs: 0,
+			sleep: () => Promise.resolve(),
+			timeoutMs: 5,
+		});
+
+		assert.deepEqual(await http.readIndex(), { failure: "network", ok: false });
+		assert.equal(calls.length, 1);
+	});
+
+	it("refuses to call an album with nothing playable a successful read", async () => {
+		// An empty track list is truthy, so without this rule the scrape failure is never raised and the empty
+		// album can be written to the 24 h cache: a hole that smiles for a day.
+		const tralbum = {
+			trackinfo: [{ title: "No file", track_num: 1, duration: 10, title_link: "/track/no-file", file: null }],
+		};
+		const html = `<div data-tralbum="${escapeAttribute(JSON.stringify(tralbum))}">`;
+		const http = createCatalogHttp({ fetch: fakeFetch([ok(html)]).fetch });
+
+		assert.deepEqual(await http.readAlbum("electric"), { failure: "scrape", ok: false });
+	});
 });
+
+/** The page escapes the JSON attribute the way HTML does: quotes and ampersands become entities. */
+function escapeAttribute(json: string): string {
+	return json.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}

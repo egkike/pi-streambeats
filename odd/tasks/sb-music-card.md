@@ -374,6 +374,8 @@ de tareas escrita a mano es exactamente lo que envejeció en el archivo de regla
 | **`sync` / descargas** | Fuera de S20: el catálogo se navega y se reproduce, no se descarga. La caché es de metadatos, nunca de audio | El dueño lo pida, o la reproducción en streaming deje de alcanzar | L2, S20 |
 | **Temas propios** | Los colores salen del tema del host, sin paletas propias | El dueño lo pida | AGENTS.md, TUI Rules |
 | **Pantalla de settings dentro de la card** | Las teclas se cambian con `/sb-music --keys` y el archivo, no con una UI | El dueño lo pida, o `--keys` deje de alcanzar | S22 |
+| **Un índice parcialmente irreconocible** (`R4-002`) | `parseAlbumIndex` saltea los ítems del grid que no matchean el patrón de slug. Sólo un índice **vacío** es `scrape`, así que un cambio parcial de markup devuelve un catálogo recortado que después se cachea 24 h | El catálogo muestre menos álbumes que el sitio, o el grid cambie de forma | L80, review de T14.1 |
+| **Orden de pistas sin número** (`R3-003`) | El fallback `track_num = rows.length` puede colisionar con números explícitos, y entonces el orden queda apoyado en la estabilidad del sort en vez de en el payload. Cosmético: los slugs siguen siendo únicos | Una página mezcle pistas numeradas y sin numerar | L80, review de T14.1 |
 
 **Cerradas por dejar de ser ciertas** — se retiran en vez de quedar acá mintiendo: el **catálogo Bandcamp en
 streaming** ya no es exclusión, es `S20` / `T14`; el **mouse** ya no es exclusión, `S17` está entregada (`T13`,
@@ -1787,3 +1789,33 @@ igual contesta `false`. La lección es de test, no de producto: un caso de falla
 
 **Siguiente (rebanada 2):** el modelo con `source`, los niveles `albums → tracks`, `top of the catalog`, la cola con
 su fuente y la identidad `origin + id`. La superficie de cambio de fuente ya está decidida (L79): `l`, ida y vuelta.
+
+L81 (la review de la rebanada 1: aprobada, y los hallazgos que sí valían). El dueño pidió correr la review nativa
+aunque el assess dijera `reviewDue: false` (`medium`, `under_budget`). Corrió con tres lentes —`risk`, `resilience`,
+`reliability`— sobre `e4ab3ff..c780e39` y **aprobó** el candidato con **nueve hallazgos advisory**, ninguno
+bloqueante: el proveedor no abrió corrección ni ofrece transición de corrección para este candidato. La autoridad
+quedó quemada en `review-46860454c775ab26`.
+
+La decisión del dueño, verbatim: **"Endurecer ahora, antes del PR"**. Cinco de los nueve cambian comportamiento
+observable y se arreglaron en una unidad propia:
+
+1. **`R3-001` + `R4-003`**: un 429/5xx se clasificaba como `scrape` y no se reintentaba. Contarle al lector que «el
+   markup cambió» cuando el servidor tuvo un mal minuto manda a la causa equivocada y se saltea el reintento que
+   existe justo para eso. Ahora `408|425|429|5xx` es `network` **y usa el reintento**.
+2. **`R4-004`**: el timeout propio se reintentaba, así que el techo real eran ~60 s. El timeout **es** el techo: un
+   abort propio ahora es terminal. El peor caso son 30 s.
+3. **`R4-001`**: un álbum cuyas pistas no eran reproducibles volvía como lectura exitosa con lista vacía — y una
+   lista vacía es *truthy*, así que el `scrape` nunca se levantaba y el hueco se cacheaba 24 h. Ahora cero pistas es
+   `scrape`.
+4. **`R1-temp-symlink`**: el temporal era `catalog.json.<pid>.tmp`, un nombre predecible que quien pueda escribir en
+   el directorio de caché puede pre-crear como symlink y la escritura lo seguiría. Ahora lleva `randomUUID()`.
+5. **`R1-cache-duration` + `R3-002`**: la caché aceptaba un `durationMs` que no fuera número, y escribía uno no
+   finito que `JSON.stringify` volvía `null` — una caché «escrita con éxito» garantizada ilegible al arrancar. Ahora
+   se exige finito y positivo, y **no se escribe** una caché que no se podría leer de vuelta.
+
+**Dos quedan como riesgo aceptado con disparador**, en la tabla de arriba: el índice parcialmente irreconocible
+(`R4-002`) —la tolerancia de S20 es por ítem a propósito— y el orden de pistas sin número (`R3-003`), cosmético
+porque el slug sigue siendo único.
+
+Evidencia: `38` tests en `tests/catalog/` (antes 32; los seis nuevos se vieron en rojo primero), `tsc` limpio en
+`lib/catalog` y `tests/catalog`.
