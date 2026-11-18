@@ -1819,3 +1819,43 @@ porque el slug sigue siendo único.
 
 Evidencia: `38` tests en `tests/catalog/` (antes 32; los seis nuevos se vieron en rojo primero), `tsc` limpio en
 `lib/catalog` y `tests/catalog`.
+
+L82 (T14, rebanada 2 cerrada: el modelo sabe de dos fuentes). `CardState` cambia de forma: `source` más
+`sources: Record<MusicSource, SourceView>`, y **desaparecen** `path`/`entries`/`cursor` del tope. Toda lectura pasa
+por `currentView(state)`. `Queue` lleva su `source`. `488` tests / `112` suites, `pnpm check` en verde (venía de
+451/102).
+
+**Lo que el brief fijó y se cumplió:** `l` es **una** acción (`switch-source`) con un hint (`l source`), y el viaje
+de ida y vuelta devuelve cada fuente a **su** carpeta y **su** cursor. El catálogo tiene dos niveles (`""` es la
+lista de álbumes, el slug son sus pistas) y `top of the catalog` en la raíz. La identidad es `origin + id`
+(`catalogTrackId` / `parseCatalogTrackId`) y la cola avanza por su propio `playOrder`, así que la fuente que se está
+mirando no decide nada. Los cuatro eventos `catalog-*` espejan los `folder-*`, y una actualización del índice
+conserva el cursor **por slug** (L75).
+
+**Ocho decisiones que el brief no fijaba y el worker declaró**, todas razonables: la fuente por defecto es catálogo
+(L74) y por eso el host sólo escanea la biblioteca cuando está a la vista; `catalog-failed` usa los textos de
+S20/L75 (`catalog unavailable · reopen to retry`, y `album missing · reopen to retry` para `not-found`); `reading`
+es compartido y el del catálogo se imprime tal cual (pasarlo por `breadcrumb` imprimiría una ruta de HOME que no
+existe); `folder-*` sólo habla en el pie con la biblioteca a la vista, así que una respuesta tardía no repinta la
+otra fuente; `catalogAlbums` vive en el estado porque `u` desde un álbum tiene que volver sin leer y el encabezado
+necesita el título, no el slug; `u` desde un álbum deja el cursor en el álbum de donde vino; `switch-source` limpia
+además `notice`/`failure`/`reading`/`hover`; y `l` se anuncia junto a `/`.
+
+**Una corrección mía sobre el diff:** `switch-source` emitía `{ kind: "load-folder", path: "" }` al volver al
+catálogo, y el test lo pineaba. Era dato falso —una ruta vacía o un slug de álbum no son paths— y lo único que
+impedía que el scanner contestara «no existe esa carpeta» era una guarda en el host. Ahora el efecto sale **sólo**
+para la biblioteca; la lectura del catálogo llega con su propio efecto en la rebanada 3. Test cambiado con el
+motivo escrito.
+
+**Transitorio declarado hasta la rebanada 3:** la card abre en el catálogo y el catálogo todavía no tiene loader, así
+que abre vacía hasta que se aprieta `l`. Es el costo de haber partido por modelo y no por host, y lo cierra la
+rebanada 3 con la carga, el progreso y la caída a local.
+
+**Dos deudas anotadas por el worker, con dueño:** la etiqueta de carpeta del S12 para un id de catálogo resuelve al
+**slug** del álbum y no a su título (`now-playing.ts` estaba fuera de las superficies de esta rebanada), y el README
+todavía dice que el catálogo es «later slice». Las dos son de la rebanada 3.
+
+**Estrategia de entrega, para que no se pierda:** el total de T14 pasa la heurística de ~400 líneas autoradas, así
+que va **un solo PR** al cerrar la rebanada 3, con `size:exception` y `Closes #72`, y lo mergea el dueño. Chained PRs
+no aplican porque cada PR exige cerrar una issue aprobada, y cerrar #72 con dos tercios del trabajo sería mentirle al
+gate.

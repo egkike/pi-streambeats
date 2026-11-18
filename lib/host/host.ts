@@ -23,6 +23,7 @@ import {
 	type CardEvent,
 	type CardSize,
 	type CardState,
+	currentView,
 	type Effect,
 	type FolderFailureReason,
 	footerHints,
@@ -243,15 +244,20 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	function trackById(trackId: string): Track | undefined {
 		const queued = state.queue?.tracks.find((track) => track.id === trackId);
 		if (queued) return queued;
-		for (const entry of state.entries) {
+		for (const entry of currentView(state).entries) {
 			if (entry.kind === "track" && entry.track.id === trackId) return entry.track;
 		}
 		return undefined;
 	}
 
 	function loadFolder(path: string): void {
-		// The same read is already in flight: showing the card again must not ask twice.
-		if (readingPath === path) return;
+		// The same read is already in flight: showing the card again must not ask twice. The card may have
+		// stopped saying so in the meantime — switching sources clears the footer — so the label is repeated
+		// instead of leaving an empty folder that is only empty because it has not arrived yet (S21, L62).
+		if (readingPath === path) {
+			dispatch({ kind: "folder-reading", path });
+			return;
+		}
 		const token = ++loadToken;
 		readingPath = path;
 		// Say what is being read before it arrives: an empty folder and one still arriving look the same
@@ -309,7 +315,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		for (const effect of effects) {
 			switch (effect.kind) {
 				case "load-folder":
-					loadFolder(effect.path);
+					// The scanner is the library's loader, and the catalog's arrives with its own slice (S20).
+					// Asking the filesystem for an album slug would report a folder failure that is not one.
+					if (state.source === "library") loadFolder(effect.path);
 					break;
 				case "play": {
 					const track = trackById(effect.trackId);
@@ -516,11 +524,12 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		state = reduce(state, { kind: size === "expanded" ? "open" : "overlay" }).state;
 		// The focus intent is recorded after any rebuild below: `hideOverlay` clears `wantsFocus`, and
 		// it used to wipe the request that the caller had just made (the card opened unfocused).
-		if (!loaded) {
+		if (!loaded && state.source === "library") {
 			// Latch only a load that worked. Latching first meant a library that was not ready when the
 			// card opened left it empty for the whole session, with no key to try again (S5, T16).
 			// The latch now lives inside the read, because the answer arrives after this returns (S21).
-			loadFolder(state.path);
+			// The catalog is not read here: it opens on its own source and its loader is the next slice (S20).
+			loadFolder(currentView(state).path);
 		}
 
 		if (overlay && overlay.size !== state.size) {

@@ -5,8 +5,14 @@
  * This module is pure: it declares shapes and nothing else.
  */
 
-/** Where a track comes from. v1 ships `local` only; `catalog` arrives in a later slice. */
+/** Where a track comes from. */
 export type TrackOrigin = "local" | "catalog";
+
+/**
+ * The two listings the card shows (S20): the StreamBeats catalog and the local library. They are two
+ * sources of one card, not two screens — navigation, filter and mouse behave the same in both.
+ */
+export type MusicSource = "catalog" | "library";
 
 /**
  * Stable identity for a track: the absolute path for local files.

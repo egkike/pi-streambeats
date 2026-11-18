@@ -10,8 +10,9 @@
 import type { Component, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { matchesKey } from "@earendil-works/pi-tui";
 import type { CardSize, CardState, PointerEvent } from "../core/model.ts";
+import { currentView } from "../core/model.ts";
 import { type HitMap, renderFrame, type ViewOptions } from "../core/view.ts";
-import type { ViewTheme } from "../types.ts";
+import type { LibraryEntry, MusicSource, ViewTheme } from "../types.ts";
 import { translateKeys } from "./keys.ts";
 
 export interface CardComponentDeps {
@@ -88,8 +89,11 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 	 * state could activate a row nobody clicked. Everything else -- the playing track, the clock, the
 	 * highlight itself -- leaves the rows where they are, and dropping those events would make the
 	 * pointer go deaf for a frame every time it hovered.
+	 *
+	 * The source is part of it because two listings means two arrangements: the index that named an
+	 * album a moment ago names a track of the library now.
 	 */
-	let paintedRows: readonly [CardState["entries"], string, number, CardSize] | undefined;
+	let paintedRows: readonly [readonly LibraryEntry[], string, number, MusicSource, CardSize] | undefined;
 
 	return {
 		render(width: number): string[] {
@@ -117,7 +121,8 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			cachedLines = [...frame.lines];
 			// Stored with the lines: a hit is only meaningful for the frame the host is painting.
 			cachedHits = frame.hits;
-			paintedRows = [state.entries, state.filter, state.cursor, state.size];
+			const view = currentView(state);
+			paintedRows = [view.entries, state.filter, view.cursor, state.source, state.size];
 			return cachedLines;
 		},
 		handleInput(data: string): void {
@@ -162,12 +167,14 @@ export function createCardComponent(deps: CardComponentDeps): Component {
 			// The hit map belongs to the rows the last render laid out, and the screen is only as fresh
 			// as that render (T24): a frame of the previous listing cannot be resolved against a new one.
 			const rows = paintedRows;
+			const view = currentView(state);
 			if (
 				!rows ||
-				rows[0] !== state.entries ||
+				rows[0] !== view.entries ||
 				rows[1] !== state.filter ||
-				rows[2] !== state.cursor ||
-				rows[3] !== state.size
+				rows[2] !== view.cursor ||
+				rows[3] !== state.source ||
+				rows[4] !== state.size
 			) {
 				return undefined;
 			}

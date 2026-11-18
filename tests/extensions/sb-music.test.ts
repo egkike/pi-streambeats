@@ -374,7 +374,7 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 		});
 	});
 
-	it("opens the card on the file's library root, with the scanner, the glyphs and the ceiling (S5, S14, S16)", async () => {
+	it("opens on the catalog, and reads the file's library root when it is asked for (S5, S14, S16, S20)", async () => {
 		const f = fixture({ asciiGlyphs: true });
 		await as(f, async () => {
 			const h = host();
@@ -383,6 +383,9 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 				await command(h, "");
 
 				const component = h.overlays.at(-1);
+				// The card opens in the catalog (S20, L74) and the catalog's loader is the next slice: the
+				// library is the source this one `l` asks for, and that key is what proves the wiring.
+				component?.handleInput?.("l");
 				// `settle` only returns once `Chillhop/` is on the frame, and that default needle is the proof the
 				// scanner and the configured root are wired. The assertion that used to stand here re-checked the
 				// same row and could never fail once the wait succeeded (T32), so it says its intent and leaves

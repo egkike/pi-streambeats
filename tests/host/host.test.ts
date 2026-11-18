@@ -350,6 +350,17 @@ async function open(h: Harness): Promise<void> {
 	await h.commands.get("sb-music")?.handler("", h.ctx);
 }
 
+/**
+ * Open the card and ask for the local library. The card opens in the catalog (S20, L74), and the tests
+ * below navigate a real listing — which in this slice is the library, one `l` away. The key emits the
+ * `load-folder` the adapter turns into a scan, so this is the same path the user takes.
+ */
+async function openLibrary(h: Harness): Promise<void> {
+	await open(h);
+	h.overlays.at(-1)?.component.handleInput?.("l");
+	await flush();
+}
+
 function lastStatus(h: Harness): string | undefined {
 	return h.statuses.at(-1)?.[1];
 }
@@ -417,7 +428,9 @@ describe("the /sb-music command (S1, S4)", () => {
 		// The command focuses the card so its keys reach it; `esc` then closes it and `done()` hands
 		// the keyboard back to Pi's own pre-focus.
 		assert.ok((call?.handle.calls.focus ?? 0) >= 1);
-		assert.deepEqual(h.scanCalls, [ROOT]);
+		// The card opens in the catalog (S20, L74), and this slice has no catalog loader: opening reads no
+		// disk at all. The library is read the first time it is asked for, which is the next assertion's job.
+		assert.deepEqual(h.scanCalls, [], "opening the card reads no folder");
 		// The frame's first line is the card's top border now (issue #36): the header is the line under it.
 		const frame = call?.component.render(90) ?? [];
 		assert.match(frame[0] ?? "", /^┌─+┐$/);
@@ -447,7 +460,7 @@ it("rebuilds the overlay when the cycle changes the size (S15)", async () => {
 	const h = harness();
 	register(h);
 	await start(h);
-	await open(h);
+	await openLibrary(h);
 	// Something has to be PLAYING for the cycle to pass through the corner at all (S15, L39), so the
 	// seed drives the cursor to the second track and plays it: `j j` then `enter`.
 	h.overlays[0]?.component.handleInput?.("j");
@@ -514,7 +527,7 @@ describe("the overlay shortcut cycles the three states (S4, S15)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 		// Silence skips the corner, so a track must be playing for this test to see the corner state.
 		component?.handleInput?.("j");
@@ -581,7 +594,7 @@ describe("the transport shortcuts are registered and alive (S22)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 		component?.handleInput?.("j");
 		component?.handleInput?.("\r");
@@ -602,7 +615,7 @@ describe("the transport shortcuts are registered and alive (S22)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 		component?.handleInput?.("j");
 		component?.handleInput?.("\r");
@@ -625,7 +638,7 @@ describe("the transport shortcuts are registered and alive (S22)", () => {
 		const last = ENTRIES.slice(2, 3);
 		register(h, (path) => ({ ok: true, path, entries: last }));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		h.overlays[0]?.component.handleInput?.("j");
 		h.overlays[0]?.component.handleInput?.("\r");
 		h.overlays[0]?.component.handleInput?.("\u001b");
@@ -853,7 +866,7 @@ describe("key routing and the status line (S12, S13)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		component?.handleInput?.("j");
@@ -869,7 +882,7 @@ describe("key routing and the status line (S12, S13)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		component?.handleInput?.("j");
@@ -889,7 +902,7 @@ describe("key routing and the status line (S12, S13)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		component?.handleInput?.("j");
@@ -921,7 +934,7 @@ describe("the total duration comes from the player (S12, S15)", () => {
 		const h = harness();
 		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		component?.handleInput?.("j");
@@ -936,7 +949,7 @@ describe("the total duration comes from the player (S12, S15)", () => {
 		const h = harness();
 		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		h.overlays[0]?.component.handleInput?.("j");
 		h.overlays[0]?.component.handleInput?.("j");
 		h.overlays[0]?.component.handleInput?.("\r");
@@ -957,7 +970,7 @@ describe("the total duration comes from the player (S12, S15)", () => {
 		const h = harness();
 		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		component?.handleInput?.("j");
@@ -971,7 +984,7 @@ describe("the total duration comes from the player (S12, S15)", () => {
 		const h = harness();
 		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		component?.handleInput?.("j");
@@ -987,7 +1000,7 @@ describe("the total duration comes from the player (S12, S15)", () => {
 		const h = harness();
 		register(h, (path) => ({ ok: true, path, entries: NO_METADATA }));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		component?.handleInput?.("j");
@@ -1006,7 +1019,7 @@ describe("player reports (S11, S12)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		component?.handleInput?.("j");
@@ -1022,7 +1035,7 @@ describe("player reports (S11, S12)", () => {
 		const single = ENTRIES.slice(1, 2);
 		register(h, (path) => ({ ok: true, path, entries: single }));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		component?.handleInput?.("\r");
@@ -1034,14 +1047,30 @@ describe("player reports (S11, S12)", () => {
 });
 
 describe("the card's state is owned by the model (S8)", () => {
-	it("loads the current folder through the injected scanner when the card opens", async () => {
+	it("reads the file's library root through the injected scanner when the local source is asked for", async () => {
+		const h = harness();
+		register(h);
+		await start(h);
+		await openLibrary(h);
+
+		// The scanner received the configured root, not the process's working directory.
+		assert.deepEqual(h.scanCalls, [ROOT]);
+		// The card opened on the catalog (S20, L74): the local listing arrived from the key, not from `show`.
+		assert.match(frameOf(h), /Arcade Dreams/);
+	});
+
+	it("never hands the filesystem scanner an album slug from the catalog (S20)", async () => {
+		// The catalog's paths are album slugs. Only the library's loader exists in this slice, so a catalog
+		// album asks for nothing: scanning `chillhop` would report a folder failure that is not one.
 		const h = harness();
 		register(h);
 		await start(h);
 		await open(h);
 
-		// The scanner received the configured root, not the process's working directory.
-		assert.deepEqual(h.scanCalls, [ROOT]);
+		assert.deepEqual(h.scanCalls, [], "opening on the catalog reads no folder");
+		assert.doesNotMatch(frameOf(h), /cannot show/, "and it accuses no folder of being unreadable");
+		// What the user sees on the way in: the header says which source they are on (S20, L74).
+		assert.match(frameOf(h), /sb-music StreamBeats/);
 	});
 
 	it("turns an activate effect on a folder into a scan and a folder-loaded event", async () => {
@@ -1050,7 +1079,7 @@ describe("the card's state is owned by the model (S8)", () => {
 			path.endsWith("Extras") ? { ok: true, path, entries: [] } : { ok: true, path, entries: ENTRIES },
 		);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 
 		h.overlays[0]?.component.handleInput?.("\r");
 
@@ -1068,7 +1097,7 @@ describe("the card's state is owned by the model (S8)", () => {
 				: new Promise<ScanResult>((resolve) => answers.set(path, resolve)),
 		);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		clickAt(component, lineOf(component, "Extras"));
@@ -1095,7 +1124,7 @@ describe("the card's state is owned by the model (S8)", () => {
 				: new Promise<ScanResult>((resolve) => answers.set(path, resolve)),
 		);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		// Into `Extras`, then back up before it answers, then answer the stale one last.
@@ -1118,7 +1147,7 @@ describe("the card's state is owned by the model (S8)", () => {
 		const h = harness();
 		register(h, () => new Promise<ScanResult>(() => {}));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 
 		// Hide and show again while the first read is still in flight.
 		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
@@ -1139,7 +1168,7 @@ describe("the card's state is owned by the model (S8)", () => {
 			return { ok: true, path, entries: ENTRIES };
 		});
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		await flush();
 
 		assert.match(frameOf(h), /cannot show/, "the failure is said, not thrown at the editor");
@@ -1183,7 +1212,7 @@ describe("rows learn the duration the player reported (issue #42)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 
 		playerReport(h, { kind: "duration", trackId: `${ALBUM}/02 - Blue Hour.mp3`, durationMs: 245_000 });
 		await flush();
@@ -1199,7 +1228,7 @@ describe("rows learn the duration the player reported (issue #42)", () => {
 		);
 		register(h, (path) => ({ ok: true, path, entries: unknown }));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 
 		const frame = h.overlays[0]?.component.render(90).join("\n") ?? "";
 		assert.equal(frame.includes("--:--"), false, "a column of placeholders is dead chrome");
@@ -1220,7 +1249,7 @@ describe("a folder that could not be read is a state, not a dead card (S5, T16)"
 		});
 		await start(h);
 
-		await open(h);
+		await openLibrary(h);
 		await flush();
 		assert.equal(h.scanCalls.length, 1, "the first show tried and failed");
 
@@ -1238,7 +1267,7 @@ describe("a folder that could not be read is a state, not a dead card (S5, T16)"
 		const h = harness();
 		register(h, (path) => ({ ok: false, path, failure: { kind: "missing", path } }));
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		await flush();
 
 		const frame = h.overlays.at(-1)?.component.render(90).join("\n") ?? "";
@@ -1258,7 +1287,7 @@ describe("a player that rejects never escapes the adapter (T16)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		h.player.play = async () => {
 			throw new Error("socket is gone");
 		};
@@ -1346,7 +1375,7 @@ describe("the mouse on the card (S17)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		clickAt(component, lineOf(component, "Extras"));
@@ -1359,7 +1388,7 @@ describe("the mouse on the card (S17)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		clickAt(component, lineOf(component, "02 - Blue Hour.mp3"));
@@ -1371,7 +1400,7 @@ describe("the mouse on the card (S17)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 		// The host only dispatches mouse events against a frame it has already painted, and the hit
 		// map comes from that frame: the card is rendered first, exactly as the overlay does.
@@ -1387,7 +1416,7 @@ describe("the mouse on the card (S17)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		const component = h.overlays[0]?.component;
 
 		// The pointer rests on the second track, and then the keyboard is driven as it always was.
@@ -1407,7 +1436,7 @@ describe("the mouse on the card (S17)", () => {
 		const h = harness();
 		register(h);
 		await start(h);
-		await open(h);
+		await openLibrary(h);
 		// The cycle only passes through the corner while something plays (S15, L39).
 		h.overlays[0]?.component.handleInput?.("j");
 		h.overlays[0]?.component.handleInput?.("\r");
@@ -1425,5 +1454,33 @@ describe("the mouse on the card (S17)", () => {
 		assert.equal(h.overlays[1]?.handle.calls.focus, 0, "the corner still holds no keyboard");
 		assert.equal(h.scanCalls.length, scans, "a click there loads nothing");
 		assert.equal(h.playerCalls.length, plays, "and plays nothing");
+	});
+});
+
+describe("the two sources in the card (S20)", () => {
+	it("says what the library is reading again after a round trip to the catalog", async () => {
+		// Switching sources clears the footer, and a read that is still in flight must not look like an
+		// empty folder: that is exactly the difference L62 added the reading line for.
+		const h = harness();
+		let answer: ((result: ScanResult) => void) | undefined;
+		register(h, () => new Promise<ScanResult>((resolve) => (answer = resolve)));
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		component?.handleInput?.("l");
+		assert.match(frameOf(h), /reading Music/);
+
+		component?.handleInput?.("l");
+		assert.equal(h.scanCalls.length, 1, "the catalog asks for no folder");
+		assert.doesNotMatch(frameOf(h), /reading /, "the catalog's footer is its own");
+
+		component?.handleInput?.("l");
+		assert.match(frameOf(h), /reading Music/, "back on the library, the read is still news");
+		assert.equal(h.scanCalls.length, 1, "and it was never asked for twice");
+
+		answer?.({ ok: true, path: ROOT, entries: ENTRIES });
+		await flush();
+		assert.match(frameOf(h), /Arcade Dreams/, "the answer lands on the library it belonged to");
 	});
 });
