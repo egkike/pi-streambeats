@@ -131,11 +131,6 @@ function typing(state: CardState, text: string): CardState {
 const fixed: ModelDeps = { random: () => 0 };
 
 /** The local library, which is one `l` away from the catalog the card opens on (S20, L74). */
-/** The effects the next `switch-source` would ask for, without needing the reduced state twice. */
-function switchEffectsOf(state: CardState): Reduction["effects"] {
-	return press(state, "l").effects;
-}
-
 function local(state: CardState): CardState {
 	return key(state, "l");
 }
