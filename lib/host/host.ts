@@ -24,12 +24,14 @@ import {
 	type CardSize,
 	type CardState,
 	type Effect,
+	type FolderFailureReason,
 	footerHints,
 	initialState,
 	reduce,
 	type TransportAction,
 } from "../core/model.ts";
 import { statusSegment } from "../core/now-playing.ts";
+import { breadcrumb } from "../core/view.ts";
 import type { ScanResult } from "../library/scan.ts";
 import type { Player, PlayerReport } from "../player/mpv.ts";
 import { editShortcuts, type SaveResult, type Settings, SHORTCUT_NAMES, type ShortcutName } from "../settings.ts";
@@ -73,6 +75,7 @@ type CommandArgs =
 	| { readonly kind: "open" }
 	| { readonly kind: "keys"; readonly assignments: readonly string[] }
 	| { readonly kind: "help" }
+	| { readonly kind: "trailing"; readonly argument: string }
 	| { readonly kind: "unknown"; readonly argument: string };
 
 /** `/sb-music` with no argument opens the card; `--keys` and `--help` are the two text modes (S22). */
@@ -82,7 +85,13 @@ function parseCommandArgs(raw: string): CommandArgs {
 		.split(/\s+/)
 		.filter((token) => token !== "");
 	if (first === undefined) return { kind: "open" };
-	if (first === "--help") return { kind: "help" };
+	if (first === "--help") {
+		// A token the command cannot honour is refused, never swallowed: printing the table and forgetting
+		// `something` is the same defect as opening the card and ignoring `--key` (S22).
+		const [trailing] = rest;
+		if (trailing !== undefined) return { kind: "trailing", argument: trailing };
+		return { kind: "help" };
+	}
 	if (first === "--keys") return { kind: "keys", assignments: rest };
 	return { kind: "unknown", argument: first };
 }
@@ -256,9 +265,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			// set, locking this folder for the rest of the session. The contract says it does not throw;
 			// this keeps a broken one local instead of silently disabling every later read of the folder.
 			readingPath = undefined;
-			const message = `cannot show ${path}: reader failed`;
-			dispatch({ kind: "notice", text: message });
-			ctx?.ui.notify(message, "warning");
+			folderFailed(path, "reader failed");
 			return;
 		}
 		void scan.then(
@@ -268,9 +275,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 				if (!result.ok) {
 					// S5 asks for the failure as a state, not as a toast that fades: the footer keeps saying it,
 					// with the path, until the card loads something else.
-					const message = `cannot show ${result.path}: ${result.failure.kind}`;
-					dispatch({ kind: "notice", text: message });
-					ctx?.ui.notify(message, "warning");
+					folderFailed(result.path, result.failure.kind);
 					return;
 				}
 				// The latch is set only by a read that worked (L46): a failure leaves it false and the next
@@ -283,11 +288,20 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			() => {
 				if (token !== loadToken) return;
 				readingPath = undefined;
-				const message = `cannot show ${path}: reader failed`;
-				dispatch({ kind: "notice", text: message });
-				ctx?.ui.notify(message, "warning");
+				folderFailed(path, "reader failed");
 			},
 		);
+	}
+
+	/**
+	 * A folder the card could not show (S5). It travels to the model as data — the path stays raw —
+	 * because the footer has to name the folder the way the header does, and only the view knows how
+	 * to turn a path into a breadcrumb (S14, S15). The toast borrows that same rule instead of
+	 * printing an absolute home path of its own.
+	 */
+	function folderFailed(path: string, reason: FolderFailureReason): void {
+		dispatch({ kind: "folder-failed", path, reason });
+		ctx?.ui.notify(`cannot show ${breadcrumb(path, state.libraryRoot)}: ${reason}`, "warning");
 	}
 
 	/** Execute the model's requests. The keyboard is handed back only when the card is dismissed. */
@@ -669,6 +683,18 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	/**
+	 * The three modes, named once: both refusals print them, so neither can drift from what the command
+	 * actually accepts. Three lines plus one of accusation stay well inside the ten-line widget (T28).
+	 */
+	function modeLines(): string[] {
+		return [
+			"  /sb-music           open the card",
+			"  /sb-music --keys    read or change the keys",
+			"  /sb-music --help    the syntax and the table",
+		];
+	}
+
+	/**
 	 * The only multi-line, non-interactive surface `ExtensionUIContext` has is a widget above the editor.
 	 * `notify` is one status line and would mangle a table; `custom` is an interactive overlay, which is
 	 * exactly what `--keys` must not build. Print and JSON modes install a no-op UI context — no surface
@@ -763,15 +789,16 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 				reportKeys(commandCtx, parsed.assignments);
 				return;
 			}
+			if (parsed.kind === "trailing") {
+				// `--help` is a complete command: it takes no argument, so a token after it is refused with the
+				// same syntax the unknown-argument path prints instead of being dropped (T28).
+				printLines(commandCtx, [`--help takes no argument, so "${parsed.argument}" is not one`, ...modeLines()]);
+				return;
+			}
 			if (parsed.kind === "unknown") {
 				// Quietly opening the card would ignore what the user typed, and silently ignoring an
 				// argument is the same defect as silently ignoring a key.
-				printLines(commandCtx, [
-					`"${parsed.argument}" is not a /sb-music argument`,
-					"  /sb-music           open the card",
-					"  /sb-music --keys    read or change the keys",
-					"  /sb-music --help    the syntax and the table",
-				]);
+				printLines(commandCtx, [`"${parsed.argument}" is not a /sb-music argument`, ...modeLines()]);
 				return;
 			}
 			if (commandCtx.mode !== "tui") {

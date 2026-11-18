@@ -728,6 +728,33 @@ describe("the card says what it is reading (S21, L62)", () => {
 	});
 });
 
+describe("a folder that could not be shown (S5, S15)", () => {
+	// The failure travels as data, not as a sentence: the host owns no path formatter, and the footer
+	// has to name the folder the way the header does (a breadcrumb, never an absolute home path).
+	it("records the folder and why as data, replacing an older notice", () => {
+		const noticed = reduce(playingB(), { kind: "notice", text: "playlist ended" }).state;
+		const failed = reduce(noticed, { kind: "folder-failed", path: ALBUM, reason: "missing" }).state;
+
+		assert.deepEqual(failed.failure, { path: ALBUM, reason: "missing" });
+		assert.equal(failed.notice, undefined, "the failure is not squeezed into a notice");
+		assert.equal(failed.reading, undefined, "a read that ended badly is not still reading");
+	});
+
+	it("is cleared by a folder that loads", () => {
+		const failed = reduce(playingB(), { kind: "folder-failed", path: ALBUM, reason: "missing" }).state;
+
+		assert.equal(loaded(failed, ALBUM, []).failure, undefined);
+	});
+
+	it("gives way to a later notice, so a stale failure cannot outlive its folder", () => {
+		const failed = reduce(playingB(), { kind: "folder-failed", path: ALBUM, reason: "missing" }).state;
+		const replaced = reduce(failed, { kind: "notice", text: "playlist ended" }).state;
+
+		assert.equal(replaced.failure, undefined);
+		assert.equal(replaced.notice, "playlist ended");
+	});
+});
+
 describe("the filter over the current folder (S18)", () => {
 	it("opens with / and keeps browsing the very same folder and listing", () => {
 		const state = browsingAlbum();

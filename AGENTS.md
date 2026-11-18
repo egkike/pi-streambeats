@@ -17,7 +17,9 @@ propia: se monta sobre la UI del host.
   que se discute, no un `pnpm add`.
 - **El host no es una dependencia de runtime.** `@earendil-works/pi-coding-agent` y `@earendil-works/pi-tui` van en
   `peerDependencies` (`"*"`) y en `devDependencies` con la versión que corre el host, para compilar contra las
-  declaraciones reales; `lib/host/` los importa **sólo como tipos**. `pnpm-workspace.yaml` existe por eso: pnpm
+  declaraciones reales. `lib/host/` y `extensions/` **sí usan valores de runtime** del host —`matchesKey`, el
+  vocabulario `Key`— porque ese código sólo corre adentro del host: lo que el contrato prohíbe es que `lib/core` los
+  toque, y un test de frontera lo afirma. `pnpm-workspace.yaml` existe por eso: pnpm
   exige decidir de forma explícita sobre dos transitivos del host (`@google/genai`, `protobufjs`) cuyos scripts de
   build no necesitamos. No borrar esas claves sin leer este párrafo.
 
@@ -52,7 +54,10 @@ extensions → host → {library, player} → core → types
    Hay un test que lo afirma. Si ese test falla, se arregla el código, no el test.
 2. **El núcleo es puro y sincrónico.** Nada de `async` en `lib/core/`: los efectos se devuelven como
    datos y el borde los ejecuta.
-3. **Sólo cuatro módulos hacen I/O:** `catalog/` (cuando exista), `library/`, `player/` y `host/`.
+3. **Los módulos que hacen I/O están enumerados, y son cinco más la raíz:** `catalog/` (cuando exista),
+   `library/`, `player/`, `host/`, `settings.ts`, más `extensions/`, que es la **raíz de composición** —spawnea mpv,
+   conecta el socket, resuelve HOME— y por eso no puede delegar ese I/O en nadie. `tests/boundary.test.ts` mantiene
+   la lista en `IO_OWNERS`.
    Todo lo demás los recibe como parámetros.
 4. **Puertos sólo donde hay segunda implementación o el otro lado es volátil:** resolver de tracks,
    spawn/transporte de mpv, host de UI, reloj/red. Cuatro. Un puerto con una sola implementación y sin

@@ -49,6 +49,13 @@ const SETTINGS: Settings = {
 /** The resolved file `--keys` prints (S22); a fake path, like everything else the adapter receives. */
 const SETTINGS_FILE = `${HOME}/.config/pi-streambeats/settings.json`;
 
+/**
+ * `InteractiveMode.MAX_WIDGET_LINES` in the host (`dist/modes/interactive/interactive-mode.js`): a string
+ * widget keeps ten lines and appends "... (widget truncated)" after dropping the rest. Every report this
+ * adapter prints has to fit, or the last line disappears without a word (S22, T28).
+ */
+const MAX_WIDGET_LINES = 10;
+
 const EDITOR: Component = { render: () => [], invalidate: () => {} };
 
 const THEME = {
@@ -711,6 +718,57 @@ describe("/sb-music --keys reads and edits the keys (S22)", () => {
 		assert.deepEqual(h.saved, []);
 	});
 
+	it("refuses a token after --help instead of swallowing it (T28)", async () => {
+		// `--help something` printed the table and forgot `something`, which is the same defect as ignoring
+		// a key or a pair name: the user wrote something and the command did not answer for it (S22).
+		const h = harness();
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--help something", h.ctx);
+
+		const lines = report(h);
+		const text = lines.join("\n");
+		assert.equal(lines[0], '--help takes no argument, so "something" is not one');
+		assert.match(text, /\/sb-music --keys\s+read or change the keys/, "the syntax travels with the refusal");
+		assert.doesNotMatch(text, /print the keys in effect/, "the table is not printed as if the token was understood");
+		assert.deepEqual(h.overlays, [], "a refused suffix does not open the card");
+		assert.deepEqual(h.saved, [], "and writes nothing");
+
+		// A mode is not an argument of `--help` either: it is still a token the command cannot honour here.
+		await h.commands.get("sb-music")?.handler("--help --keys", h.ctx);
+		assert.equal(report(h)[0], '--help takes no argument, so "--keys" is not one');
+	});
+
+	it("prints --help inside the ten lines the widget keeps, where nothing is left (T28)", async () => {
+		// The cap is reached exactly: one more line here is silently dropped by the host, table included.
+		const h = harness();
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--help", h.ctx);
+
+		const lines = report(h);
+		assert.equal(
+			lines.length,
+			MAX_WIDGET_LINES,
+			`the help report is ${lines.length} lines; the host keeps ${MAX_WIDGET_LINES}`,
+		);
+	});
+
+	it("keeps the longest report inside the widget cap: the warning plus the full table (T28)", async () => {
+		// The worst real case for `--keys`: a settings file the loader could not use adds two lines to the
+		// table it is warning about. This is the boundary the report was documented to fit (S22, R3-002).
+		const h = harness();
+		h.options.warning = `${SETTINGS_FILE} is not valid JSON, using defaults`;
+		register(h);
+
+		await h.commands.get("sb-music")?.handler("--keys", h.ctx);
+
+		const lines = report(h);
+		// 1 header + the loader's 2 lines + 4 shortcuts + the card's keys + how to change them.
+		assert.equal(lines.length, 9);
+		assert.ok(lines.length <= MAX_WIDGET_LINES, `the report is ${lines.length} lines, which the host would truncate`);
+	});
+
 	it("saves once with the expected settings and says where and when it applies", async () => {
 		const h = harness();
 		register(h);
@@ -1181,6 +1239,10 @@ describe("a folder that could not be read is a state, not a dead card (S5, T16)"
 		const frame = h.overlays.at(-1)?.component.render(90).join("\n") ?? "";
 		assert.match(frame, /cannot show/, "the footer keeps saying what is wrong");
 		assert.match(frame, /missing/, "and why, not just that something failed");
+		// The path travels as data and the view formats it with the header's own breadcrumb: the host
+		// never hands the card a pre-baked absolute path (S14, S15).
+		assert.match(frame, /cannot show Music: missing/, "the folder is named the way the header names it");
+		assert.equal(frame.includes(HOME), false, "no absolute home path reaches the card (S15)");
 	});
 });
 

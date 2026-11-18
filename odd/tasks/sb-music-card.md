@@ -285,7 +285,7 @@ Requisitos, todos verificables:
 | T7 | S12 | `lib/core/now-playing.ts`: limpieza de nombre y formato del segmento + tests | worker | hecho (PR #16) | `6f3b70d` |
 | T8 | S6, S11 | `lib/player/mpv.ts`: spawn, IPC, pausa/next/prev, auto-avance, errores, shutdown | worker | hecho (PR #17) | `5828bd5`, `a083366` |
 | T9 | S1, S4, S8, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | hecho (PR #25) | `bf2ebf3` … `c259e87` |
-| T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | abierta — frontera hecha, falta el host falso | `872d5c2` (parcial) |
+| T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | **hecho** — la mitad del host falso ya la pagó T9; el hueco real era otro: la raíz de composición no tenía ningún test (L70) | `872d5c2`, L70 |
 | T11 | S9 | Suite completa verde y reporte | inline | **hecho** — 320 tests / 79 suites, `pnpm check` verde y `gate` verde en `main` (L51) | — |
 | T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
@@ -295,8 +295,11 @@ Requisitos, todos verificables:
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
-| T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | inline | **hecho** — verificado por el dueño en el host (L64) | — |
-| T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | worker | abierta — bloqueada por la API del host (L48) | — |
+| T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | inline | **hecho** — verificado por el dueño en el host (L64) | `0f8baed` (PR #66) |
+| T27 | S5, S15 | El fallo de carpeta nombra la ruta como el breadcrumb, nunca una ruta absoluta de HOME | inline | **hecho** — la falla es dato (`failure` + evento `folder-failed`) y el pie la formatea (L66) | — |
+| T28 | S22 | `--help` de `/sb-music --keys`: el sufijo pendiente y el tope de diez líneas del widget, sin test | inline | **hecho** — el sufijo se rechaza por decisión del dueño (L68) y el tope quedó pinneado | — |
+| T29 | S22 | `R3-003`: el dedupe "inalcanzable" de `identityOf` | inline | **cerrada sin cambio de código** — el hallazgo era falso y la guarda quedó pinneada por test (L67) | — |
+| T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
 | T19 | S3, S16 | Borde exterior de la card expandida (va por fuera del padding; 2 filas pagadas por el alto) + hallazgos R3-rule-width-empty, R2-001..004 y R2-jargon-refs | worker | **hecho** — verificado por el dueño en el host (L49) | `c857843` (PR #39) |
@@ -1231,7 +1234,7 @@ el 1 y el 8 los cerró T25 y el 2 se conserva tal cual (sin argumentos el comand
    **no abre la card**: imprime el error y la sintaxis, porque ignorar lo que el usuario escribió es el mismo defecto
    que ignorar una tecla. (b) `super` es válido para el host y **no** se acepta acá: el vocabulario y la gramática
    prometen `ctrl`/`alt`/`shift`, que es lo que S22 nombra. (c) Se acepta `overlay=default` con la palabra exacta;
-   `nombre=` vacío se rechaza como «empty». (d) `--help` ignora tokens de más en vez de pelearse por ellos.
+   `nombre=` vacío se rechaza como «empty». (d) `--help` ignora tokens de más en vez de pelearse por ellos. **(d) superado por `L68`: se rechaza.**
 
 Test-first, un RED por regla. `tests/settings.test.ts` (10 nuevos): «applies several pairs and says what changed»,
 «refuses a bare key…», «refuses two keys that would become the same, including the overlay key», «refuses a name that
@@ -1345,3 +1348,131 @@ busquedas / y funcionó bien". La navegación a una carpeta real y el filtro seg
 el cambio tocaba: cada `/` sobre la carpeta recién leída pasa por el estado de lectura, por el token y por el
 latch. El caso del mount lento sigue sin medirse con un reloj, y no se afirma que esté medido: lo que está
 probado es que el camino funciona y que el editor no esperó al disco en ninguno de esos pasos.
+L65 (limpieza antes de T14 y T12). Pedido del dueño, verbatim: "Luego quiero que veamos primero T10, T22 y los
+follow-ups: R3-002 de #59, R3-003, R3-001/R3-002 de #52, y el notice de fallo que imprime ruta absoluta contra
+S15. Quiero dejar todo limpio antes de avanzar a T14 y T12".
+
+**Un defecto de proceso que este pedido destapó:** esos hallazgos vivían sólo en el resumen de una sesión, no en
+este documento. Ninguno de los dos `gh pr view` (#52, #59) los tenía como comentario, así que no había dónde
+leerlos. Es el mismo defecto que ya se anotó dos veces para el catálogo (L32) y para el endurecimiento (L33):
+conocimiento que sólo vive en una sesión no está guardado, está olvidado con suerte. Quedan como filas con su
+`S#`, no como una lista en prosa, porque una fila se cierra y una lista se olvida.
+
+Inventario de lo que entra en la limpieza, con su disposición:
+
+| Hallazgo | Disposición |
+|---|---|
+| `notice` de fallo con ruta absoluta, contra S15 | **T27**, arreglar: es la única violación de contrato del lote, y ahora choca a la vista contra el `reading <breadcrumb>` que acaba de entrar |
+| `R3-002` de #59: `--help` con sufijo pendiente, y el tope de diez líneas del widget sin test | **T28**, cubrir con test: es comportamiento visible sin red |
+| `R3-003`: dedupe inalcanzable en `identityOf` | **T29**, borrar: un guard que nunca corre es una mentira sobre la forma de los datos, no cobertura |
+| `R3-001` de #52: el hover persiste cuando el puntero sale | **límite, no defecto**: el host no emite un evento "puntero salió" (L54). Se documenta en el README junto al resto de los límites del mouse, y no se promete lo que no se puede observar |
+| `R3-002` de #52: guarda repetida en el click | **ya cerrado por T24**: la guarda es una sola desde `1f7fcc9`. No se reabre |
+| `T22`: `ctrl+c` a Pi con la card enfocada | **bloqueada**: `Component.handleInput` devuelve `void`, así que la card no puede reenviar la tecla. No es trabajo de la extensión; hasta que el host exponga un camino, se documenta el límite |
+| `T10`: test del adaptador con host falso | **queda**: trabajo real, y el más grande del lote |
+
+**Orden recomendado y por qué:** T27 primero (violación de contrato, diff chico, y el breadcrumb está fresco); después
+T28 y T29 juntos como unidad de hallazgos chicos; `R3-001` de #52 y `T22` como documentación de límites, que se
+cierran en la misma pasada; T10 al final, que es el único que pide diseño de test. `T14` y `T12` no arrancan hasta
+que esta tabla esté vacía.
+L66 (T27 cerrado). La falla de carpeta dejó de ser una frase armada por el host y pasó a ser **dato**: campo
+`failure` (`path` + `reason`: `missing`, `unreadable`, `reader failed`) y evento `folder-failed`. El pie la escribe
+como `cannot show <breadcrumb>: <motivo>`, con la misma función que usa el header, que ahora se exporta. Orden del
+pie: `notice` → `failure` → `reading` → hints.
+
+Cuatro sitios limpian `failure`, y cada uno tiene su motivo: `folder-loaded` (la carpeta volvió), `notice` (otro
+mensaje tomó el pie), `folder-reading` (un veredicto viejo no puede sobrevivir a un pedido nuevo) y `loadFolder`
+(la falla es de la carpeta anterior). Un fallo que sobrevive a su carpeta es una mentira que persiste.
+
+**RED observado por el worker, y reproduce el defecto:** el test del host que ya existía falló mostrando el frame
+real con `cannot show /home/kike/Music: missing`. Siete fallas en total (3 modelo, 3 vista, 1 host), después
+`pnpm check` verde. Lo confirmé con mi propio run: **401 tests / 92 suites**, biome 35 archivos, `tsc` limpio.
+
+**Un tradeoff que se acepta con los ojos abiertos:** el toast de aviso de Pi también usa el breadcrumb, así que
+cuando la biblioteca entera falta dice `cannot show Music: missing` en vez de la ruta absoluta. Un toast es
+superficie de diagnóstico, y ahí la ruta completa era más útil. Se aceptó igual porque la alternativa es volver a
+tener dos formas de nombrar la misma carpeta —exactamente lo que este cambio vino a borrar— y porque el pie de la
+card, que es el que persiste, ya dice lo mismo. Queda escrito acá para que no se descubra dentro de seis meses
+como una regresión.
+
+**Un test se invirtió a propósito:** la prueba de S21 que armaba `notice: "cannot show <ruta absoluta>"` a mano
+ahora arma `failure: { path, reason }`. El intento es el mismo (la lectura cede el pie al fallo); el portador es
+el nuevo, porque ese string era justo la forma pre-cocinada que se elimina. Queda anotado en `L66` para que no
+parezca que se aflojó una aserción.
+L67 (`R3-003` cerrado como **falso positivo**, sin tocar código). El hallazgo decía que el `Set` dentro de
+`identityOf` era inalcanzable porque los valores ya venían validados. No es así: `loadSettings` acepta **cualquier
+string no vacío** que el archivo traiga (`lib/settings.ts:151-162`), sin pasar por `checkValue` —L19 tolera un
+archivo roto en vez de reescribirlo, así que no lo sanea—. Un `ctrl+ctrl+n` guardado a mano llega entonces a la
+comparación de colisiones, y para el host ese valor **es** `ctrl+n`: sin el `Set`, `identityOf` los vería
+distintos y aceptaría dos shortcuts que son la misma tecla.
+
+Borrar el guard habría sido reducción de robustez disfrazada de limpieza. Lo que faltaba no era código: era la
+prueba de que corre. Se agregó en `tests/settings.test.ts` ("normalizes a shortcut the settings file carried,
+because the loader does not validate it") y se verificó **por mutación**: sacando el `Set`, ese test y sólo ese
+falla (22 pasan, 1 falla); restaurado, verde. Vale anotar cómo salió mal el primer intento de mutación: el regex
+no matcheó, el archivo quedó igual y el test "pasó" —un falso verde que se desarma mirando el diff de la mutación
+en vez de creerle al resultado—. Se rehizo y se comprobó que el archivo había cambiado **antes** de correr nada.
+
+Lección que vale más que el hallazgo: un reporte de review también puede estar equivocado, y "borrar código
+muerto" es la clase de fix que menos se revisa y más robustez puede sacar. `pnpm check` verde: **402 tests / 92
+suites**.
+L68 (T28 cerrado: el sufijo de `--help` y el tope del widget). El hallazgo `R3-002` de #59 tenía dos mitades y
+las dos eran reales.
+
+1. **`/sb-music --help algo` se tragaba `algo` en silencio** e imprimía la tabla igual. El resto de la superficie
+   hace lo contrario con lo que no entiende (`--key`, `/sb-music next`, `name=value` inválido), así que el silencio
+   era la excepción. Decisión del dueño, verbatim: "Rechazar: `--help algo` imprime el error y la sintaxis". Se
+   retiró `L58(d)`, que había decidido lo opuesto ("ignora tokens de más en vez de pelearse por ellos") y convivía
+   con `L58(a)`, que argumenta justo lo contrario. Dos frases que se contradicen en el mismo registro son peores
+   que una equivocada: la equivocada se corrige, la contradicción se elige al azar cada vez que alguien la lee.
+   El mensaje es distinto del de argumento desconocido (`takes no argument, so "x" is not one`) para no afirmar
+   algo falso cuando el token es una segunda forma válida, como `--help --keys`.
+2. **El tope de diez líneas del widget no estaba pinneado.** Ahora sí: `--help` ocupa exactamente diez, y el peor
+   caso de `--keys` (archivo que el loader no pudo usar, con su aviso más la tabla completa) ocupa nueve. Los dos
+   tests se probaron **por mutación**: agregando una línea a `helpLines()` falla sólo el del tope; agregando un
+   tercer aviso falla sólo el de `--keys`. `pnpm check` verde: **405 tests / 92 suites**.
+
+**Dos límites que quedan anotados y no se tocaron:** `--keys overlay=a overlay=b` toma la última asignación y gana
+el último, comportamiento sin documentar en S22 (la atomicidad se respeta: no se escribe medio cambio); y el tope
+del widget cuenta líneas del arreglo, no filas renderizadas, así que un `warning` largo sí envuelve y come filas
+visuales — medirlo pediría lógica de ancho que el adaptador no tiene. Y un riesgo que conviene tener presente:
+`helpLines()` está **exactamente** en diez, sin holgura; la próxima línea que alguien agregue la corta el host en
+silencio. Hoy eso lo avisa un test que falla, no el espacio.
+L69 (los límites se documentan, no se prometen). Cierra `T22` y `R3-001` de #52 sin una línea de código, porque
+ninguno de los dos es un defecto: son propiedades del host o del terminal.
+
+`README.md` gana **Limits worth knowing**, con cuatro filas y el porqué de cada una: el hover puede quedarse en la
+última fila tocada porque el host reporta movimiento y clicks pero nunca que el puntero **salió**; el hover degrada
+en tmux o zellij porque esos multiplexores no reenvían el movimiento; un click en la card de esquina no hace nada
+porque es lectura pasiva sin filas (S15); y `ctrl+c` con la card enfocada **cierra la card** en vez de interrumpir
+Pi, porque `Component.handleInput` devuelve `void` y la card no puede reenviar la tecla —cerrarla devuelve el
+teclado, y el siguiente `ctrl+c` llega a Pi, que es lo que T16 dejó andando—.
+
+**Por qué esto cierra filas en vez de dejarlas abiertas:** una tarea que espera una API que no existe no es trabajo
+pendiente, es una promesa que nadie puede cumplir. Escrita como límite con su causa, el usuario sabe qué esperar;
+escrita como tarea abierta, el backlog miente sobre su propio tamaño. La diferencia entre las dos es el README, y
+ahora existe.
+
+Queda **T10** como único ítem de la limpieza: el test del adaptador con host falso. Es el que pide diseño de test de
+verdad, no una fila de tabla.
+L70 (T10 cerrada: la fila mentía, y el hueco estaba en otro lado). La fila decía "frontera hecha, falta el host
+falso" desde antes de que existiera T9. **La mitad del host falso ya estaba pagada**: `tests/host/host.test.ts` finge
+`ExtensionAPI`, la fábrica de overlays, la TUI, el tema, el player y el scanner en 57 tests. Escribir otro test para
+justificar la fila habría sido inventar trabajo.
+
+El hueco real apareció al mapear S8 contra tests: **`extensions/sb-music.ts` tenía cero tests**, y es lo único que
+Pi carga de verdad. Todos los tests llaman `registerSbMusic(pi, deps)` con deps fabricadas, así que la raíz de
+composición —de dónde sale `libraryRoot`, cómo se resuelve el archivo de settings, qué scanner y qué player se
+inyectan, dónde está el techo— no la miraba nadie. Se agregó `tests/extensions/sb-music.test.ts` (5 tests, host
+falso, sin mpv ni red) y dos guardas de frontera que faltaban: **la dirección de dependencias** (`extensions → host →
+{library, player} → core → types`, el bug que L24 tuvo que arreglar a mano) y el **import type-only en el entry
+point**. Siete mutaciones para probar que las guardas muerden: invertir un `import type`, colar un import de
+`library/` en el core, reemplazar el escritor por un stub, cambiar el techo por `libraryRoot`, cada una rompe
+exactamente el test que le corresponde.
+
+**Dos frases de `AGENTS.md` eran falsas, y se corrigieron acá:** decía que `lib/host/` importa el host "**sólo como
+tipos**", pero `lib/host/host.ts:15` importa `Key` como valor y `component.ts`/`keys.ts` importan `matchesKey` —ese
+código sólo corre adentro del host, así que es correcto, lo que estaba mal era el contrato—; y decía "**sólo cuatro
+módulos hacen I/O**", cuando `settings.ts` es el quinto desde siempre y `extensions/` también (spawnea mpv, conecta
+el socket, resuelve HOME). El propio archivo pide corregirlo en vez de ignorarlo, así que se corrigió.
+
+`pnpm check` verde: **412 tests / 93 suites**, biome 36 archivos, `tsc` limpio.

@@ -146,6 +146,23 @@ describe("shortcut edits (S22)", () => {
 		assert.match(errorOf(["prev=alt+ctrl+z"]), /overlay and prev/);
 	});
 
+	it("normalizes a shortcut the settings file carried, because the loader does not validate it", () => {
+		// `loadSettings` keeps any non-empty string a file holds instead of rewriting it (L19): a broken file
+		// is reported and left alone. So a repeated modifier can arrive from disk, and for the host
+		// `ctrl+ctrl+n` IS `ctrl+n`. Without the de-duplication inside `identityOf` these two would look
+		// like different keys and the pair would be accepted as two distinct shortcuts.
+		// This is the test that keeps that guard alive: delete the `Set` and this fails, nothing else does.
+		const fromDisk: Settings = {
+			...base,
+			shortcuts: { ...base.shortcuts, next: "ctrl+ctrl+n", prev: "ctrl+n" },
+		};
+
+		const result = editShortcuts(fromDisk, ["overlay=ctrl+alt+m"], KNOWN);
+
+		assert.equal(result.ok, false);
+		assert.match(result.ok === false ? result.error : "", /next and prev would both be/);
+	});
+
 	it("refuses a name that is not one of the four and lists the ones it knows", () => {
 		const error = errorOf(["volume=ctrl+alt+v"]);
 
