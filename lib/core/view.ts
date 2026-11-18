@@ -401,12 +401,22 @@ function footerLine(state: CardState, theme: ViewTheme, width: number, options: 
 }
 
 function footerRole(state: CardState): Role {
-	return state.notice ? "accent" : "muted";
+	return state.notice || state.failure ? "accent" : "muted";
 }
 
-/** The notice owns the footer while it is active (S11, S14); otherwise every hint is announced. */
+/**
+ * Who speaks in the footer: a notice (S11, S14), then a folder that could not be shown (S5), then the
+ * read in flight (S21); with nothing to report, every key is announced (S13).
+ */
 function footerText(state: CardState, budget: number, options: ViewOptions): string {
 	if (state.notice) return truncate(printable(state.notice), budget);
+	// A folder that could not be shown names it the way the header does (S5): the failure arrived as
+	// data, so the breadcrumb is formatted here and one rule covers both lines — no absolute home
+	// path can reach the card (S14, S15).
+	if (state.failure) {
+		const folder = breadcrumb(state.failure.path, options.libraryRoot);
+		return truncate(printable(`cannot show ${folder}: ${state.failure.reason}`), budget);
+	}
 	// A read in flight says what it is reading (S21). The path is the breadcrumb, never an absolute
 	// home path (S15): the footer names the folder the way the header does.
 	if (state.reading) return truncate(printable(`reading ${breadcrumb(state.reading, options.libraryRoot)}`), budget);
@@ -606,8 +616,11 @@ function printable(text: string): string {
 /**
  * The breadcrumb (S14): relative to `libraryRoot` while the folder is inside it, `~/…` above it.
  * Never an absolute home path. Pure string arithmetic in the path's own flavour (S19).
+ *
+ * Exported because the rule is one rule: the header and the footer both name a folder, and the host
+ * formats its own warning with it too, so no surface can print an absolute home path (S15).
  */
-function breadcrumb(path: string, libraryRoot: string): string {
+export function breadcrumb(path: string, libraryRoot: string): string {
 	const flavour = posix.isAbsolute(path) ? posix : win32;
 	const relative = flavour.relative(libraryRoot, path);
 	if (relative === "") {

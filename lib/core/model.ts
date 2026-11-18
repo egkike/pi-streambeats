@@ -57,8 +57,15 @@ export interface CardState {
 	readonly queue?: Queue;
 	readonly volume: number;
 	readonly shuffle: boolean;
-	/** The footer's message (S11, S14): "at home", "playlist ended", a failure, the shuffle state. */
+	/** The footer's message (S11, S14): "at home", "playlist ended", the shuffle state. Not a path. */
 	readonly notice?: string;
+	/**
+	 * A folder the shell could not show (S5), kept as data instead of a sentence: the path arrives raw
+	 * and only the view turns it into a breadcrumb, so the footer names the folder the way the header
+	 * does and no absolute home path can reach the card (S14, S15). It outlives the toast, and it gives
+	 * way to a listing or to a newer notice.
+	 */
+	readonly failure?: FolderFailure;
 	/**
 	 * The folder a scan is reading right now (S21). While it is set the footer says `reading <path>`:
 	 * a folder that is still arriving and a folder that is empty must not look the same, and the scan
@@ -142,6 +149,19 @@ export interface FooterHint {
 	readonly action: KeyAction;
 }
 
+/**
+ * Why a folder could not be shown (S5). The scanner's own two verdicts, plus the one thing its
+ * contract forbids — a dependency that throws or rejects — because a broken dep is a folder the card
+ * cannot show either. It is data, never a sentence: the wording and the path belong to the view.
+ */
+export type FolderFailureReason = "missing" | "unreadable" | "reader failed";
+
+/** A folder the shell could not show (S5), with the path exactly as the shell asked for it. */
+export interface FolderFailure {
+	readonly path: string;
+	readonly reason: FolderFailureReason;
+}
+
 /** The only key table (S13): the footer renders from it and the reducer dispatches from it. */
 export const KEY_BINDINGS: readonly KeyBinding[] = [
 	{ id: "up", label: "↑", action: "cursor-up", help: "move", hint: true },
@@ -207,6 +227,8 @@ export type CardEvent =
 	| { readonly kind: "transport"; readonly action: TransportAction }
 	/** A message that has to survive the toast: the footer keeps it until something else happens (S5). */
 	| { readonly kind: "notice"; readonly text: string }
+	/** The folder could not be shown (S5): the path stays raw and the view formats it (S14, S15). */
+	| { readonly kind: "folder-failed"; readonly path: string; readonly reason: FolderFailureReason }
 	/** A scan for this folder has started (S21): the footer says what the card is reading. */
 	| { readonly kind: "folder-reading"; readonly path: string }
 	/** `/sb-music` (S15): opens the card expanded. */
@@ -279,10 +301,23 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 			// and a key is not a click, so the row stops being marked as soon as the user types.
 			return pressKey(forgetHover(state), event.id, deps);
 		case "notice":
-			// The failure owns the footer alone: a read that ended badly is not still reading (S21).
-			return { state: { ...state, notice: event.text, reading: undefined }, effects: [] };
+			// The failure owns the footer alone: a read that ended badly is not still reading (S21), and a
+			// newer message replaces the folder that could not be shown (S5).
+			return {
+				state: { ...state, notice: event.text, reading: undefined, failure: undefined },
+				effects: [],
+			};
+		case "folder-failed":
+			// The other way round: the failure is the news, so it takes the footer from an older notice and
+			// ends the read that just failed. The path is stored as it arrived (S5, S15).
+			return {
+				state: { ...state, failure: { path: event.path, reason: event.reason }, notice: undefined, reading: undefined },
+				effects: [],
+			};
 		case "folder-reading":
-			return { state: { ...state, reading: event.path }, effects: [] };
+			// A new attempt supersedes the last verdict: while this folder is being read again, `cannot
+			// show` would be a lie about what the card is doing (S5, S21).
+			return { state: { ...state, reading: event.path, failure: undefined }, effects: [] };
 		case "overlay":
 			return { state: state.presence === "visible" ? hidden(state) : shown(state, "corner"), effects: [] };
 		case "transport":
@@ -314,6 +349,7 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 					filtering: false,
 					hover: undefined,
 					notice: undefined,
+					failure: undefined,
 					reading: undefined,
 				},
 				effects: [],
@@ -554,7 +590,17 @@ function activate(state: CardState, deps: ModelDeps): Reduction {
  */
 function loadFolder(state: CardState, path: string): Reduction {
 	return {
-		state: { ...state, path, entries: [], cursor: 0, filter: "", filtering: false, notice: undefined },
+		state: {
+			...state,
+			path,
+			entries: [],
+			cursor: 0,
+			filter: "",
+			filtering: false,
+			notice: undefined,
+			// The previous folder's failure is about the previous folder: it cannot outlive it (S5).
+			failure: undefined,
+		},
 		effects: [{ kind: "load-folder", path }],
 	};
 }

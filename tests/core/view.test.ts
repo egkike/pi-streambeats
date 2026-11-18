@@ -347,7 +347,7 @@ describe("the footer (S3, S13)", () => {
 	it("drops the reading line once the listing lands, and keeps the failure instead (S21)", () => {
 		const reading = renderFrame(card({ path: ALBUM, entries: [], reading: ALBUM }), plain, 90, 10, options());
 		const failed = renderFrame(
-			card({ path: ALBUM, entries: [], notice: `cannot show ${ALBUM}: missing` }),
+			card({ path: ALBUM, entries: [], failure: { path: ALBUM, reason: "missing" } }),
 			plain,
 			90,
 			10,
@@ -357,6 +357,32 @@ describe("the footer (S3, S13)", () => {
 		assert.match(reading.lines[8] ?? "", /reading /);
 		assert.doesNotMatch(failed.lines[8] ?? "", /reading /);
 		assert.match(failed.lines[8] ?? "", /cannot show/);
+	});
+
+	it("names a folder that could not be shown as a breadcrumb, never an absolute home path (S5, S15)", () => {
+		const frame = renderFrame(
+			card({ path: ALBUM, entries: [], failure: { path: ALBUM, reason: "missing" } }),
+			plain,
+			90,
+			10,
+			options(),
+		);
+
+		assert.equal(frame.lines[8], framed(fill(" cannot show StreamBeats/Chillhop: missing ", contentWidth(90))));
+		assert.equal(frame.lines.join("\n").includes("/home/kike"), false);
+	});
+
+	it("collapses a failed folder above the root to ~/…, exactly like the header (S14, S15)", () => {
+		const frame = renderFrame(
+			card({ path: HOME, entries: [], failure: { path: HOME, reason: "unreadable" } }),
+			plain,
+			90,
+			10,
+			options(),
+		);
+
+		assert.equal(frame.lines[8], framed(fill(" cannot show ~/…: unreadable ", contentWidth(90))));
+		assert.equal(frame.lines.join("\n").includes("/home/kike"), false);
 	});
 
 	it("drops the hairlines before it drops the content on a very short frame (S3)", () => {
