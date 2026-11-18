@@ -286,9 +286,9 @@ Requisitos, todos verificables:
 | T20 | S3, S12 | La card no pide más ancho del que entra, y las filas aprenden la duración del player sin `--:--` | inline | **hecho** — verificado por el dueño en el host (L44) | `b3023c1` |
 
 El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` da por implementado `01-lista-unica.html`
-(la card real es `lib/core/view.ts` + `lib/host/component.ts`, T6 y T9). `03-mini-card.html` sigue en `sent`: la card
-de esquina existe (S15), pero el artboard no se comparó todavía contra ella, y cerrarlo sin esa comparación sería
-afirmar algo que nadie miró.
+(la card real es `lib/core/view.ts` + `lib/host/component.ts`, T6 y T9). `03-mini-card.html` **no se implementó y no
+debe implementarse**: quedó superado por la implementación, que es más chica (L61). Se conserva como referencia de la
+dirección «card de esquina», no como especificación.
 
 ## Log
 
@@ -1259,3 +1259,17 @@ palabra, mientras que guardar sí se negaba por el mismo motivo). Era el peor mo
 pregunta qué teclas tiene justamente cuando quiere entender por qué no le guarda. El reporte ahora imprime el aviso
 del loader y aclara que la tabla son defaults en memoria; sigue sin escribir nada, sin abrir la card, y entra en el
 tope de diez líneas del widget (nueve).
+L61 (`03-mini-card.html` superado, no pendiente). El artboard se mandó el 10/11 y quedó en `sent` con `startedAt`
+`null`: nunca se recogió. No era una fila abierta del backlog sino un handoff huérfano, y la pregunta «¿está
+implementado?» tenía respuesta incómoda en las dos direcciones: la **dirección** se entregó (la card de esquina es el
+estado por defecto, T17, verificado en el host en `L41`), pero **el artboard no**, y no corresponde entregarlo: dibuja
+siete filas —header, barra, carpeta, tema actual, próximo— y anuncia `l browse` en el pie, mientras S15 pide **dos
+filas** (glifo, tiempo y barra; el título lo posee la barra de estado) y `L38` retiró `l`. Se dibujó antes de que la
+spec se corrigiera.
+
+El canvas sólo entiende `queued`, `sent`, `in_progress` e `implemented` (`canvas-handoffs.js` 
+`handoffKind` devuelve `null` para cualquier otro valor), así que «superado» no tiene badge: cerrarlo como
+`implemented` habría afirmado algo que nadie miró, que es el error que el propio documento ya anotó. Se quitó la
+entrada huérfana de `handoffs.json` —la fila deja de mentir sobre su estado— y el motivo quedó escrito donde se lee:
+un aviso al principio del artboard y este `L61`. `chosen` sigue apuntando a `03` porque la dirección elegida es
+correcta; lo que envejeció es el contenido del mockup, no la decisión.
