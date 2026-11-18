@@ -6,8 +6,13 @@
  * with nothing playable are all *data*: the card decides how to say it, this layer decides what is
  * true. Every name that leaves here has been neutralized (S5), and the path is left raw because it
  * is identity, not display.
+ *
+ * The scan is asynchronous (S21): it runs inside the host's input path, and a big folder or a network
+ * mount used to freeze the editor while the listing was read. Failure is still data, never a
+ * rejection, so a caller that cannot wait has nothing to catch either.
  */
-import { type Dirent, readdirSync, realpathSync, statSync } from "node:fs";
+import type { Dirent } from "node:fs";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Folder, LibraryEntry, Track } from "../types.ts";
 import { AUDIO_EXTENSIONS, isAudioFile, neutralizeName } from "./names.ts";
@@ -74,26 +79,26 @@ function failureOf(error: unknown, path: string): ScanFailure {
 }
 
 /** Canonical form of a path, best effort: a folder we cannot resolve is kept as it was found. */
-function canonical(path: string): string {
+async function canonical(path: string): Promise<string> {
 	try {
-		return realpathSync(path);
+		return await realpath(path);
 	} catch {
 		return path;
 	}
 }
 
 /** Whether a path names a directory, following symlinks. A broken link answers false. */
-function isDirectory(path: string): boolean {
+async function isDirectory(path: string): Promise<boolean> {
 	try {
-		return statSync(path).isDirectory();
+		return (await stat(path)).isDirectory();
 	} catch {
 		return false;
 	}
 }
 
 /** A symlink is listed as whatever it points at, so the entry is not skipped for being a link. */
-function isFolder(dirent: Dirent, path: string): boolean {
-	return dirent.isDirectory() || (dirent.isSymbolicLink() && isDirectory(path));
+async function isFolder(dirent: Dirent, path: string): Promise<boolean> {
+	return dirent.isDirectory() || (dirent.isSymbolicLink() && (await isDirectory(path)));
 }
 
 /**
@@ -101,19 +106,19 @@ function isFolder(dirent: Dirent, path: string): boolean {
  * alphabetical (S5). Hidden entries are skipped, every name is neutralized, and no failure escapes
  * as an exception.
  */
-export function scanFolder(dir: string, ctx: LibraryContext): ScanResult {
+export async function scanFolder(dir: string, ctx: LibraryContext): Promise<ScanResult> {
 	let path: string;
 	try {
 		// Canonical first: a symlinked folder is listed under its real path, so `u` and the ceiling
 		// both compare real paths and navigation cannot loop (S14).
-		path = realpathSync(dir);
+		path = await realpath(dir);
 	} catch (error) {
 		return { ok: false, path: dir, failure: failureOf(error, dir) };
 	}
 
 	let dirents: Dirent[];
 	try {
-		dirents = readdirSync(path, { withFileTypes: true });
+		dirents = await readdir(path, { withFileTypes: true });
 	} catch (error) {
 		return { ok: false, path, failure: failureOf(error, path) };
 	}
@@ -130,8 +135,8 @@ export function scanFolder(dir: string, ctx: LibraryContext): ScanResult {
 		const full = join(path, name);
 		const display = neutralizeName(name);
 
-		if (isFolder(dirent, full)) {
-			folders.push({ path: canonical(full), name: display });
+		if (await isFolder(dirent, full)) {
+			folders.push({ path: await canonical(full), name: display });
 			continue;
 		}
 		// Sockets, fifos and devices are neither enterable nor playable.

@@ -376,7 +376,7 @@ function footerLine(state: CardState, theme: ViewTheme, width: number, options: 
 	const overhead = progress ? clock(progress.elapsedMs).length + clock(progress.totalMs).length + 2 : 0;
 	const canProgress = progress !== undefined && inner >= overhead + MIN_BAR + 1;
 	const budget = canProgress ? inner - overhead - MIN_BAR - 1 : inner;
-	const left = footerText(state, budget);
+	const left = footerText(state, budget, options);
 
 	if (!canProgress || !progress) {
 		return spaces(pad) + paint(theme, footerRole(state), left) + spaces(inner - left.length) + spaces(pad);
@@ -405,8 +405,11 @@ function footerRole(state: CardState): Role {
 }
 
 /** The notice owns the footer while it is active (S11, S14); otherwise every hint is announced. */
-function footerText(state: CardState, budget: number): string {
+function footerText(state: CardState, budget: number, options: ViewOptions): string {
 	if (state.notice) return truncate(printable(state.notice), budget);
+	// A read in flight says what it is reading (S21). The path is the breadcrumb, never an absolute
+	// home path (S15): the footer names the folder the way the header does.
+	if (state.reading) return truncate(printable(`reading ${breadcrumb(state.reading, options.libraryRoot)}`), budget);
 	return hintText(budget);
 }
 

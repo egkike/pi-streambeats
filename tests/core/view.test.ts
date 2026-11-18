@@ -336,6 +336,29 @@ describe("the footer (S3, S13)", () => {
 		assert.equal(frame.lines[8], framed(fill(" playlist ended ", contentWidth(90))));
 	});
 
+	it("says what it is reading, in breadcrumb form, until the listing arrives (S21, L62)", () => {
+		const frame = renderFrame(card({ path: ALBUM, entries: [], reading: ALBUM }), plain, 90, 10, options());
+
+		// The footer names the folder the way the header does: never an absolute home path (S15).
+		assert.equal(frame.lines[8], framed(fill(" reading StreamBeats/Chillhop ", contentWidth(90))));
+		assert.equal(frame.lines.join("\n").includes("/home/kike"), false);
+	});
+
+	it("drops the reading line once the listing lands, and keeps the failure instead (S21)", () => {
+		const reading = renderFrame(card({ path: ALBUM, entries: [], reading: ALBUM }), plain, 90, 10, options());
+		const failed = renderFrame(
+			card({ path: ALBUM, entries: [], notice: `cannot show ${ALBUM}: missing` }),
+			plain,
+			90,
+			10,
+			options(),
+		);
+
+		assert.match(reading.lines[8] ?? "", /reading /);
+		assert.doesNotMatch(failed.lines[8] ?? "", /reading /);
+		assert.match(failed.lines[8] ?? "", /cannot show/);
+	});
+
 	it("drops the hairlines before it drops the content on a very short frame (S3)", () => {
 		// `overlayHeight` bottoms out at 4 rows. Two hairlines there would leave no list row between
 		// them and stack one separator over the other, so the separators give way first.

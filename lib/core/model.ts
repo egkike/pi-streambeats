@@ -60,6 +60,12 @@ export interface CardState {
 	/** The footer's message (S11, S14): "at home", "playlist ended", a failure, the shuffle state. */
 	readonly notice?: string;
 	/**
+	 * The folder a scan is reading right now (S21). While it is set the footer says `reading <path>`:
+	 * a folder that is still arriving and a folder that is empty must not look the same, and the scan
+	 * happens on the input path, so the card paints before the answer exists.
+	 */
+	readonly reading?: string;
+	/**
 	 * The filter over the current folder (S18): the term the listing is narrowed by, empty when there
 	 * is none. The listing is read through `visibleEntries`, so the narrowing lives in one function.
 	 */
@@ -201,6 +207,8 @@ export type CardEvent =
 	| { readonly kind: "transport"; readonly action: TransportAction }
 	/** A message that has to survive the toast: the footer keeps it until something else happens (S5). */
 	| { readonly kind: "notice"; readonly text: string }
+	/** A scan for this folder has started (S21): the footer says what the card is reading. */
+	| { readonly kind: "folder-reading"; readonly path: string }
 	/** `/sb-music` (S15): opens the card expanded. */
 	| { readonly kind: "open" }
 	| { readonly kind: "focus" }
@@ -271,7 +279,10 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 			// and a key is not a click, so the row stops being marked as soon as the user types.
 			return pressKey(forgetHover(state), event.id, deps);
 		case "notice":
-			return { state: { ...state, notice: event.text }, effects: [] };
+			// The failure owns the footer alone: a read that ended badly is not still reading (S21).
+			return { state: { ...state, notice: event.text, reading: undefined }, effects: [] };
+		case "folder-reading":
+			return { state: { ...state, reading: event.path }, effects: [] };
 		case "overlay":
 			return { state: state.presence === "visible" ? hidden(state) : shown(state, "corner"), effects: [] };
 		case "transport":
@@ -303,6 +314,7 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 					filtering: false,
 					hover: undefined,
 					notice: undefined,
+					reading: undefined,
 				},
 				effects: [],
 			};
