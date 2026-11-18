@@ -603,7 +603,7 @@ function truncateHead(text: string, budget: number): string {
 }
 
 /**
- * Characters that act on the terminal instead of occupying a cell (AGENTS.md). `lib/library/names`
+ * Characters that act on the terminal instead of occupying a cell (AGENTS.md). `lib/core/names`
  * neutralizes names at the source; a renderer that trusts its input is one refactor away from an
  * escape sequence in the chrome, so the rule is applied here too — the core cannot import library.
  */

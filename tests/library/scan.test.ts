@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { AUDIO_EXTENSIONS } from "../../lib/library/names.ts";
+import { AUDIO_EXTENSIONS } from "../../lib/core/names.ts";
 import { scanFolder } from "../../lib/library/scan.ts";
 
 /** Symlinks need extra privileges on Windows; the rules they cover are the same on every POSIX host. */

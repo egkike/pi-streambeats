@@ -15,7 +15,7 @@ import { glyphFamily } from "./view.ts";
  * The nine audio extensions of the repo (S5), with the leading dot, matched case-insensitively
  * because files copied from a case-insensitive filesystem arrive upper-cased. The list is repeated
  * here because `lib/core` sits below `lib/library` in the dependency direction (S8) and may not
- * import it; `lib/library/names.ts` owns the same nine for scanning.
+ * import it; `lib/core/names.ts` owns the same nine for scanning.
  */
 const AUDIO_EXTENSIONS = "mp3|flac|ogg|oga|opus|m4a|aac|wav|wma";
 

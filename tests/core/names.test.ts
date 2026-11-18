@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AUDIO_EXTENSIONS, isAudioFile, neutralizeName } from "../../lib/library/names.ts";
+import { AUDIO_EXTENSIONS, isAudioFile, neutralizeName } from "../../lib/core/names.ts";
 
 describe("audio extensions (S5)", () => {
 	it("accepts exactly the nine extensions of the Go repo", () => {

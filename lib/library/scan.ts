@@ -14,8 +14,8 @@
 import type { Dirent } from "node:fs";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { AUDIO_EXTENSIONS, isAudioFile, neutralizeName } from "../core/names.ts";
 import type { Folder, LibraryEntry, Track } from "../types.ts";
-import { AUDIO_EXTENSIONS, isAudioFile, neutralizeName } from "./names.ts";
 
 /** Shared vocabulary (see lib/types.ts): the card holds these rows in its state. */
 export type { LibraryEntry };
