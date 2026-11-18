@@ -25,6 +25,11 @@ export interface Track {
 	readonly origin: TrackOrigin;
 	/** Duration in milliseconds when it is known before playing; undefined until then. */
 	readonly durationMs?: number;
+	/**
+	 * The album a catalog track belongs to, in display form (S20, S12). A local track has a directory to be
+	 * labelled by; a catalog track has only an id, and `catalog:<slug>` is not a name a listener recognizes.
+	 */
+	readonly album?: string;
 }
 
 /** A directory the card can descend into. Children are listed one level at a time (S5). */

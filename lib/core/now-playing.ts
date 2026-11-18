@@ -90,7 +90,9 @@ export function statusSegment(state: NowPlayingState, width: number, options: Se
 	const total = options.totalMs ?? track.durationMs;
 	const time = `${clock(options.elapsedMs ?? 0)}/${total === undefined ? UNKNOWN_TIME : clock(total)}`;
 	const title = cleanTitle(track.title);
-	const folder = folderLabel(track.id);
+	// A catalog track has no directory: the album travels on the row, so the label is the album a listener
+	// recognizes instead of `catalog:<slug>` (S12, S20).
+	const folder = track.album ?? folderLabel(track.id);
 
 	const whole = `${glyph} ${title}${SEPARATOR}${folder} ${time}`;
 	if (lengthOf(whole) <= columns) return whole;

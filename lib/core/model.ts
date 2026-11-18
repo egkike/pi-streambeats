@@ -953,6 +953,9 @@ function albumRows(albums: readonly CatalogAlbum[]): readonly LibraryEntry[] {
 /**
  * One album's tracks as rows (S20). The identity is `origin + id` (S3): the signed URL expires and the
  * album and track slugs do not, so the row is named after what cannot go stale.
+ *
+ * The album's **title** travels on the row because a catalog track has no directory to be labelled by:
+ * the status line reads a folder from the id and would print `catalog:<slug>` (S12, L84).
  */
 function trackRows(album: CatalogAlbumListing): readonly LibraryEntry[] {
 	return album.tracks.map((track) => ({
@@ -962,6 +965,7 @@ function trackRows(album: CatalogAlbumListing): readonly LibraryEntry[] {
 			title: track.title,
 			origin: "catalog",
 			durationMs: track.durationMs,
+			album: album.title,
 		},
 	}));
 }
