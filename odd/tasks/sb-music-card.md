@@ -340,7 +340,7 @@ Requisitos, todos verificables:
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
 | T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
 | T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help` y tabla del README | worker | **hecho** — verificado por el dueño en el host (L59) | `08ba81d` (PR #59) |
-| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | **en curso** — descongelada por el dueño (L78), issue #72; entra en tres rebanadas | — |
+| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | **implementada** en cuatro rebanadas (L78-L85) — **falta la prueba del dueño en el host**, que este documento exige para cerrar cualquier fila | `8a03144`, `c780e39`, `e27ba6d`, `fb6c50e`, `851816a`, `cdd312e`, `7403a0c` |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
 | T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | inline | **hecho** — verificado por el dueño en el host (L64) | `0f8baed` (PR #66) |
@@ -1905,3 +1905,29 @@ imprime el slug (`catalog:<album>`), porque `now-playing.ts` estaba fuera de las
 `catalog unavailable · reopen to retry` es más amplia que el comportamiento después de la caída —la card queda en la
 biblioteca, así que reabrir muestra la biblioteca y el reintento real ocurre con `l`— aunque las dos vías
 reintentan de verdad, porque el latch sólo lo pone una lectura exitosa.
+
+L85 (T14 implementada: lo que cierra la rebanada 3, y lo que falta). Dos cosas que L82/L84 dejaron abiertas y se
+cerraron acá, cada una con su evidencia:
+
+1. **La etiqueta de S12 para una pista del catálogo.** Imprimía `catalog:<albumSlug>` porque `folderLabel` deriva la
+   carpeta del id y un id de catálogo no tiene carpeta. Ahora el **título del álbum viaja en la fila** (`Track.album`)
+   y el segmento lo prefiere; una pista local sigue etiquetándose por su directorio y la vista no aprende nada de
+   ninguna de las dos fuentes. El test se vio **en rojo** con el fallback puesto y verde con el arreglo.
+2. **El README decía que el catálogo era «later slice»** y no mencionaba `l`, que es la tecla sin la cual la segunda
+   fuente es inalcanzable. Ahora documenta las dos fuentes, la tecla, dónde vive la caché de metadatos (`0600`, fuera
+   de la carpeta de música), la revalidación de 24 h en segundo plano, las dos formas del contador de progreso, la
+   caída a local con su frase y que cada play cuesta una request porque la URL firmada no se guarda.
+
+`507` tests / `115` suites, `pnpm check` verde. La rama lleva **siete commits** y el candidato completo de T14 pasa la
+heurística de ~400 líneas con holgura, así que el PR va con `size:exception` y `Closes #72`, y el merge es del dueño.
+
+**Lo que falta para cerrar la fila T14 no es código: es la prueba del dueño en el host.** `AGENTS.md` (Feedback
+Loop) dice que una integración no está lista cuando el gate está verde sino cuando abre en Pi, y este documento ya
+cerró filas así cinco veces. La prueba concreta: `pi -e ./extensions/sb-music.ts`, abrir la card (tiene que abrir en
+el catálogo y traerlo), apretar `l` y ver la biblioteca, volver con `l`, entrar a un álbum, reproducir una pista
+(el estado tiene que decir el álbum, no el slug) y, con `SB_MUSIC_DEBUG=/tmp/sb-music.log`, confirmar que la segunda
+apertura no toca la red.
+
+**Dos cosas quedan declaradas y abiertas, ninguna bloqueante:** T34 (una carpeta local vacía se re-escanea en cada
+viaje de ida y vuelta) y la frase `catalog unavailable · reopen to retry`, que después de la caída es más amplia que
+el gesto real —la card queda en la biblioteca y el reintento ocurre con `l`— aunque las dos vías reintentan.
