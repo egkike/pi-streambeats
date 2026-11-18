@@ -351,6 +351,7 @@ Requisitos, todos verificables:
 | T33 | S8 | `importSpecifiers()` (el otro helper de frontera) no ve especificadores entre comillas simples, así que dos guardas viejas son ciegas a `import "node:fs"` escrito así | inline | **hecho** — se borró el segundo parser en vez de parchearlo (L73) | — |
 | T31 | S22 | `R2-002`: el tope de diez líneas de `modeLines()` vive sólo en los tests; quien lea `host.ts` no ve que `--help` está justo en el borde | inline | **hecho** — se quitó la falta de holgura en vez de etiquetarla: 8 de 10, dos de margen (L73) | — |
 | T32 | S8 | `R3-002`: `settle()` polléa ~1 s y, si el disco tarda más, el test falla con un mensaje que culpa al listado en vez de reportar el timeout | inline | **hecho** — falla como timeout que nombra presupuesto, fila y frame; 5 s (L73) | — |
+| T34 | S20 | `R3-temp-empty-refetch` de la review de T14.2: una carpeta local **vacía** se vuelve a escanear en cada viaje de ida y vuelta, porque `switch-source` sólo pide lectura cuando `entries.length === 0` y no recuerda si ya se pidió | inline | abierta — no bloquea T14: la card se comporta bien, sólo gasta un escaneo de más | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
@@ -1859,3 +1860,48 @@ todavía dice que el catálogo es «later slice». Las dos son de la rebanada 3.
 que va **un solo PR** al cerrar la rebanada 3, con `size:exception` y `Closes #72`, y lo mergea el dueño. Chained PRs
 no aplican porque cada PR exige cerrar una issue aprobada, y cerrar #72 con dos tercios del trabajo sería mentirle al
 gate.
+
+L83 (la review de la rebanada 2: aprobada, y lo que dejó). Dos lentes —`readability` y `reliability`— sobre
+`c780e39..fb6c50e` porque era un cambio de forma del estado, sin I/O nueva. **Aprobada**, autoridad quemada en
+`review-631300eb4aef6a86`, tres hallazgos advisory y ninguno bloqueante.
+
+- **`R2-default-source-empty-catalog` (WARNING)** — dice exactamente el transitorio que L82 ya había declarado: la
+  card abre en el catálogo y el catálogo no tiene loader, así que se ve una lista vacía sin etiqueta y sin aviso
+  hasta apretar `l`. No se arregla con un parche: **lo cierra la rebanada 3**, que está en curso.
+- **`R3-temp-empty-refetch` (SUGGESTION)** — real y anotado como **T34**: `switch-source` pide lectura cuando el
+  listado está vacío y no recuerda que ya la pidió, así que una carpeta legítimamente vacía se re-escanea en cada
+  ida y vuelta. No bloquea T14.
+- **`R2-reading-label-source-coupling` (SUGGESTION)** — el pie decide cómo imprimir `state.reading` según
+  `state.source`, y la invariante «un `reading` siempre pertenece a la fuente que se está viendo» hoy la sostienen
+  las guardas del reducer y los comentarios, no el tipo. Se deja como observación: cerrarla con tipos costaría un
+  campo por fuente y el riesgo real es una etiqueta mal impresa en una carrera entre dos lecturas, que la guarda de
+  token de T21 ya hace improbable.
+
+L84 (T14, rebanada 3 cerrada: el catálogo carga, cae a local y suena). La card abre en el catálogo y el catálogo
+existe: `lib/host/host.ts` gana `openCatalog`/`readCatalog`/`catalogFailed`/`ensureCatalog` con el mismo latch y
+guarda de token que dejó T21, `extensions/sb-music.ts` es la raíz de composición del `fetch` ambiente, de la caché y
+del resolver, y `createResolver` pide el token **antes de cada play** (`expiresAt` de 5 minutos, nunca persistido).
+`506` tests / `115` suites, `pnpm check` verde (venía de 488/112). El transitorio de L82 —«abre vacía»— queda
+cerrado, y con él el hallazgo `R2-default-source-empty-catalog` de la review de la rebanada 2.
+
+**Las cuatro filas de L75, implementadas como están escritas:** caché tibia pinta sin tocar la red; caché fría con
+red pinta el marco, trae el índice y después los álbumes con `reading catalog…` y luego
+`reading catalog · N of M albums` contando **resueltos**; caché fría sin red cae a la biblioteca; y la revalidación
+de una caché vieja corre en segundo plano bajo un token de pasada, así que una respuesta que perdió su carrera no
+escribe nada.
+
+**Seis decisiones que el brief no fijaba y el worker declaró en vez de esconder:** (1) la caché entra **inyectada**
+como tercer dep (`read`/`write`/`isFresh`) porque `lib/host` no puede importar `lib/catalog` — la dirección va al
+revés, y la guarda de frontera lo impone; (2) no hay efecto `read-catalog`: la lectura arranca desde `show()` y desde
+`dispatch()` con `ensureCatalog()`, que es lo que hace que `l` vuelva a pedir; (3) los álbumes cacheados se
+**recuerdan** en un mapa de sesión y se despachan al entrar, porque `catalog-album` sólo aterriza en el álbum que se
+está mirando; (4) la frase de la caída se **re-aplica una vez** cuando llega el listado de la biblioteca, porque
+`folder-loaded` limpia el pie y si no la sentencia viviría milisegundos; (5) la raíz de composición acepta un
+`{ fetch }` de test, que es la única forma de ejercitar el resolver sin abrir un socket; (6) entrar a un álbum que
+nadie leyó lo lee al momento, con el título del álbum como etiqueta.
+
+**Dos cosas que quedan abiertas y dichas:** la etiqueta de carpeta de S12 para una pista del catálogo todavía
+imprime el slug (`catalog:<album>`), porque `now-playing.ts` estaba fuera de las superficies; y la frase
+`catalog unavailable · reopen to retry` es más amplia que el comportamiento después de la caída —la card queda en la
+biblioteca, así que reabrir muestra la biblioteca y el reintento real ocurre con `l`— aunque las dos vías
+reintentan de verdad, porque el latch sólo lo pone una lectura exitosa.

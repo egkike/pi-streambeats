@@ -36,7 +36,15 @@ import { breadcrumb } from "../core/view.ts";
 import type { ScanResult } from "../library/scan.ts";
 import type { Player, PlayerReport } from "../player/mpv.ts";
 import { editShortcuts, type SaveResult, type Settings, SHORTCUT_NAMES, type ShortcutName } from "../settings.ts";
-import type { Track } from "../types.ts";
+import type {
+	CatalogAlbum,
+	CatalogAlbumListing,
+	CatalogCache,
+	CatalogFailure,
+	CatalogResult,
+	CatalogTrack,
+	Track,
+} from "../types.ts";
 import { createCardComponent, overlayHeight } from "./component.ts";
 import { matchesOverlayKey } from "./keys.ts";
 import { toViewTheme } from "./theme.ts";
@@ -113,6 +121,28 @@ export interface SbMusicDeps {
 	readonly scan: (path: string) => Promise<ScanResult>;
 	/** The player for one session (S6), created on `session_start`, never in the factory. */
 	readonly createPlayer: (report: (report: PlayerReport) => void) => Player;
+	/**
+	 * The catalog's reader (S20). Absent means the feature is off: the card opens on the same empty catalog
+	 * it always had, with no read, no cache and no throw. `readTrackUrl` is here because it is one port, but
+	 * the adapter never calls it — the token is resolved by the player's resolver, immediately before a play.
+	 */
+	readonly catalog?: {
+		readIndex(): Promise<CatalogResult<readonly CatalogAlbum[]>>;
+		readAlbum(slug: string): Promise<CatalogResult<readonly CatalogTrack[]>>;
+		readTrackUrl(albumSlug: string, trackSlug: string): Promise<CatalogResult<string>>;
+	};
+	/**
+	 * The catalog's metadata cache (S20, L75), injected instead of imported: the direction guard of S8 lets
+	 * `catalog` reach down and never up, so `lib/host` may not import `lib/catalog`. Absent means no cache —
+	 * every open is a cold read — and the card still works.
+	 */
+	readonly catalogCache?: {
+		read(path: string): CatalogCache | undefined;
+		write(path: string, cache: CatalogCache): boolean;
+		isFresh(cache: CatalogCache, now: number): boolean;
+	};
+	/** Where `catalog.json` lives (S20), resolved by the entry point; used together with `catalogCache`. */
+	readonly catalogCachePath?: string;
 	/** Time source for the elapsed clock; defaults to `Date.now`. */
 	readonly now?: () => number;
 	/** Schedules the one-second status refresh; defaults to `setInterval`. Returns its cancel. */
@@ -178,6 +208,23 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	let readingPath: string | undefined;
 	let wantsFocus = false;
 	let closing = false;
+	/**
+	 * The catalog's latch (S20, L75), the same shape as the library's: only a read that worked sets it, so a
+	 * failure leaves the next open free to retry. A second latch — `catalogInFlight` — keeps one pass at a
+	 * time, because this read is the network's and every dispatch asks whether it should start.
+	 */
+	let catalogLoaded = false;
+	let catalogInFlight = false;
+	/** The pass that may write state (T21's token discipline, applied to the network). */
+	let catalogToken = 0;
+	/** The album listings this session holds, so entering an album that already arrived costs no request. */
+	const catalogListings = new Map<string, CatalogAlbumListing>();
+	/**
+	 * The sentence the fallback wrote, waiting for the library listing that will take the footer from it. The
+	 * read of the library cleans the footer when it lands, so without this the reader would never see why the
+	 * card is on the library instead of the catalog (S20, L75).
+	 */
+	let pendingFallback: CatalogFailure | undefined;
 
 	/* --- the status line (S12) ---------------------------------------------------------------- */
 
@@ -271,6 +318,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			// set, locking this folder for the rest of the session. The contract says it does not throw;
 			// this keeps a broken one local instead of silently disabling every later read of the folder.
 			readingPath = undefined;
+			pendingFallback = undefined;
 			folderFailed(path, "reader failed");
 			return;
 		}
@@ -281,6 +329,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 				if (!result.ok) {
 					// S5 asks for the failure as a state, not as a toast that fades: the footer keeps saying it,
 					// with the path, until the card loads something else.
+					// The catalog's sentence is consumed, not repeated: a folder that cannot be shown is the
+					// newer news, and the footer only has one line.
+					pendingFallback = undefined;
 					folderFailed(result.path, result.failure.kind);
 					return;
 				}
@@ -288,12 +339,21 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 				// show asks again, instead of leaving the card empty for the whole session.
 				loaded = true;
 				dispatch({ kind: "folder-loaded", path: result.path, entries: result.entries });
+				// `folder-loaded` takes the footer for the listing it just painted, and the reason the card is
+				// on the library at all was the catalog's failure: for this one open that sentence is restored
+				// (S20, L75). It is dropped here either way, so it can never leak onto a later folder.
+				const fallback = pendingFallback;
+				pendingFallback = undefined;
+				if (fallback !== undefined && state.source === "library") {
+					dispatch({ kind: "catalog-failed", reason: fallback });
+				}
 			},
 			// `scan` never rejects (S21). If it ever does, that is a bug, and a bug must not become an
 			// unhandled rejection that takes the session down.
 			() => {
 				if (token !== loadToken) return;
 				readingPath = undefined;
+				pendingFallback = undefined;
 				folderFailed(path, "reader failed");
 			},
 		);
@@ -310,14 +370,236 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		ctx?.ui.notify(`cannot show ${breadcrumb(path, state.libraryRoot)}: ${reason}`, "warning");
 	}
 
+	/* --- the catalog (S20, L75) ---------------------------------------------------------------- */
+
+	/** How the footer counts a pass (L75): `catalog · 3 of 12 albums`, with the total the index brought. */
+	function catalogProgress(resolved: number, total: number): string {
+		return `catalog · ${resolved} of ${total} albums`;
+	}
+
+	/** The album list the model navigates: an album is a folder whose path is its slug (S20). */
+	function albumsOf(listings: readonly CatalogAlbumListing[]): readonly CatalogAlbum[] {
+		return listings.map(({ slug, title }) => ({ slug, title }));
+	}
+
+	/**
+	 * The catalog's opening (S20, L75), in the four cases the table names:
+	 *
+	 * - **A warm cache is the whole opening**: the list is painted from `catalog.json` and no socket is opened,
+	 *   not even in the background.
+	 * - **A stale cache is still a listing**: it is painted first and revalidated behind the reader's back.
+	 * - **Cold with a network**: the frame paints and the read starts — the index first, then every album — so
+	 *   the list grows instead of leaving twenty seconds of blank.
+	 * - **Cold without a network**: `catalogFailed` falls back to the local library and says why.
+	 *
+	 * It returns before any byte arrives: the opening never waits for the network, because the host's input
+	 * path cannot (S21) and the card paints before the answer exists.
+	 */
+	function openCatalog(): void {
+		if (!deps.catalog) return;
+		const path = deps.catalogCachePath;
+		const store = deps.catalogCache;
+		const cache = path === undefined ? undefined : store?.read(path);
+
+		if (cache !== undefined && store?.isFresh(cache, clock())) {
+			catalogLoaded = true;
+			serveCache(cache);
+			return;
+		}
+
+		const token = ++catalogToken;
+		catalogInFlight = true;
+		if (cache !== undefined) {
+			// The refresh does not get to block the opening: the reader keeps what it has while the network is
+			// asked, and nothing is said while it works (L75).
+			catalogLoaded = true;
+			serveCache(cache);
+			void readCatalog(token, true);
+			return;
+		}
+		// The message has two forms because the total does not exist until the index is parsed (L75): the
+		// footer starts without it and only then can it say `3 of 12`.
+		dispatch({ kind: "catalog-reading", label: "catalog…" });
+		void readCatalog(token, false);
+	}
+
+	/** Paint from the cache, and remember its albums for the moments they are entered (S20). */
+	function serveCache(cache: CatalogCache): void {
+		for (const album of cache.albums) catalogListings.set(album.slug, album);
+		dispatch({ kind: "catalog-albums", albums: albumsOf(cache.albums) });
+	}
+
+	/**
+	 * One pass over the catalog: the index and then every album, in index order. `revalidating` is the
+	 * background refresh of a served cache, which says nothing in the footer while it works (L75).
+	 *
+	 * Every answer is checked against the pass token before it touches the state, and a pass that lost its
+	 * race writes nothing — the same discipline T21 established for folder reads, applied to the network.
+	 */
+	async function readCatalog(token: number, revalidating: boolean): Promise<void> {
+		const reader = deps.catalog;
+		if (!reader) return;
+
+		let index: CatalogResult<readonly CatalogAlbum[]>;
+		try {
+			index = await reader.readIndex();
+		} catch {
+			// A port that rejects instead of answering is a dep that lies. The card renders a sentence, so a
+			// rejection has to become data here instead of an unhandled rejection that takes the session down.
+			index = { ok: false, failure: "network" };
+		}
+		if (token !== catalogToken) return;
+		if (!index.ok) {
+			catalogFailed(index.failure, revalidating);
+			catalogInFlight = false;
+			return;
+		}
+
+		// The index is the list, so it is the read that worked: it sets the latch even if a later album fails.
+		catalogLoaded = true;
+		dispatch({ kind: "catalog-albums", albums: index.value });
+		const total = index.value.length;
+		if (!revalidating) dispatch({ kind: "catalog-reading", label: catalogProgress(0, total) });
+
+		const listings: CatalogAlbumListing[] = [];
+		let resolved = 0;
+		for (const album of index.value) {
+			let page: CatalogResult<readonly CatalogTrack[]>;
+			try {
+				page = await reader.readAlbum(album.slug);
+			} catch {
+				page = { ok: false, failure: "network" };
+			}
+			if (token !== catalogToken) return;
+			// A read that finished is one the counter can stop waiting for, whether the album arrived or was
+			// skipped: counting only arrivals would leave one dead album reporting `11 of 12` forever, which is
+			// exactly the stuck counter L75 rules out.
+			resolved += 1;
+			if (page.ok) {
+				const listing: CatalogAlbumListing = { slug: album.slug, title: album.title, tracks: page.value };
+				catalogListings.set(album.slug, listing);
+				listings.push(listing);
+				dispatch({ kind: "catalog-album", album: listing });
+			}
+			if (!revalidating) dispatch({ kind: "catalog-reading", label: catalogProgress(resolved, total) });
+		}
+
+		// Settle the footer: the last label would otherwise stay up after the pass ended, and the index is the
+		// list's final truth anyway — the model keeps the cursor by slug when it accepts it (L75).
+		dispatch({ kind: "catalog-albums", albums: index.value });
+		catalogInFlight = false;
+
+		if (listings.length === 0) {
+			// The tolerance of L33 is per album, never for the whole catalog: an index whose every page failed
+			// is a catalog that is not there, and caching it would hide the failure for a day.
+			catalogFailed("scrape", revalidating);
+			return;
+		}
+		writeCatalog(listings);
+	}
+
+	/**
+	 * A catalog read that could not finish (S20, L75), in the two shapes it has:
+	 *
+	 * - **Nothing was served** (cold, no cache): the card falls back to the local library and says why. The
+	 *   switch goes first because `switch-source` clears the footer, and the sentence has to survive it; the
+	 *   library's own listing clears the footer too, so the sentence is applied once more when it lands.
+	 * - **Something was served** (a background revalidation): the list stays and one short notice says the
+	 *   refresh did not happen.
+	 *
+	 * The copy is the model's, not the adapter's: `catalog unavailable · reopen to retry` is the sentence L75
+	 * chose, and it names the only retry the card has.
+	 */
+	function catalogFailed(reason: CatalogFailure, revalidating: boolean): void {
+		if (revalidating) {
+			// The notice belongs to the catalog the refresh was started from: if the reader moved to another
+			// source meanwhile, the sentence would land on a listing it has nothing to do with.
+			if (state.source === "catalog") dispatch({ kind: "catalog-failed", reason });
+			return;
+		}
+		if (state.source === "catalog") {
+			pendingFallback = reason;
+			dispatch({ kind: "key", id: "l" });
+			// The library may already be on screen: with no read in flight nothing will clear the footer, so
+			// the sentence stands on its own and there is nothing to restore later.
+			if (readingPath === undefined) pendingFallback = undefined;
+		}
+		dispatch({ kind: "catalog-failed", reason });
+	}
+
+	/** The metadata cache, written once per finished pass (S20). A write that fails is not news: it is a cold start. */
+	function writeCatalog(listings: readonly CatalogAlbumListing[]): void {
+		const store = deps.catalogCache;
+		const path = deps.catalogCachePath;
+		if (store === undefined || path === undefined) return;
+		store.write(path, { version: 1, fetchedAt: clock(), albums: listings });
+	}
+
+	/**
+	 * Entering an album (S20): `enter` on a row asks for its slug, and the listing may already be here — the
+	 * pass reads every album and the cache carries them all. Only an album nobody has read yet costs a request.
+	 */
+	function loadCatalogAlbum(slug: string): void {
+		const known = catalogListings.get(slug);
+		if (known) {
+			dispatch({ kind: "catalog-album", album: known });
+			return;
+		}
+		if (!deps.catalog) return;
+
+		// The album list already knows the title, and the footer says what is being read in the same shape it
+		// uses for the catalog itself: an album still arriving must not look like an empty one (L62, L75).
+		const title = state.catalogAlbums.find((album) => album.slug === slug)?.title ?? "catalog…";
+		dispatch({ kind: "catalog-reading", label: title });
+		void readAlbum(catalogToken, slug, title);
+	}
+
+	/** One album asked for on demand, with its answer checked against the pass that owns the state. */
+	async function readAlbum(token: number, slug: string, title: string): Promise<void> {
+		const reader = deps.catalog;
+		if (!reader) return;
+		let page: CatalogResult<readonly CatalogTrack[]>;
+		try {
+			page = await reader.readAlbum(slug);
+		} catch {
+			page = { ok: false, failure: "network" };
+		}
+		if (token !== catalogToken) return;
+		if (!page.ok) {
+			// `album missing · reopen to retry` for a 404 and `catalog unavailable · reopen to retry` otherwise:
+			// the two sentences the model already carries (L82).
+			dispatch({ kind: "catalog-failed", reason: page.failure });
+			return;
+		}
+		const album: CatalogAlbumListing = { slug, title, tracks: page.value };
+		catalogListings.set(slug, album);
+		dispatch({ kind: "catalog-album", album });
+	}
+
+	/**
+	 * The catalog's latch (S20). It is set only by a read that worked, so a failure leaves the next open free
+	 * to retry — the gesture the footer announces (L75). `catalogInFlight` keeps one pass at a time, because
+	 * every dispatch asks and this read is the network's. With no catalog port the feature is off and none of
+	 * this happens: the card keeps the empty catalog it always had.
+	 */
+	function ensureCatalog(): void {
+		if (deps.catalog === undefined || catalogLoaded || catalogInFlight) return;
+		// A closed card reads nothing: the transport shortcuts dispatch with no overlay on screen, and a
+		// catalog read started there would be a network call nobody asked for.
+		if (state.presence !== "visible" || state.source !== "catalog") return;
+		openCatalog();
+	}
+
 	/** Execute the model's requests. The keyboard is handed back only when the card is dismissed. */
 	function applyEffects(effects: readonly Effect[]): void {
 		for (const effect of effects) {
 			switch (effect.kind) {
 				case "load-folder":
-					// The scanner is the library's loader, and the catalog's arrives with its own slice (S20).
-					// Asking the filesystem for an album slug would report a folder failure that is not one.
-					if (state.source === "library") loadFolder(effect.path);
+					// One effect, two sources, told apart by where the card is (S20): the library's folders are the
+					// scanner's, and the catalog's are album slugs, which are not paths — asking the filesystem for a
+					// slug would report a folder failure that is not one.
+					if (state.source === "catalog") loadCatalogAlbum(effect.path);
+					else loadFolder(effect.path);
 					break;
 				case "play": {
 					const track = trackById(effect.trackId);
@@ -371,6 +653,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		const reduction = reduce(state, event);
 		state = reduction.state;
 		applyEffects(reduction.effects);
+		// A key that brings the catalog back on screen is the other way its read starts (S20): the model emits
+		// no effect for it, because the network is the adapter's business and the state machine stays pure.
+		ensureCatalog();
 		if (state.presence === "hidden") {
 			hideOverlay();
 		} else if (overlay && overlay.size !== state.size) {
@@ -528,9 +813,11 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			// Latch only a load that worked. Latching first meant a library that was not ready when the
 			// card opened left it empty for the whole session, with no key to try again (S5, T16).
 			// The latch now lives inside the read, because the answer arrives after this returns (S21).
-			// The catalog is not read here: it opens on its own source and its loader is the next slice (S20).
 			loadFolder(currentView(state).path);
 		}
+		// The catalog's read is the network's: it starts here, after the presence is set, so the card paints
+		// its frame first and the opening never waits for a byte (S20, L75).
+		ensureCatalog();
 
 		if (overlay && overlay.size !== state.size) {
 			// Geometry is fixed when the overlay is created, so corner -> expanded is a new overlay.
@@ -622,6 +909,12 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		loadToken += 1;
 		readingPath = undefined;
 		wantsFocus = false;
+		// The catalog's pass has the same rule, plus its own latch and the albums it had read (S20).
+		catalogLoaded = false;
+		catalogInFlight = false;
+		catalogToken += 1;
+		catalogListings.clear();
+		pendingFallback = undefined;
 		player = deps.createPlayer(onReport);
 		stopTick = schedule(() => {
 			// A full repaint every second for a hidden card with nothing playing is pure cost (T16).
@@ -635,6 +928,11 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		closing = true;
 		stopTick?.();
 		stopTick = undefined;
+		// A catalog pass still in flight belongs to the session that is ending: its answers write nothing
+		// from here on (S20).
+		catalogToken += 1;
+		catalogInFlight = false;
+		pendingFallback = undefined;
 
 		const current = player;
 		player = undefined;

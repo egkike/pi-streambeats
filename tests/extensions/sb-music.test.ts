@@ -12,8 +12,8 @@
  */
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
 import type {
 	ExtensionAPI,
@@ -23,7 +23,21 @@ import type {
 	Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { Component, OverlayHandle, TUI } from "@earendil-works/pi-tui";
-import sbMusic from "../../extensions/sb-music.ts";
+import sbMusic, { createResolver } from "../../extensions/sb-music.ts";
+import { catalogCachePath } from "../../lib/catalog/cache.ts";
+import type { CatalogFetch, CatalogHttp } from "../../lib/catalog/http.ts";
+import type { Platform } from "../../lib/settings.ts";
+import type { CatalogAlbumListing, Track } from "../../lib/types.ts";
+
+/**
+ * The catalog's two pages, from the same fixtures the reader's own tests use: the entry point really runs
+ * `createCatalogHttp` here, and there is no socket anywhere (S20).
+ */
+const MUSIC_PAGE = readFileSync(new URL("../fixtures/catalog/music-grid.html", import.meta.url), "utf8");
+const ALBUM_PAGE = readFileSync(new URL("../fixtures/catalog/album-tralbum.html", import.meta.url), "utf8");
+
+const catalogFetch: CatalogFetch = async (url) =>
+	url.endsWith("/music") ? { status: 200, text: MUSIC_PAGE } : { status: 200, text: ALBUM_PAGE };
 
 /** The width the frames below are rendered at: the artboard's comfortable reference (S3). */
 const COLUMNS = 90;
@@ -102,11 +116,17 @@ function fixture(options: FixtureOptions = {}): Fixture {
 async function as(target: Fixture, run: () => void | Promise<void>): Promise<void> {
 	const saved = {
 		XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+		XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
 		APPDATA: process.env.APPDATA,
+		LOCALAPPDATA: process.env.LOCALAPPDATA,
 		HOME: process.env.HOME,
 	};
 	process.env.XDG_CONFIG_HOME = target.configHome;
+	// The catalog's cache is one of the extension's own files (S20): it belongs in the fixture, never in
+	// the real user's cache directory.
+	process.env.XDG_CACHE_HOME = join(target.root, "cache");
 	process.env.APPDATA = target.configHome;
+	process.env.LOCALAPPDATA = target.configHome;
 	process.env.HOME = target.home;
 	try {
 		await run();
@@ -299,7 +319,7 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 		const f = fixture({ shortcuts: { overlay: "ctrl+alt+m", next: "ctrl+alt+j" } });
 		await as(f, () => {
 			const h = host();
-			sbMusic(h.pi);
+			sbMusic(h.pi, { fetch: catalogFetch });
 
 			assert.deepEqual(
 				h.shortcutKeys().sort(),
@@ -318,7 +338,7 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 		const f = fixture({ shortcuts: { overlay: "ctrl+alt+m" } });
 		await as(f, async () => {
 			const h = host();
-			sbMusic(h.pi);
+			sbMusic(h.pi, { fetch: catalogFetch });
 
 			await command(h, "--keys");
 
@@ -339,7 +359,7 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 		const f = fixture({ raw: "{\n" });
 		await as(f, async () => {
 			const h = host();
-			sbMusic(h.pi);
+			sbMusic(h.pi, { fetch: catalogFetch });
 
 			await command(h, "--keys");
 
@@ -357,7 +377,7 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 		const f = fixture({});
 		await as(f, async () => {
 			const h = host();
-			sbMusic(h.pi);
+			sbMusic(h.pi, { fetch: catalogFetch });
 
 			await command(h, "--keys overlay=ctrl+alt+k");
 
@@ -378,7 +398,7 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 		const f = fixture({ asciiGlyphs: true });
 		await as(f, async () => {
 			const h = host();
-			sbMusic(h.pi);
+			sbMusic(h.pi, { fetch: catalogFetch });
 			try {
 				await command(h, "");
 
@@ -406,6 +426,150 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 				const stayed = component?.render(COLUMNS) ?? [];
 				assert.ok(stayed.join("\n").includes("at home"), `the footer says why it did not move:\n${stayed.join("\n")}`);
 				assert.ok(stayed.join("\n").includes("Music/"), "and the listing did not move either");
+			} finally {
+				await shutdown(h);
+			}
+		});
+	});
+});
+
+/** The platform the entry point resolves, mirrored here so the test knows where the cache lands (S19, S10). */
+function platformOf(): Platform {
+	if (process.platform === "win32") return "win32";
+	if (process.platform === "darwin") return "darwin";
+	return "linux";
+}
+
+/** The cache file the XDG convention resolves for the current fixture (S20). */
+function cacheFile(): string {
+	return catalogCachePath({ platform: platformOf(), env: process.env, home: homedir() });
+}
+
+/** One album as the cache stores it: metadata only, never a URL (S20). */
+const CHILLHOP: CatalogAlbumListing = {
+	slug: "chillhop",
+	title: "Chillhop",
+	tracks: [{ slug: "arcade-dreams", title: "Arcade Dreams", durationMs: 200_000 }],
+};
+
+/** The catalog track the resolver is asked about: `origin + id`, never a URL (S3, S20). */
+const CATALOG_TRACK: Track = { id: "catalog:chillhop/arcade-dreams", title: "Arcade Dreams", origin: "catalog" };
+
+/** A catalog that answers one URL per call, so a second play paying for its own token is observable (S20). */
+function countingCatalog(): { port: Pick<CatalogHttp, "readTrackUrl">; asked: string[] } {
+	const asked: string[] = [];
+	return {
+		asked,
+		port: {
+			readTrackUrl: (albumSlug, trackSlug) => {
+				asked.push(`${albumSlug}/${trackSlug}`);
+				return Promise.resolve({ ok: true, value: `https://streambeats.test/${asked.length}?token=abc` });
+			},
+		},
+	};
+}
+
+describe("the resolver the root builds owns both sources (S7, S20)", () => {
+	it("gives a local track its own path and asks nobody", async () => {
+		const catalog = countingCatalog();
+
+		const result = await createResolver(catalog.port).resolve({ id: "/music/a.mp3", title: "a.mp3", origin: "local" });
+
+		assert.deepEqual(result, { ok: true, target: { uri: "/music/a.mp3" } });
+		assert.deepEqual(catalog.asked, [], "a local file is already its own target");
+	});
+
+	it("resolves the catalog id into a URL with a bounded life", async () => {
+		const catalog = countingCatalog();
+
+		const result = await createResolver(catalog.port, () => 1_000).resolve(CATALOG_TRACK);
+
+		assert.deepEqual(catalog.asked, ["chillhop/arcade-dreams"], "the model's own reader took the id apart");
+		assert.deepEqual(result, {
+			ok: true,
+			target: { uri: "https://streambeats.test/1?token=abc", expiresAt: 1_000 + 5 * 60_000 },
+		});
+	});
+
+	it("pays for a fresh token on every play instead of reusing the last one", async () => {
+		// The invariant S20 states and AGENTS.md repeats: a cached URL is an expired URL, so nothing here
+		// remembers what the previous play resolved.
+		const catalog = countingCatalog();
+		const resolver = createResolver(catalog.port);
+
+		const first = await resolver.resolve(CATALOG_TRACK);
+		const second = await resolver.resolve(CATALOG_TRACK);
+
+		const uriOf = (result: typeof first): string | undefined => (result.ok ? result.target.uri : undefined);
+		assert.equal(catalog.asked.length, 2, "each play asked for its own");
+		assert.notEqual(uriOf(first), uriOf(second), "and the two URLs are not the same token");
+	});
+
+	it("maps the catalog's failures onto the names the resolver already has", async () => {
+		for (const failure of ["network", "not-found", "scrape"] as const) {
+			const resolver = createResolver({ readTrackUrl: () => Promise.resolve({ ok: false, failure }) });
+
+			assert.deepEqual(await resolver.resolve(CATALOG_TRACK), { ok: false, failure }, failure);
+		}
+	});
+
+	it("refuses an id that names no album and track without asking for a URL", async () => {
+		const catalog = countingCatalog();
+		const resolver = createResolver(catalog.port);
+
+		const result = await resolver.resolve({ id: "catalog:broken", title: "x", origin: "catalog" });
+
+		assert.deepEqual(result, { ok: false, failure: "not-found" });
+		assert.deepEqual(catalog.asked, [], "there is nothing to ask about");
+	});
+});
+
+describe("the catalog at the composition root (S20)", () => {
+	it("opens from the cache file the XDG convention resolves and never touches the network", async () => {
+		const f = fixture({});
+		await as(f, async () => {
+			const file = cacheFile();
+			mkdirSync(dirname(file), { recursive: true });
+			writeFileSync(file, `${JSON.stringify({ version: 1, fetchedAt: Date.now(), albums: [CHILLHOP] })}\n`);
+			let calls = 0;
+			const h = host();
+			sbMusic(h.pi, {
+				fetch: async () => {
+					calls += 1;
+					return { status: 200, text: MUSIC_PAGE };
+				},
+			});
+			try {
+				await command(h, "");
+
+				assert.equal(calls, 0, "a warm cache is the whole opening: no socket at all");
+				assert.match(h.overlays.at(-1)?.render(COLUMNS).join("\n") ?? "", /Chillhop/);
+			} finally {
+				await shutdown(h);
+			}
+		});
+	});
+
+	it("reads the catalog on open, paints the albums and writes the cache once", async () => {
+		const f = fixture({});
+		await as(f, async () => {
+			const h = host();
+			sbMusic(h.pi, { fetch: catalogFetch });
+			try {
+				await command(h, "");
+				// The read is asynchronous by contract; what it must not do is leave a blank card behind.
+				const frame = await settle(h.overlays.at(-1), "Groovy");
+				assert.ok(frame.join("\n").includes("Better When"), "the list grew with the albums the index announced");
+
+				const file = cacheFile();
+				const written = JSON.parse(readFileSync(file, "utf8")) as { albums: { slug: string }[] };
+				assert.deepEqual(
+					written.albums.map((album) => album.slug),
+					["better-when-im-high-remix", "electric", "groovy"],
+					"the metadata the pass read is what got cached",
+				);
+				// L80 made this structural — the cache has no field for a token — and the file proves it.
+				assert.equal(readFileSync(file, "utf8").includes("http"), false, "no audio URL is ever persisted");
 			} finally {
 				await shutdown(h);
 			}

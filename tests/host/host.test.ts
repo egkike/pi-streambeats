@@ -13,11 +13,19 @@ import type {
 	Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { Component, OverlayHandle, TUI, TuiMouseEvent } from "@earendil-works/pi-tui";
+import { isCatalogFresh } from "../../lib/catalog/cache.ts";
 import { registerSbMusic, STATUS_KEY } from "../../lib/host/host.ts";
 import type { ScanResult } from "../../lib/library/scan.ts";
 import type { Player, PlayerReport } from "../../lib/player/mpv.ts";
 import type { Settings } from "../../lib/settings.ts";
-import type { LibraryEntry } from "../../lib/types.ts";
+import type {
+	CatalogAlbum,
+	CatalogAlbumListing,
+	CatalogCache,
+	CatalogResult,
+	CatalogTrack,
+	LibraryEntry,
+} from "../../lib/types.ts";
 
 const HOME = "/home/kike";
 const ROOT = `${HOME}/Music`;
@@ -49,12 +57,50 @@ const SETTINGS: Settings = {
 /** The resolved file `--keys` prints (S22); a fake path, like everything else the adapter receives. */
 const SETTINGS_FILE = `${HOME}/.config/pi-streambeats/settings.json`;
 
+/** Where the catalog's metadata cache lives (S20): the path the entry point resolves and the adapter receives. */
+const CACHE_FILE = `${HOME}/.cache/pi-streambeats/catalog.json`;
+
 /**
  * `InteractiveMode.MAX_WIDGET_LINES` in the host (`dist/modes/interactive/interactive-mode.js`): a string
  * widget keeps ten lines and appends "... (widget truncated)" after dropping the rest. Every report this
  * adapter prints has to fit, or the last line disappears without a word (S22, T28).
  */
 const MAX_WIDGET_LINES = 10;
+
+/** The two albums the fake catalog announces, and the only track each of them carries. */
+const CHILLHOP: CatalogAlbum = { slug: "chillhop", title: "Chillhop" };
+const LOFI: CatalogAlbum = { slug: "lofi", title: "Lo-fi" };
+
+const TRACKS: readonly CatalogTrack[] = [{ slug: "arcade-dreams", title: "Arcade Dreams", durationMs: 200_000 }];
+
+/**
+ * What a fake catalog answers (S20). Every read is recorded by the harness, so "touched no network at all"
+ * is something a test can observe instead of infer.
+ */
+interface CatalogScript {
+	readonly readIndex: () => Promise<CatalogResult<readonly CatalogAlbum[]>>;
+	readonly readAlbum: (slug: string) => Promise<CatalogResult<readonly CatalogTrack[]>>;
+}
+
+/** An index that answers at once, for the tests that are not about the index's timing. */
+function indexOf(albums: readonly CatalogAlbum[] = [CHILLHOP, LOFI]): CatalogScript["readIndex"] {
+	return () => Promise.resolve({ ok: true, value: albums });
+}
+
+/** An album page that answers at once, with the fixture track, whatever album was asked for. */
+function albumsOf(): CatalogScript["readAlbum"] {
+	return () => Promise.resolve({ ok: true, value: TRACKS });
+}
+
+/** A listing as the cache stores it: metadata only, never a URL (S20). */
+function listingOf(album: CatalogAlbum, tracks: readonly CatalogTrack[] = TRACKS): CatalogAlbumListing {
+	return { slug: album.slug, title: album.title, tracks };
+}
+
+/** A cache holding these albums, stamped `fetchedAt` (S20, L75). */
+function cacheOf(albums: readonly CatalogAlbumListing[], fetchedAt: number): CatalogCache {
+	return { version: 1, fetchedAt, albums };
+}
 
 const EDITOR: Component = { render: () => [], invalidate: () => {} };
 
@@ -102,8 +148,14 @@ interface Harness {
 	/** How many players the adapter built: the session is the only thing that creates one (S6). */
 	readonly created: { players: number };
 	readonly scanCalls: string[];
+	/** How often each catalog read was asked for, so "no network at all" is observable (S20). */
+	readonly catalogCalls: { index: number; readonly albums: string[] };
+	/** Every cache write the adapter asked for, in order, with the file it wrote (S20, L75). */
+	readonly catalogWrites: { path: string; cache: CatalogCache }[];
+	/** Every frame the host painted, in order: the progress label is a sequence, not a final state (L75). */
+	readonly frames: string[];
 	/** Knobs a test sets before `register` runs, for the paths that only start from a broken file. */
-	readonly options: { warning?: string };
+	readonly options: { warning?: string; catalog?: CatalogScript; cache?: CatalogCache };
 	readonly report: (report: PlayerReport) => void;
 	readonly tick: () => void;
 	readonly closed: () => number;
@@ -189,9 +241,12 @@ function harness(editor: Component | null = EDITOR): Harness {
 	const saved: Settings[] = [];
 	const overlays: OverlayCall[] = [];
 	const scanCalls: string[] = [];
+	const catalogCalls: { index: number; albums: string[] } = { index: 0, albums: [] };
+	const catalogWrites: { path: string; cache: CatalogCache }[] = [];
+	const frames: string[] = [];
 	const created = { players: 0 };
 	const now = { value: 1_000 };
-	const options: { warning?: string } = {};
+	const options: { warning?: string; catalog?: CatalogScript; cache?: CatalogCache } = {};
 	const reportHandler: (report: PlayerReport) => void = () => {};
 	let tickFn: (() => void) | undefined;
 	let closedCount = 0;
@@ -201,6 +256,11 @@ function harness(editor: Component | null = EDITOR): Harness {
 		getFocusedComponent: () => editor,
 		requestRender: () => {
 			renderCount += 1;
+			// What the host does with the request: paint the frame that is current right now. Recording it is
+			// what lets a test see a sequence of states (a progress label walking to its total) instead of only
+			// the last one (L75).
+			const current = overlays.at(-1);
+			if (current) frames.push(current.component.render(90).join("\n"));
 		},
 		terminal: { rows: 24, columns: 120 },
 	} as unknown as TUI;
@@ -293,6 +353,9 @@ function harness(editor: Component | null = EDITOR): Harness {
 		playerCalls,
 		created,
 		scanCalls,
+		catalogCalls,
+		catalogWrites,
+		frames,
 		options,
 		report: (report) => reportHandler(report),
 		tick: () => tickFn?.(),
@@ -307,6 +370,7 @@ function register(
 	scan: (path: string) => ScanResult | Promise<ScanResult> = (path) => ({ ok: true, path, entries: ENTRIES }),
 	terminalColumns?: () => number,
 ): void {
+	const script = h.options.catalog;
 	registerSbMusic(h.pi, {
 		settings: SETTINGS,
 		ceiling: HOME,
@@ -320,6 +384,36 @@ function register(
 			h.scanCalls.push(path);
 			return Promise.resolve(scan(path));
 		},
+		// The catalog only exists when a test asks for it: absent is the feature being off (S20), which is the
+		// state of every other test in this file.
+		catalog:
+			script === undefined
+				? undefined
+				: {
+						readIndex: () => {
+							h.catalogCalls.index += 1;
+							return script.readIndex();
+						},
+						readAlbum: (slug) => {
+							h.catalogCalls.albums.push(slug);
+							return script.readAlbum(slug);
+						},
+						// The adapter never resolves a token; the player's resolver does, in the entry point.
+						readTrackUrl: () => Promise.resolve({ ok: false, failure: "not-found" }),
+					},
+		catalogCache:
+			script === undefined
+				? undefined
+				: {
+						read: () => h.options.cache,
+						write: (path, cache) => {
+							h.catalogWrites.push({ path, cache });
+							return true;
+						},
+						// The real TTL rule (L75), so "fresh" means what the cache module means by it.
+						isFresh: (cache, now) => isCatalogFresh(cache, now),
+					},
+		catalogCachePath: CACHE_FILE,
 		createPlayer: (report) => {
 			// The harness needs the callback, so it is captured here and used by `report`.
 			Object.assign(h, { report });
@@ -1482,5 +1576,253 @@ describe("the two sources in the card (S20)", () => {
 		answer?.({ ok: true, path: ROOT, entries: ENTRIES });
 		await flush();
 		assert.match(frameOf(h), /Arcade Dreams/, "the answer lands on the library it belonged to");
+	});
+});
+
+/** A promise whose answer the test decides, so the frames painted in between can be observed (L75). */
+function defer<T>(): { readonly promise: Promise<T>; answer: (value: T) => void } {
+	let answer!: (value: T) => void;
+	const promise = new Promise<T>((resolve) => {
+		answer = resolve;
+	});
+	return { promise, answer };
+}
+
+describe("the catalog opens, loads and revalidates (S20, L75)", () => {
+	it("paints a warm cache and opens no socket at all", async () => {
+		// The first rule of the table: a cache inside its 24 h is the whole opening. Not even the background
+		// refresh is allowed here, which is why both counters are asserted instead of only the frame.
+		const h = harness();
+		h.options.catalog = { readIndex: indexOf(), readAlbum: albumsOf() };
+		h.options.cache = cacheOf([listingOf(CHILLHOP)], h.now.value);
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.equal(h.catalogCalls.index, 0, "the index was never asked for");
+		assert.deepEqual(h.catalogCalls.albums, [], "and no album page either");
+		assert.match(frameOf(h), /Chillhop/, "the cached album is on the frame");
+		assert.doesNotMatch(frameOf(h), /reading /, "and nothing claims the card is reading");
+	});
+
+	it("says what it is reading before the total is known, then counts resolved albums to it", async () => {
+		// Two forms of one message (L75): the total does not exist until the index is parsed, and the counter
+		// has to reach it even when an album is skipped, or it would look stuck one short of the end.
+		const h = harness();
+		const index = defer<CatalogResult<readonly CatalogAlbum[]>>();
+		const pages = new Map<string, (value: CatalogResult<readonly CatalogTrack[]>) => void>();
+		h.options.catalog = {
+			readIndex: () => index.promise,
+			readAlbum: (slug) => new Promise((resolve) => pages.set(slug, resolve)),
+		};
+		register(h);
+		await start(h);
+		await open(h);
+
+		assert.match(frameOf(h), /reading catalog…/, "without a total there is no number to print");
+
+		index.answer({ ok: true, value: [CHILLHOP, LOFI] });
+		await flush();
+		assert.match(frameOf(h), /reading catalog · 0 of 2 albums/);
+		assert.match(frameOf(h), /Chillhop/, "the album list arrived first, so the card is never blank");
+
+		pages.get(CHILLHOP.slug)?.({ ok: true, value: TRACKS });
+		await flush();
+		assert.match(frameOf(h), /reading catalog · 1 of 2 albums/);
+
+		pages.get(LOFI.slug)?.({ ok: false, failure: "not-found" });
+		await flush();
+
+		assert.ok(
+			h.frames.some((frame) => frame.includes("reading catalog · 2 of 2 albums")),
+			"a skipped album still counts, so the counter reaches the total (L33, L75)",
+		);
+		assert.doesNotMatch(frameOf(h), /reading /, "and the footer goes back to the hints once the pass ends");
+		assert.equal(h.catalogWrites.length, 1, "the cache is written once, when the pass finishes");
+		assert.equal(h.catalogWrites[0]?.path, CACHE_FILE, "into the file the entry point resolved");
+		assert.deepEqual(
+			h.catalogWrites[0]?.cache.albums.map((album) => album.slug),
+			[CHILLHOP.slug],
+			"and it caches what was actually read, not the album that was skipped",
+		);
+	});
+
+	it("falls back to the local library when the index cannot be read and there is no cache", async () => {
+		// The second half of the table. The sentence goes AFTER the switch, because `switch-source` clears the
+		// footer; and the listing's own arrival clears it again, so the sentence is restored once it lands.
+		const h = harness();
+		let answer: ((result: ScanResult) => void) | undefined;
+		h.options.catalog = {
+			readIndex: () => Promise.resolve({ ok: false, failure: "network" }),
+			readAlbum: albumsOf(),
+		};
+		register(h, () => new Promise<ScanResult>((resolve) => (answer = resolve)));
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.deepEqual(h.scanCalls, [ROOT], "the library is the source the card fell back to");
+		// The sentence outranks the read in the footer, and it can only be there because it was dispatched
+		// AFTER the switch: `switch-source` clears the footer, so the opposite order would have erased it.
+		assert.match(frameOf(h), /catalog unavailable · reopen to retry/, "and the footer names the way out (L75)");
+		assert.match(frameOf(h), /0 tracks/, "while the library it fell back to is still being read");
+
+		answer?.({ ok: true, path: ROOT, entries: ENTRIES });
+		await flush();
+
+		assert.match(frameOf(h), /Arcade Dreams/, "the library listing landed");
+		assert.match(
+			frameOf(h),
+			/catalog unavailable · reopen to retry/,
+			"and the sentence survives the listing that would have cleared it",
+		);
+	});
+
+	it("paints a stale cache first and revalidates it behind the reader's back", async () => {
+		const h = harness();
+		const index = defer<CatalogResult<readonly CatalogAlbum[]>>();
+		h.options.catalog = { readIndex: () => index.promise, readAlbum: albumsOf() };
+		h.options.cache = cacheOf([listingOf(CHILLHOP)], h.now.value - 25 * 60 * 60 * 1000);
+		register(h);
+		await start(h);
+		await open(h);
+
+		assert.match(frameOf(h), /Chillhop/, "a stale cache is still a listing, and the opening shows it");
+		assert.doesNotMatch(frameOf(h), /reading /, "the refresh is silent while it works (L75)");
+		assert.equal(h.catalogCalls.index, 1, "the stale cache was revalidated in the background");
+
+		index.answer({ ok: true, value: [CHILLHOP, LOFI] });
+		await flush();
+
+		assert.match(frameOf(h), /Lo-fi/, "the new list is applied on top of the one on screen");
+		assert.equal(h.catalogWrites.length, 1, "and the refreshed metadata replaces the stale file");
+	});
+
+	it("keeps a stale listing when the revalidation fails, and says so once", async () => {
+		const h = harness();
+		h.options.catalog = {
+			readIndex: () => Promise.resolve({ ok: false, failure: "network" }),
+			readAlbum: albumsOf(),
+		};
+		h.options.cache = cacheOf([listingOf(CHILLHOP)], h.now.value - 25 * 60 * 60 * 1000);
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.match(frameOf(h), /Chillhop/, "the list does not disappear because a refresh failed");
+		assert.match(frameOf(h), /catalog unavailable · reopen to retry/, "one short notice, and it names the gesture");
+		assert.equal(h.catalogWrites.length, 0, "a cache that could not be refreshed is not rewritten");
+	});
+
+	it("writes nothing for a pass that lost its session (S20)", async () => {
+		// The token discipline of T21, applied to the network: an answer that arrives after the session it
+		// belongs to is gone must not paint or cache anything.
+		const h = harness();
+		const index = defer<CatalogResult<readonly CatalogAlbum[]>>();
+		h.options.catalog = { readIndex: () => index.promise, readAlbum: albumsOf() };
+		register(h);
+		await start(h);
+		await open(h);
+		assert.equal(h.catalogCalls.index, 1, "the pass started");
+
+		await h.handlers.get("session_shutdown")?.(undefined, h.ctx);
+		index.answer({ ok: true, value: [CHILLHOP] });
+		await flush();
+
+		assert.deepEqual(h.catalogCalls.albums, [], "the pass stopped before reading an album");
+		assert.equal(h.catalogWrites.length, 0, "and wrote no cache for a session that is over");
+	});
+
+	it("does not start a second pass while the first one is still in flight", async () => {
+		// Hiding and reopening is the retry gesture (L75), and the pass it would retry is still running: two
+		// reads would double the requests and race each other for the same state.
+		const h = harness();
+		const index = defer<CatalogResult<readonly CatalogAlbum[]>>();
+		h.options.catalog = { readIndex: () => index.promise, readAlbum: albumsOf() };
+		register(h);
+		await start(h);
+		await open(h);
+
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+
+		assert.equal(h.catalogCalls.index, 1, "one pass, not one per show");
+		index.answer({ ok: true, value: [CHILLHOP] });
+		await flush();
+		assert.match(frameOf(h), /Chillhop/, "and the one pass that ran paints the album");
+	});
+
+	it("lists an album the pass already read without asking for it again", async () => {
+		const h = harness();
+		h.options.catalog = { readIndex: indexOf([CHILLHOP]), readAlbum: albumsOf() };
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+		assert.deepEqual(h.catalogCalls.albums, [CHILLHOP.slug], "the pass read the album");
+
+		h.overlays[0]?.component.handleInput?.("\r");
+		await flush();
+
+		assert.deepEqual(h.catalogCalls.albums, [CHILLHOP.slug], "entering it costs no second request");
+		assert.match(frameOf(h), /Arcade Dreams/, "and its tracks are on the card");
+	});
+
+	it("retries the catalog when the card asks for it again after a failed open", async () => {
+		// L75 has no retry key: the retry is asking again. The latch is only set by a read that worked, so a
+		// failed open leaves the card free to try, and the sentence it printed names exactly that gesture.
+		const h = harness();
+		let attempts = 0;
+		h.options.catalog = {
+			readIndex: () => {
+				attempts += 1;
+				return attempts === 1 ? Promise.resolve({ ok: false, failure: "network" }) : indexOf([CHILLHOP])();
+			},
+			readAlbum: albumsOf(),
+		};
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+		assert.equal(h.catalogCalls.index, 1, "the first open tried and failed");
+
+		h.overlays[0]?.component.handleInput?.("l");
+		await flush();
+
+		assert.equal(h.catalogCalls.index, 2, "coming back to the catalog is the retry");
+		assert.match(frameOf(h), /Chillhop/, "and the second attempt paints the album");
+	});
+
+	it("turns a catalog that rejects into the same sentences a failure gets (S20)", async () => {
+		// The contract says every read answers data. A dep that rejects anyway must not become an unhandled
+		// rejection that takes the session down: the card renders a sentence, so a rejection becomes data here.
+		const h = harness();
+		h.options.catalog = {
+			readIndex: () => Promise.reject(new Error("boom")),
+			readAlbum: () => Promise.reject(new Error("boom")),
+		};
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.match(frameOf(h), /catalog unavailable · reopen to retry/, "the failure is a sentence, not a crash");
+		assert.deepEqual(h.scanCalls, [ROOT], "and it fell back to the library like any other failed index");
+	});
+
+	it("keeps the card working with no catalog port at all, reading nothing", async () => {
+		// The feature being off is a state, not an error: no read, no cache, no throw (S20).
+		const h = harness();
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.equal(h.catalogCalls.index, 0);
+		assert.match(frameOf(h), /sb-music StreamBeats/, "the card still says which source it is on");
 	});
 });
