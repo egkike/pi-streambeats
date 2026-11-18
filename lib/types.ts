@@ -5,8 +5,14 @@
  * This module is pure: it declares shapes and nothing else.
  */
 
-/** Where a track comes from. v1 ships `local` only; `catalog` arrives in a later slice. */
+/** Where a track comes from. */
 export type TrackOrigin = "local" | "catalog";
+
+/**
+ * The two listings the card shows (S20): the StreamBeats catalog and the local library. They are two
+ * sources of one card, not two screens — navigation, filter and mouse behave the same in both.
+ */
+export type MusicSource = "catalog" | "library";
 
 /**
  * Stable identity for a track: the absolute path for local files.
@@ -19,6 +25,11 @@ export interface Track {
 	readonly origin: TrackOrigin;
 	/** Duration in milliseconds when it is known before playing; undefined until then. */
 	readonly durationMs?: number;
+	/**
+	 * The album a catalog track belongs to, in display form (S20, S12). A local track has a directory to be
+	 * labelled by; a catalog track has only an id, and `catalog:<slug>` is not a name a listener recognizes.
+	 */
+	readonly album?: string;
 }
 
 /** A directory the card can descend into. Children are listed one level at a time (S5). */
@@ -63,6 +74,51 @@ export interface TrackResolver {
 	readonly prefetchable: boolean;
 	resolve(track: Track, signal?: AbortSignal): Promise<ResolveResult>;
 }
+
+/**
+ * One album of the catalog, as the index page announces it (S20). `slug` is its identity; a title is
+ * decoration the site may change without changing which album the row is.
+ */
+export interface CatalogAlbum {
+	readonly slug: string;
+	/** Display title, already neutralized: it arrived from the network, not from a disk we chose. */
+	readonly title: string;
+}
+
+/** One track of a catalog album (S20). Its `slug` identifies it inside its album, never across albums. */
+export interface CatalogTrack {
+	readonly slug: string;
+	readonly title: string;
+	readonly durationMs?: number;
+}
+
+/** An album together with the tracks its own page announced: what the card lists and the cache stores. */
+export interface CatalogAlbumListing extends CatalogAlbum {
+	readonly tracks: readonly CatalogTrack[];
+}
+
+/**
+ * The catalog's metadata cache (S20). It is redownloadable and it carries **no audio URL**: a signed
+ * URL is a token, and a token on disk outlives the play that paid for it.
+ */
+export interface CatalogCache {
+	/** Bumped when the shape changes: an older file is a missing cache, never a half-read one. */
+	readonly version: 1;
+	/** Epoch milliseconds of the read that filled it; the 24 h TTL of L75 is measured from here. */
+	readonly fetchedAt: number;
+	readonly albums: readonly CatalogAlbumListing[];
+}
+
+/**
+ * Why the catalog could not be read (S20). `not-found` is one album that is gone, `scrape` is markup we
+ * no longer recognize, and `network` is the world not answering. Each gets its own message.
+ */
+export type CatalogFailure = "network" | "not-found" | "scrape";
+
+/** A catalog read as data, never as a rejection: the card has nowhere to catch an exception. */
+export type CatalogResult<T> =
+	| { readonly ok: true; readonly value: T }
+	| { readonly ok: false; readonly failure: CatalogFailure };
 
 /**
  * Semantic colour roles, mapped from the host theme (S3, D8).

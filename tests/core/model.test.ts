@@ -7,17 +7,23 @@ import { describe, it } from "node:test";
 import {
 	actionFor,
 	type CardState,
+	catalogTrackId,
+	currentView,
+	DEFAULT_SOURCE,
 	footerHints,
 	initialState,
 	KEY_BINDINGS,
 	type KeyAction,
 	type ModelDeps,
+	parseCatalogTrackId,
 	type Reduction,
 	reduce,
+	type SourceView,
 	selectedEntry,
+	TOP_OF_CATALOG,
 	visibleEntries,
 } from "../../lib/core/model.ts";
-import type { Folder, LibraryEntry, Track } from "../../lib/types.ts";
+import type { CatalogAlbum, CatalogAlbumListing, Folder, LibraryEntry, Track } from "../../lib/types.ts";
 
 const HOME = "/home/kike";
 const ROOT = `${HOME}/Music`;
@@ -55,6 +61,11 @@ function start(config = { libraryRoot: ROOT, ceiling: HOME }): CardState {
 	return initialState(config);
 }
 
+/** The listing on screen, which the model reads through exactly one selector (S20). */
+function view(state: CardState): SourceView {
+	return currentView(state);
+}
+
 function visible(state: CardState): CardState {
 	return reduce(state, { kind: "overlay" }).state;
 }
@@ -78,14 +89,14 @@ function key(state: CardState, id: string, deps?: ModelDeps): CardState {
 /** Move the cursor to a row by pressing the keys the card binds, never by editing the state. */
 function at(state: CardState, row: number): CardState {
 	let moved = state;
-	while (moved.cursor > row) moved = key(moved, "up");
-	while (moved.cursor < row) moved = key(moved, "down");
+	while (view(moved).cursor > row) moved = key(moved, "up");
+	while (view(moved).cursor < row) moved = key(moved, "down");
 	return moved;
 }
 
 /** The card showing the album, on screen and holding the keyboard. */
 function browsingAlbum(): CardState {
-	return loaded(withFocus(visible(start())), ALBUM, album());
+	return loaded(withFocus(local(visible(start()))), ALBUM, album());
 }
 
 function playing(row: number): CardState {
@@ -119,6 +130,11 @@ function typing(state: CardState, text: string): CardState {
 /** Deterministic randomness, so a shuffle can be asserted exactly (S11). */
 const fixed: ModelDeps = { random: () => 0 };
 
+/** The local library, which is one `l` away from the catalog the card opens on (S20, L74). */
+function local(state: CardState): CardState {
+	return key(state, "l");
+}
+
 function deepFreeze<T>(value: T): T {
 	if (typeof value === "object" && value !== null) {
 		for (const key of Object.keys(value)) deepFreeze((value as Record<string, unknown>)[key]);
@@ -127,16 +143,20 @@ function deepFreeze<T>(value: T): T {
 	return value;
 }
 
-describe("the starting state (S15, S14, S11)", () => {
-	it("is hidden, in the corner, at libraryRoot and playing nothing", () => {
+describe("the starting state (S15, S14, S11, S20)", () => {
+	it("is hidden, in the corner, on the catalog, and playing nothing", () => {
 		const state = start();
 
 		assert.equal(state.presence, "hidden");
 		assert.equal(state.size, "corner");
 		assert.equal(state.focused, false);
-		assert.equal(state.path, ROOT);
-		assert.deepEqual(state.entries, []);
-		assert.equal(state.cursor, 0);
+		// The card opens in the catalog (S20, L74); the library waits at its own root, unread.
+		assert.equal(state.source, DEFAULT_SOURCE);
+		assert.equal(state.source, "catalog");
+		assert.equal(view(state).path, "", "the catalog's root is the album list");
+		assert.deepEqual(view(state).entries, []);
+		assert.equal(view(state).cursor, 0);
+		assert.deepEqual(state.sources.library, { path: ROOT, entries: [], cursor: 0 });
 		assert.equal(state.playing, undefined);
 		assert.equal(state.paused, false);
 		assert.equal(state.queue, undefined);
@@ -154,14 +174,14 @@ describe("the starting state (S15, S14, S11)", () => {
 		const state = start({ libraryRoot: "/srv/music", ceiling: "/srv/music" });
 
 		assert.equal(state.ceiling, "/srv/music");
-		assert.equal(state.path, "/srv/music");
+		assert.equal(state.sources.library.path, "/srv/music");
 	});
 
 	it("reserves an empty filter term for S18 and reads the listing through one selector", () => {
 		const state = browsingAlbum();
 
 		assert.equal(state.filter, "");
-		assert.deepEqual(visibleEntries(state), state.entries);
+		assert.deepEqual(visibleEntries(state), view(state).entries);
 	});
 });
 
@@ -303,10 +323,10 @@ describe("the cursor (S13)", () => {
 	it("moves with the arrows and with j/k", () => {
 		const state = browsingAlbum();
 
-		assert.equal(key(state, "down").cursor, 1);
-		assert.equal(key(state, "j").cursor, 1);
-		assert.equal(key(state, "up").cursor, 0);
-		assert.equal(key(key(state, "down"), "k").cursor, 0);
+		assert.equal(view(key(state, "down")).cursor, 1);
+		assert.equal(view(key(state, "j")).cursor, 1);
+		assert.equal(view(key(state, "up")).cursor, 0);
+		assert.equal(view(key(key(state, "down"), "k")).cursor, 0);
 	});
 
 	it("stops at both ends instead of wrapping", () => {
@@ -314,8 +334,8 @@ describe("the cursor (S13)", () => {
 		let end = state;
 		for (let step = 0; step < album().length + 3; step++) end = key(end, "down");
 
-		assert.equal(key(state, "up").cursor, 0);
-		assert.equal(end.cursor, album().length - 1);
+		assert.equal(view(key(state, "up")).cursor, 0);
+		assert.equal(view(end).cursor, album().length - 1);
 	});
 
 	it("selects the row under it, folder or track", () => {
@@ -327,9 +347,9 @@ describe("the cursor (S13)", () => {
 
 	it("resets to the first row of the folder it loads", () => {
 		const moved = at(browsingAlbum(), ROW.c);
-		assert.equal(moved.cursor, ROW.c);
+		assert.equal(view(moved).cursor, ROW.c);
 
-		assert.equal(loaded(moved, `${ROOT}/StreamBeats`, []).cursor, 0);
+		assert.equal(view(loaded(moved, `${ROOT}/StreamBeats`, [])).cursor, 0);
 	});
 });
 
@@ -484,9 +504,9 @@ describe("stop (S11)", () => {
 		const state = at(playingB(), ROW.b);
 		const stopped = key(state, "s");
 
-		assert.equal(stopped.path, state.path);
-		assert.equal(stopped.cursor, state.cursor);
-		assert.equal(stopped.entries.length, state.entries.length);
+		assert.equal(view(stopped).path, view(state).path);
+		assert.equal(view(stopped).cursor, view(state).cursor);
+		assert.equal(view(stopped).entries.length, view(state).entries.length);
 	});
 
 	it("does nothing when there is nothing to stop", () => {
@@ -588,7 +608,7 @@ describe("shuffle (S11)", () => {
 		assert.equal(reduction.state.shuffle, true);
 		assert.equal(reduction.state.notice, "shuffle on");
 		assert.equal(reduction.state.playing?.id, B.id);
-		assert.equal(reduction.state.cursor, state.cursor);
+		assert.equal(view(reduction.state).cursor, view(state).cursor);
 		assert.equal(reduction.state.queue?.position, 1);
 		assert.deepEqual(ids(reduction.state.queue?.playOrder), ids([A, B, D, C]));
 		assert.deepEqual(reduction.effects, []);
@@ -656,9 +676,9 @@ describe("navigating up (S14)", () => {
 	it("moves to the parent folder below the ceiling", () => {
 		const reduction = press(browsingAlbum(), "u");
 
-		assert.equal(reduction.state.path, `${ROOT}/StreamBeats`);
-		assert.deepEqual(reduction.state.entries, []);
-		assert.equal(reduction.state.cursor, 0);
+		assert.equal(view(reduction.state).path, `${ROOT}/StreamBeats`);
+		assert.deepEqual(view(reduction.state).entries, []);
+		assert.equal(view(reduction.state).cursor, 0);
 		assert.deepEqual(reduction.effects, [{ kind: "load-folder", path: `${ROOT}/StreamBeats` }]);
 	});
 
@@ -669,17 +689,17 @@ describe("navigating up (S14)", () => {
 	it("walks up to the ceiling and stops there with at home", () => {
 		let state = browsingAlbum();
 		for (let step = 0; step < 3; step++) state = press(state, "u").state;
-		assert.equal(state.path, HOME);
+		assert.equal(view(state).path, HOME);
 
 		const reduction = press(state, "u");
-		assert.equal(reduction.state.path, HOME);
+		assert.equal(view(reduction.state).path, HOME);
 		assert.equal(reduction.state.notice, "at home");
 		assert.deepEqual(reduction.effects, []);
 	});
 
 	it("reads a Windows path in its own flavour", () => {
 		const state = loaded(
-			withFocus(visible(initialState({ libraryRoot: "C:\\Users\\kike\\Music", ceiling: "C:\\Users\\kike" }))),
+			withFocus(local(visible(initialState({ libraryRoot: "C:\\Users\\kike\\Music", ceiling: "C:\\Users\\kike" })))),
 			"C:\\Users\\kike\\Music",
 			[],
 		);
@@ -762,7 +782,7 @@ describe("the filter over the current folder (S18)", () => {
 
 		assert.equal(opened.filtering, true);
 		assert.equal(opened.filter, "");
-		assert.equal(opened.path, state.path);
+		assert.equal(view(opened).path, view(state).path);
 		assert.deepEqual(visibleEntries(opened), visibleEntries(state));
 	});
 
@@ -786,15 +806,15 @@ describe("the filter over the current folder (S18)", () => {
 
 	it("keeps the cursor in range while the listing narrows under it", () => {
 		const moved = at(browsingAlbum(), ROW.d);
-		assert.equal(moved.cursor, 4);
+		assert.equal(view(moved).cursor, 4);
 
 		const narrowed = typing(moved, "0");
 		assert.equal(visibleEntries(narrowed).length, 4);
-		assert.equal(narrowed.cursor, 3);
+		assert.equal(view(narrowed).cursor, 3);
 
 		const single = key(narrowed, "4");
 		assert.equal(visibleEntries(single).length, 1);
-		assert.equal(single.cursor, 0);
+		assert.equal(view(single).cursor, 0);
 	});
 
 	it("leaves the mode with enter and puts the cursor on the first result", () => {
@@ -803,7 +823,7 @@ describe("the filter over the current folder (S18)", () => {
 
 		assert.equal(reduction.state.filtering, false);
 		assert.equal(reduction.state.filter, "0");
-		assert.equal(reduction.state.cursor, 0);
+		assert.equal(view(reduction.state).cursor, 0);
 		assert.equal(selectedEntry(reduction.state)?.kind, "track");
 		assert.deepEqual(reduction.effects, []);
 	});
@@ -815,7 +835,7 @@ describe("the filter over the current folder (S18)", () => {
 		assert.equal(cleared.filter, "");
 		assert.equal(cleared.filtering, false);
 		assert.equal(cleared.presence, "visible");
-		assert.deepEqual(visibleEntries(cleared), cleared.entries);
+		assert.deepEqual(visibleEntries(cleared), view(cleared).entries);
 	});
 
 	it("hides the card when esc finds nothing to clear (S13, S18)", () => {
@@ -842,14 +862,14 @@ describe("the filter over the current folder (S18)", () => {
 
 		assert.equal(reduction.state.filter, "0");
 		assert.equal(reduction.state.filtering, true);
-		assert.equal(reduction.state.path, ALBUM);
+		assert.equal(view(reduction.state).path, ALBUM);
 		assert.deepEqual(reduction.effects, []);
 	});
 
 	it("still goes up a folder with backspace and u outside the mode", () => {
 		const state = browsingAlbum();
 
-		assert.equal(press(state, "backspace").state.path, `${ROOT}/StreamBeats`);
+		assert.equal(view(press(state, "backspace").state).path, `${ROOT}/StreamBeats`);
 		assert.deepEqual(press(state, "backspace"), press(state, "u"));
 	});
 
@@ -867,8 +887,8 @@ describe("the filter over the current folder (S18)", () => {
 	it("keeps the arrows moving the cursor inside the narrowed listing", () => {
 		const narrowed = typing(browsingAlbum(), "0");
 
-		assert.equal(key(narrowed, "down").cursor, 1);
-		assert.equal(key(key(narrowed, "down"), "up").cursor, 0);
+		assert.equal(view(key(narrowed, "down")).cursor, 1);
+		assert.equal(view(key(key(narrowed, "down"), "up")).cursor, 0);
 	});
 
 	it("reports no results as a state that keeps and names the term", () => {
@@ -952,7 +972,7 @@ describe("the mouse (S17)", () => {
 	it("selects the row a click lands on and plays the track under it", () => {
 		const clicked = click(browsingAlbum(), ROW.c);
 
-		assert.equal(clicked.state.cursor, ROW.c, "the click selects before it activates");
+		assert.equal(view(clicked.state).cursor, ROW.c, "the click selects before it activates");
 		assert.equal(clicked.state.playing?.id, C.id);
 		assert.deepEqual(clicked.effects, [{ kind: "play", trackId: C.id }]);
 		assert.deepEqual(ids(clicked.state.queue?.tracks), [A.id, B.id, C.id, D.id], "the folder is still the queue");
@@ -962,8 +982,8 @@ describe("the mouse (S17)", () => {
 		const clicked = click(browsingAlbum(), ROW.folder);
 
 		assert.deepEqual(clicked.effects, [{ kind: "load-folder", path: `${ALBUM}/Extras` }]);
-		assert.equal(clicked.state.path, `${ALBUM}/Extras`);
-		assert.equal(clicked.state.cursor, 0, "a new folder starts at its first row");
+		assert.equal(view(clicked.state).path, `${ALBUM}/Extras`);
+		assert.equal(view(clicked.state).cursor, 0, "a new folder starts at its first row");
 	});
 
 	it("ignores a click on a row the card is not showing", () => {
@@ -975,13 +995,13 @@ describe("the mouse (S17)", () => {
 	});
 
 	it("scrolls the listing with the wheel", () => {
-		assert.equal(wheel(browsingAlbum(), 1).state.cursor, ROW.a);
-		assert.equal(wheel(at(browsingAlbum(), ROW.c), -1).state.cursor, ROW.b);
+		assert.equal(view(wheel(browsingAlbum(), 1).state).cursor, ROW.a);
+		assert.equal(view(wheel(at(browsingAlbum(), ROW.c), -1).state).cursor, ROW.b);
 	});
 
 	it("stops the wheel at both ends instead of wrapping", () => {
-		assert.equal(wheel(browsingAlbum(), -3).state.cursor, ROW.folder);
-		assert.equal(wheel(at(browsingAlbum(), ROW.d), 4).state.cursor, ROW.d);
+		assert.equal(view(wheel(browsingAlbum(), -3).state).cursor, ROW.folder);
+		assert.equal(view(wheel(at(browsingAlbum(), ROW.d), 4).state).cursor, ROW.d);
 
 		const state = browsingAlbum();
 		assert.equal(wheel(state, 0).state, state, "no movement is not a new state");
@@ -1008,7 +1028,7 @@ describe("the mouse (S17)", () => {
 	it("leaves the keyboard where it was: hovering never moves the cursor", () => {
 		const state = hover(at(browsingAlbum(), ROW.b), ROW.d);
 
-		assert.equal(state.cursor, ROW.b);
+		assert.equal(view(state).cursor, ROW.b);
 		assert.equal(press(state, "enter").state.playing?.id, B.id, "enter still opens what the keyboard selected");
 	});
 
@@ -1016,7 +1036,7 @@ describe("the mouse (S17)", () => {
 		const pressed = press(hover(browsingAlbum(), ROW.d), "down").state;
 
 		assert.equal(pressed.hover, undefined);
-		assert.equal(pressed.cursor, ROW.a, "and the key still does exactly what it did before");
+		assert.equal(view(pressed).cursor, ROW.a, "and the key still does exactly what it did before");
 	});
 
 	it("forgets the highlight when the listing changes under it or the card hides", () => {
@@ -1051,11 +1071,16 @@ describe("the reducer stays pure (S8, AGENTS.md)", () => {
 		press(state, "down");
 		press(state, "z", fixed);
 		press(state, "u");
+		press(state, "l");
 		reduce(state, { kind: "track-ended", trackId: B.id });
 		reduce(state, { kind: "track-failed", trackId: B.id });
 		reduce(state, { kind: "hover", index: ROW.c });
 		reduce(state, { kind: "click", index: ROW.a });
 		reduce(state, { kind: "wheel", delta: 1 });
+		reduce(state, { kind: "catalog-albums", albums: [CHILLHOP] });
+		reduce(state, { kind: "catalog-album", album: albumListing("chillhop", ["First"]) });
+		reduce(state, { kind: "catalog-reading", label: "catalog" });
+		reduce(state, { kind: "catalog-failed", reason: "network" });
 
 		assert.deepEqual(state, snapshot);
 	});
@@ -1072,8 +1097,312 @@ describe("the reducer stays pure (S8, AGENTS.md)", () => {
 		const state = playingB();
 		const unfocused = reduce(state, { kind: "blur" }).state;
 
-		assert.equal(press(unfocused, "l").state, unfocused);
+		assert.equal(press(unfocused, "x").state, unfocused);
 		assert.equal(press(state, "q").state, state);
 		assert.equal(reduce(state, { kind: "focus" }).state, state);
+	});
+});
+
+/* --- the second source (S20) ----------------------------------------------------------------- */
+
+const CHILLHOP: CatalogAlbum = { slug: "chillhop", title: "Chillhop" };
+const LOFI: CatalogAlbum = { slug: "lofi", title: "LoFi" };
+/** A new album that lands ON TOP of the list: the case L75's rule exists for. */
+const SUNSET: CatalogAlbum = { slug: "sunset", title: "Sunset" };
+
+function albumListing(slug: string, titles: readonly string[]): CatalogAlbumListing {
+	return {
+		slug,
+		title: slug,
+		tracks: titles.map((title) => ({ slug: title.toLowerCase().replaceAll(" ", "-"), title })),
+	};
+}
+
+/** The catalog's album list arrived. */
+function catalogAlbums(state: CardState, list: readonly CatalogAlbum[] = [CHILLHOP, LOFI]): CardState {
+	return reduce(state, { kind: "catalog-albums", albums: list }).state;
+}
+
+/** One album page arrived. */
+function albumPage(state: CardState, album: CatalogAlbumListing): CardState {
+	return reduce(state, { kind: "catalog-album", album }).state;
+}
+
+/** The card on the catalog, open and holding the keyboard, showing the album list. */
+function browsingCatalog(): CardState {
+	return withFocus(visible(catalogAlbums(start())));
+}
+
+/** The card inside `Chillhop`, its three tracks on screen. */
+function insideAlbum(): CardState {
+	const entered = press(at(browsingCatalog(), 0), "enter").state;
+	return albumPage(entered, albumListing("chillhop", ["First", "Second", "Third"]));
+}
+
+function switchSource(state: CardState): Reduction {
+	return press(state, "l");
+}
+
+describe("the key that switches sources (S13, S20)", () => {
+	it("is one action for both directions, announced once in the footer from the same table", () => {
+		assert.equal(actionFor("l"), "switch-source");
+
+		const hints = footerHints().filter((hint) => hint.action === "switch-source");
+		assert.deepEqual(hints, [{ key: "l", help: "source", action: "switch-source" }]);
+	});
+});
+
+describe("switching sources (S20, L79)", () => {
+	it("moves to the other source and asks for it when it has never been read", () => {
+		const reduction = switchSource(visible(start()));
+
+		assert.equal(reduction.state.source, "library");
+		// The library's own path, which is where it left off — `libraryRoot` until it is asked for once.
+		assert.deepEqual(reduction.effects, [{ kind: "load-folder", path: ROOT }]);
+	});
+
+	it("asks the filesystem for nothing when it goes back to a catalog no one has read", () => {
+		// The catalog's read is the network's and arrives with its own effect; a `load-folder` here would hand the
+		// scanner an album slug — or the empty string — and answer with a folder failure that is not one.
+		const reduction = switchSource(browsingAlbum());
+
+		assert.equal(reduction.state.source, "catalog");
+		assert.deepEqual(reduction.effects, []);
+	});
+
+	it("brings each source back exactly where it was, never to the top", () => {
+		// The library is left on row `ROW.c`, the catalog on its second album; both must survive the trip.
+		const library = at(browsingAlbum(), ROW.c);
+		const catalog = at(catalogAlbums(switchSource(library).state), 1);
+		assert.equal(view(catalog).cursor, 1);
+
+		const backToLibrary = switchSource(catalog).state;
+		assert.equal(backToLibrary.source, "library");
+		assert.equal(view(backToLibrary).path, ALBUM);
+		assert.equal(view(backToLibrary).cursor, ROW.c, "the library's cursor comes back too");
+
+		const backToCatalog = switchSource(backToLibrary).state;
+		assert.equal(backToCatalog.source, "catalog");
+		assert.equal(view(backToCatalog).cursor, 1, "and the catalog's did not move either");
+	});
+
+	it("does not ask again for a source that already has its listing", () => {
+		const library = at(browsingAlbum(), ROW.c);
+		const reduction = switchSource({ ...library, source: "catalog" });
+
+		assert.equal(reduction.state.source, "library");
+		assert.deepEqual(reduction.effects, [], "the listing is already there: nothing to read");
+	});
+
+	it("drops the filter, because a term belongs to the listing it was typed in (S18)", () => {
+		// While the mode is open the key is text, like every other letter (S18): it is the same `l`,
+		// resolved by the innermost mode first.
+		const typing_l = key(typing(browsingAlbum(), "0"), "l");
+		assert.equal(typing_l.filtering, true);
+		assert.equal(typing_l.filter, "0l");
+
+		const confirmed = key(typing(browsingAlbum(), "04"), "enter");
+		const switched = switchSource(confirmed).state;
+		assert.equal(switched.source, "catalog");
+		assert.equal(switched.filter, "", "the term does not travel to a listing it was not typed in");
+		assert.equal(switched.filtering, false);
+	});
+
+	it("leaves the queue alone: what is playing is not what is being looked at (S11)", () => {
+		const playing = playingB();
+		const switched = switchSource(playing).state;
+
+		assert.equal(switched.playing?.id, B.id);
+		assert.equal(switched.queue?.source, "library");
+		assert.deepEqual(ids(switched.queue?.playOrder), ids([A, B, C, D]));
+	});
+});
+
+describe("the catalog's two levels (S20, L76)", () => {
+	it("lists an album as a folder whose path is its slug, so enter and u work the same as on disk", () => {
+		const rows = visibleEntries(browsingCatalog());
+
+		assert.deepEqual(rows, [
+			{ kind: "folder", folder: { path: "chillhop", name: "Chillhop" } },
+			{ kind: "folder", folder: { path: "lofi", name: "LoFi" } },
+		]);
+	});
+
+	it("enters an album and asks for its page, then shows its tracks", () => {
+		const entered = press(browsingCatalog(), "enter");
+
+		assert.equal(view(entered.state).path, "chillhop");
+		assert.deepEqual(entered.effects, [{ kind: "load-folder", path: "chillhop" }]);
+
+		const loaded = albumPage(entered.state, albumListing("chillhop", ["First", "Second"]));
+		assert.deepEqual(visibleEntries(loaded).map(nameOf), ["First", "Second"]);
+	});
+
+	it("says `top of the catalog` at the album list instead of staying silent", () => {
+		const reduction = press(browsingCatalog(), "u");
+
+		assert.equal(reduction.state.notice, TOP_OF_CATALOG);
+		assert.equal(reduction.state.notice, "top of the catalog");
+		assert.deepEqual(reduction.effects, [], "there is nothing above it, and nothing is broken");
+		assert.equal(view(reduction.state).path, "", "and the list did not move");
+	});
+
+	it("goes back from an album to the album list, with the cursor on the album it left", () => {
+		const inAlbum = at(insideAlbum(), 2);
+		const reduction = press(inAlbum, "u");
+
+		assert.equal(view(reduction.state).path, "");
+		assert.deepEqual(reduction.effects, [], "the index is already here: going up reads nothing");
+		assert.equal(view(reduction.state).cursor, 0, "the album it came from owns the cursor");
+		assert.equal(selectedEntry(reduction.state)?.kind, "folder");
+	});
+});
+
+describe("the catalog's identity (S3, S20)", () => {
+	it("names a track `origin + id`, never the signed URL that expires", () => {
+		const entered = press(at(browsingCatalog(), 0), "enter").state;
+		const [row] = visibleEntries(albumPage(entered, albumListing("chillhop", ["First"])));
+
+		assert.ok(row?.kind === "track", "the album lists its tracks as track rows");
+		assert.equal(row.track.id, catalogTrackId("chillhop", "first"));
+		assert.equal(row.track.id, "catalog:chillhop/first");
+		assert.equal(row.track.origin, "catalog");
+	});
+
+	it("takes an id apart into the album and track it names, and refuses anything else", () => {
+		assert.deepEqual(parseCatalogTrackId(catalogTrackId("chillhop", "first")), {
+			albumSlug: "chillhop",
+			trackSlug: "first",
+		});
+		assert.equal(parseCatalogTrackId("catalog:chillhop"), undefined, "no track slug");
+		assert.equal(parseCatalogTrackId("catalog:a/b/c"), undefined, "more than one separator");
+		assert.equal(parseCatalogTrackId(`${ALBUM}/01 - A.mp3`), undefined, "a local path is not a catalog id");
+	});
+});
+
+describe("the catalog's listings arrive (S20, L75)", () => {
+	it("keeps the cursor on the album it was looking at when a new one lands on top", () => {
+		const onLofi = at(browsingCatalog(), 1);
+		const updated = catalogAlbums(onLofi, [SUNSET, CHILLHOP, LOFI]);
+
+		assert.deepEqual(updated.sources.catalog.entries.map(nameOf), ["Sunset", "Chillhop", "LoFi"]);
+		assert.equal(updated.sources.catalog.cursor, 2, "the cursor follows LoFi, not the index it had");
+		assert.deepEqual(visibleEntries(updated)[updated.sources.catalog.cursor], {
+			kind: "folder",
+			folder: { path: "lofi", name: "LoFi" },
+		});
+	});
+
+	it("clips the cursor when the album it was on disappeared", () => {
+		const onLofi = at(browsingCatalog(), 1);
+		const updated = catalogAlbums(onLofi, [CHILLHOP]);
+
+		assert.equal(updated.sources.catalog.cursor, 0, "the list is shorter than the cursor it had");
+		assert.deepEqual(updated.sources.catalog.entries.map(nameOf), ["Chillhop"]);
+	});
+
+	it("does not move the user when the update lands while an album is open", () => {
+		const inAlbum = insideAlbum();
+		const updated = catalogAlbums(inAlbum, [SUNSET, CHILLHOP, LOFI]);
+
+		assert.deepEqual(visibleEntries(updated).map(nameOf), ["First", "Second", "Third"]);
+		assert.equal(view(updated).path, "chillhop", "the album did not close");
+		assert.deepEqual(
+			updated.catalogAlbums.map((album) => album.slug),
+			["sunset", "chillhop", "lofi"],
+		);
+	});
+
+	it("only lands an album's tracks on the album the card is showing", () => {
+		const inAlbum = insideAlbum();
+		const late = albumPage(inAlbum, albumListing("lofi", ["Other"]));
+
+		assert.deepEqual(visibleEntries(late).map(nameOf), ["First", "Second", "Third"]);
+	});
+});
+
+describe("the catalog says what it is doing (S20, L75)", () => {
+	it("repeats the label while the read is in flight, and stops when the list arrives", () => {
+		const reading = reduce(browsingCatalog(), { kind: "catalog-reading", label: "catalog · 3 of 12 albums" }).state;
+		assert.equal(reading.reading, "catalog · 3 of 12 albums");
+
+		assert.equal(catalogAlbums(reading).reading, undefined);
+	});
+
+	it("says why the catalog is not there, naming the gesture that retries it", () => {
+		const failed = reduce(browsingCatalog(), { kind: "catalog-failed", reason: "network" }).state;
+
+		assert.equal(failed.notice, "catalog unavailable · reopen to retry");
+		assert.equal(failed.reading, undefined);
+	});
+
+	it("keeps the reason in the words, because one album gone is not the whole catalog gone", () => {
+		const failed = reduce(browsingCatalog(), { kind: "catalog-failed", reason: "not-found" }).state;
+
+		assert.equal(failed.notice, "album missing · reopen to retry");
+	});
+});
+
+describe("a queue belongs to its source (S20)", () => {
+	it("carries the source its tracks came from", () => {
+		assert.equal(playingB().queue?.source, "library");
+
+		const catalog = press(insideAlbum(), "enter").state;
+		assert.equal(catalog.queue?.source, "catalog");
+	});
+
+	it("advances through the library's album while the catalog is on screen", () => {
+		const hiddenLibrary = switchSource(playingB()).state;
+		assert.equal(hiddenLibrary.source, "catalog");
+
+		const next = reduce(hiddenLibrary, { kind: "track-ended", trackId: B.id });
+
+		assert.equal(next.state.playing?.id, C.id, "the queue's own next track, not a row of the album list");
+		assert.deepEqual(next.effects, [{ kind: "play", trackId: C.id }]);
+	});
+
+	it("advances through the catalog's album while the library is on screen", () => {
+		const playing = press(insideAlbum(), "enter").state;
+		const first = playing.playing;
+		assert.equal(playing.queue?.source, "catalog");
+
+		const moved = switchSource(playing).state;
+		assert.equal(moved.source, "library");
+
+		const next = reduce(moved, { kind: "track-ended", trackId: first?.id ?? "" });
+		const second = albumListing("chillhop", ["First", "Second", "Third"]).tracks[1];
+		assert.equal(next.state.playing?.id, catalogTrackId("chillhop", second?.slug ?? ""));
+	});
+
+	it("never mixes the two: the end of a catalog album does not fall back to the library", () => {
+		const playing = press(at(insideAlbum(), 2), "enter").state;
+		const last = catalogTrackId("chillhop", "third");
+		assert.equal(playing.playing?.id, last);
+		assert.equal(playing.queue?.position, 2);
+
+		const moved = switchSource(playing).state;
+		const ended = reduce(moved, { kind: "track-ended", trackId: last });
+
+		assert.equal(ended.state.queue, undefined, "the queue ends; the library's album is not its next");
+		assert.equal(ended.state.playing, undefined);
+		assert.deepEqual(ended.effects, [{ kind: "stop" }]);
+	});
+});
+
+describe("a read that lands while the other source is on screen (S20)", () => {
+	it("fills the library without touching the catalog's footer", () => {
+		const catalog = browsingCatalog();
+		const withNotice = reduce(catalog, { kind: "catalog-failed", reason: "network" }).state;
+		const landed = loaded(withNotice, ALBUM, album());
+
+		assert.deepEqual(landed.sources.library, { path: ALBUM, entries: album(), cursor: 0 });
+		assert.equal(landed.notice, "catalog unavailable · reopen to retry", "the catalog keeps its own message");
+		assert.equal(landed.source, "catalog", "and the user stays where they were");
+	});
+
+	it("does not let a library failure speak for the catalog", () => {
+		const failed = reduce(browsingCatalog(), { kind: "folder-failed", path: ALBUM, reason: "missing" }).state;
+
+		assert.equal(failed.failure, undefined);
 	});
 });

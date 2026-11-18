@@ -8,7 +8,7 @@
  */
 import { posix, win32 } from "node:path";
 import type { LibraryEntry, Role, Track, ViewTheme } from "../types.ts";
-import { type CardState, footerHints, visibleEntries } from "./model.ts";
+import { type CardState, currentView, footerHints, visibleEntries } from "./model.ts";
 
 /** The whole glyph family (S16). One family per frame: geometric or ASCII, never a mix. */
 export interface Glyphs {
@@ -113,6 +113,8 @@ const MAX_BAR = 20;
 const CORNER_WIDTH = 46;
 const ELLIPSIS = "…";
 const SEPARATOR = " · ";
+/** The catalog names itself in the header (S20): it is where you are, not a breadcrumb of a disk. */
+const CATALOG_TITLE = "StreamBeats";
 
 /** Render one frame of the card, exactly `width` cells per line (S3). */
 export function renderFrame(
@@ -179,7 +181,7 @@ function expandedFrame(
 	const rows = noResults ? Math.max(0, listRows - 1) : listRows;
 	if (noResults && listRows > 0) lines.push(noResultsLine(state, theme, contentWidth));
 
-	const start = windowStart(entries.length, rows, state.cursor);
+	const start = windowStart(entries.length, rows, currentView(state).cursor);
 	for (let slot = 0; slot < rows; slot++) {
 		const index = start + slot;
 		const entry = entries[index];
@@ -234,7 +236,7 @@ function headerLine(state: CardState, theme: ViewTheme, width: number, options: 
 	const summaryText = truncate(summaryOf(visibleEntries(state)), inner);
 	const right = command.length + 1 + summaryText.length + 1 <= inner ? summaryText : "";
 	const crumbBudget = inner - command.length - 1 - (right ? right.length + 1 : 0);
-	const crumb = crumbBudget >= 1 ? truncateTail(breadcrumb(state.path, options.libraryRoot), crumbBudget) : "";
+	const crumb = crumbBudget >= 1 ? truncateTail(headerCrumb(state, options), crumbBudget) : "";
 	const left = `${command}${crumb ? ` ${crumb}` : ""}`;
 
 	if (left.length > inner) {
@@ -250,6 +252,19 @@ function headerLine(state: CardState, theme: ViewTheme, width: number, options: 
 		`${filler}${paint(theme, "dim", right)}` +
 		spaces(pad)
 	);
+}
+
+/**
+ * Where you are (S20, L74). The catalog names itself and, inside an album, which album; the library is
+ * its breadcrumb, so no absolute home path can reach the card (S14, S15). One header, two sources.
+ */
+function headerCrumb(state: CardState, options: ViewOptions): string {
+	const view = currentView(state);
+	if (state.source === "library") return breadcrumb(view.path, options.libraryRoot);
+	if (view.path === "") return CATALOG_TITLE;
+
+	const album = state.catalogAlbums.find((candidate) => candidate.slug === view.path);
+	return `${CATALOG_TITLE}/${printable(album?.title ?? view.path)}`;
 }
 
 /** `N tracks · M:SS` (S3). The total appears only when every track's duration is known. */
@@ -305,7 +320,7 @@ function entryLine(
 	const gap = rest >= 2 ? COLUMN_GAP : 0;
 	const nameWidth = Math.max(0, rest - gap - (durationWidthHere > 0 ? COLUMN_GAP + durationWidthHere : 0));
 	const playingHere = entry.kind === "track" && state.playing?.id === entry.track.id;
-	const cursorHere = state.cursor === index;
+	const cursorHere = currentView(state).cursor === index;
 	// The pointer's row (S17). It is deliberately NOT the cursor's elevated surface: two identical
 	// highlights would make "what would enter open" the less predictable of the two, and the cursor is
 	// the one that has to stay unmistakable. Weight is a signal the family of roles already owns
@@ -417,9 +432,13 @@ function footerText(state: CardState, budget: number, options: ViewOptions): str
 		const folder = breadcrumb(state.failure.path, options.libraryRoot);
 		return truncate(printable(`cannot show ${folder}: ${state.failure.reason}`), budget);
 	}
-	// A read in flight says what it is reading (S21). The path is the breadcrumb, never an absolute
-	// home path (S15): the footer names the folder the way the header does.
-	if (state.reading) return truncate(printable(`reading ${breadcrumb(state.reading, options.libraryRoot)}`), budget);
+	// A read in flight says what it is reading (S21). The library's read names a folder, so it is repeated as
+	// the header's breadcrumb and no absolute home path can reach the card (S15); the catalog's read is
+	// already a label the shell composed (`catalog · 3 of 12 albums`, L75) and is printed as it arrived.
+	if (state.reading) {
+		const what = state.source === "library" ? breadcrumb(state.reading, options.libraryRoot) : printable(state.reading);
+		return truncate(printable(`reading ${what}`), budget);
+	}
 	return hintText(budget);
 }
 
@@ -603,7 +622,7 @@ function truncateHead(text: string, budget: number): string {
 }
 
 /**
- * Characters that act on the terminal instead of occupying a cell (AGENTS.md). `lib/library/names`
+ * Characters that act on the terminal instead of occupying a cell (AGENTS.md). `lib/core/names`
  * neutralizes names at the source; a renderer that trusts its input is one refactor away from an
  * escape sequence in the chrome, so the rule is applied here too — the core cannot import library.
  */

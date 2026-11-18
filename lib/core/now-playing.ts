@@ -15,7 +15,7 @@ import { glyphFamily } from "./view.ts";
  * The nine audio extensions of the repo (S5), with the leading dot, matched case-insensitively
  * because files copied from a case-insensitive filesystem arrive upper-cased. The list is repeated
  * here because `lib/core` sits below `lib/library` in the dependency direction (S8) and may not
- * import it; `lib/library/names.ts` owns the same nine for scanning.
+ * import it; `lib/core/names.ts` owns the same nine for scanning.
  */
 const AUDIO_EXTENSIONS = "mp3|flac|ogg|oga|opus|m4a|aac|wav|wma";
 
@@ -90,7 +90,9 @@ export function statusSegment(state: NowPlayingState, width: number, options: Se
 	const total = options.totalMs ?? track.durationMs;
 	const time = `${clock(options.elapsedMs ?? 0)}/${total === undefined ? UNKNOWN_TIME : clock(total)}`;
 	const title = cleanTitle(track.title);
-	const folder = folderLabel(track.id);
+	// A catalog track has no directory: the album travels on the row, so the label is the album a listener
+	// recognizes instead of `catalog:<slug>` (S12, S20).
+	const folder = track.album ?? folderLabel(track.id);
 
 	const whole = `${glyph} ${title}${SEPARATOR}${folder} ${time}`;
 	if (lengthOf(whole) <= columns) return whole;

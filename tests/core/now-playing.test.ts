@@ -176,4 +176,18 @@ describe("statusSegment (S12)", () => {
 		assert.equal(statusSegment({ playing: LONG_TRACK, paused: false }, 1, { elapsedMs: ELAPSED }), "●");
 		assert.equal(statusSegment({ playing: LONG_TRACK, paused: false }, 0, { elapsedMs: ELAPSED }), "");
 	});
+	it("labels a catalog track with its album, because `catalog:<slug>` is not a name (S20)", () => {
+		// A local track is labelled by the directory that holds it; a catalog one has no directory, so the
+		// album comes with the row. Without it the segment would print `catalog:better-when-im-high-remix`.
+		const catalogTrack = {
+			id: "catalog:better-when-im-high-remix/better-when-im-high-remix",
+			title: "Better When I'm High (Remix)",
+			origin: "catalog" as const,
+			album: "Better When I'm High (Remix)",
+		};
+
+		const line = statusSegment({ playing: catalogTrack, paused: false }, 90, { elapsedMs: 1000, totalMs: 191520 });
+
+		assert.equal(line, `● Better When I'm High (Remix) · Better When I'm High (Remix) 0:01/3:11`);
+	});
 });

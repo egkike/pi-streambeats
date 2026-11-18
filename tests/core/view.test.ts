@@ -5,9 +5,9 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type CardState, initialState } from "../../lib/core/model.ts";
+import { type CardState, initialState, type SourceView } from "../../lib/core/model.ts";
 import { glyphFamily, renderFrame } from "../../lib/core/view.ts";
-import type { LibraryEntry, Track, ViewTheme } from "../../lib/types.ts";
+import type { LibraryEntry, MusicSource, Track, ViewTheme } from "../../lib/types.ts";
 
 const HOME = "/home/kike";
 const ROOT = `${HOME}/Music`;
@@ -51,16 +51,17 @@ const ENTRIES: readonly LibraryEntry[] = [
 
 const B = trackAt(ENTRIES, 2);
 
-/** The card as the reducer would leave it: open, expanded, showing the album (S15). */
-function card(overrides: Partial<CardState> = {}): CardState {
-	return {
-		...initialState({ libraryRoot: ROOT, ceiling: HOME }),
-		presence: "visible",
-		size: "expanded",
-		path: ALBUM,
-		entries: ENTRIES,
-		...overrides,
-	};
+/**
+ * The card as the reducer would leave it: open, expanded, on the local library, showing the album (S15).
+ * The three view fields are taken flat so a test can say `card({ cursor: 4 })` without naming the source
+ * the listing belongs to; the source defaults to the library, which is where every row in this file lives.
+ */
+function card(overrides: Partial<CardState> & Partial<SourceView> = {}): CardState {
+	const { path = ALBUM, entries = ENTRIES, cursor = 0, ...rest } = overrides;
+	const base = initialState({ libraryRoot: ROOT, ceiling: HOME });
+	const source: MusicSource = rest.source ?? "library";
+	const sources: Record<MusicSource, SourceView> = { ...base.sources, [source]: { path, entries, cursor } };
+	return { ...base, presence: "visible", size: "expanded", ...rest, source, sources };
 }
 
 function options(
@@ -132,7 +133,7 @@ function folderRow(marker: string, name: string, width = 90): string {
 	return fill(` ${marker} ${name.padEnd(width - 10)} ${"    "} `, width);
 }
 
-const HINTS = "↑ · enter · space · n · p · u · / · s · + · - · z · esc";
+const HINTS = "↑ · enter · space · n · p · u · / · l · s · + · - · z · esc";
 
 function footerLine(hints: string, right: string, width: number): string {
 	return between(` ${hints}`, `${right} `, width);
@@ -177,7 +178,7 @@ describe("the expanded card at 90 columns (S3, S9)", () => {
 			framed(entryRow("▸ ", "04 - Paper Planes.mp3", "2:57", contentWidth(90))),
 			framed(entryRow("  ", "05 - Rainy Window.mp3", "4:31", contentWidth(90))),
 			framed(ruleLine(contentWidth(90))),
-			framed(footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, contentWidth(90))),
+			framed(footerLine(HINTS, `0:47 ${bar(16, 47_000, 245_000)} 4:05`, contentWidth(90))),
 			edgeBottom(90),
 		]);
 	});
@@ -211,7 +212,7 @@ describe("the expanded card at 78 columns (S3, S9)", () => {
 				entryRow("  ", "07 - Midnight Commute (extended midnight mix, remastered deluxe e…", "6:12", contentWidth(78)),
 			),
 			framed(ruleLine(contentWidth(78))),
-			framed(footerLine(HINTS, `0:47 ${bar(8, 47_000, 222_000)} 3:42`, contentWidth(78))),
+			framed(footerLine(HINTS, `0:47 ${bar(4, 47_000, 222_000)} 3:42`, contentWidth(78))),
 			edgeBottom(78),
 		]);
 	});
@@ -313,13 +314,13 @@ describe("the footer (S3, S13)", () => {
 	it("announces every key from the model's table and the progress at 90 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 10, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[8], framed(footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, contentWidth(90))));
+		assert.equal(frame.lines[8], framed(footerLine(HINTS, `0:47 ${bar(16, 47_000, 245_000)} 4:05`, contentWidth(90))));
 	});
 
 	it("shrinks the progress bar instead of dropping a key at 78 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 78, 10, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[8], framed(footerLine(HINTS, `0:47 ${bar(8, 47_000, 245_000)} 4:05`, contentWidth(78))));
+		assert.equal(frame.lines[8], framed(footerLine(HINTS, `0:47 ${bar(4, 47_000, 245_000)} 4:05`, contentWidth(78))));
 	});
 
 	it("drops the progress when the total is not known yet instead of inventing one", () => {
@@ -406,7 +407,7 @@ describe("the footer (S3, S13)", () => {
 			framed(" ".repeat(contentWidth(90))),
 			framed(" ".repeat(contentWidth(90))),
 		]);
-		assert.equal(frame.lines[12], framed(footerLine(HINTS, `0:47 ${bar(20, 47_000, 245_000)} 4:05`, contentWidth(90))));
+		assert.equal(frame.lines[12], framed(footerLine(HINTS, `0:47 ${bar(16, 47_000, 245_000)} 4:05`, contentWidth(90))));
 	});
 });
 
@@ -550,6 +551,42 @@ describe("the breadcrumb (S14)", () => {
 			frame.lines[1],
 			framed(between(" sb-music StreamBeats/Chillhop", "5 tracks · 18:33 ", contentWidth(90))),
 		);
+	});
+});
+
+/**
+ * The header is the only thing that says where you are (S20, L74): the footer's `l source` hint is static,
+ * so the catalog has to name itself and, inside an album, name the album instead of its slug.
+ */
+describe("the header of the catalog (S20)", () => {
+	it("names the catalog at its album list", () => {
+		const frame = renderFrame(card({ source: "catalog", path: "", entries: [] }), plain, 90, 3, options());
+
+		assert.equal(frame.lines[0], between(" sb-music StreamBeats", "0 tracks ", 90));
+	});
+
+	it("names the album the card is inside, and never the slug behind a local path", () => {
+		const albums = [{ slug: "chillhop", title: "Chillhop" }];
+		const state = card({ source: "catalog", path: "chillhop", entries: [], catalogAlbums: albums });
+		const frame = renderFrame(state, plain, 90, 3, options());
+
+		assert.equal(frame.lines[0], between(" sb-music StreamBeats/Chillhop", "0 tracks ", 90));
+		assert.equal(frame.lines.join("\n").includes("/home/kike"), false, "no disk path reaches the catalog");
+	});
+
+	it("prints the catalog's read label as it arrived, not as a breadcrumb", () => {
+		// The label is composed by the shell (`catalog · 3 of 12 albums`, L75); running it through the
+		// library's breadcrumb would print `~/…` for a string that is not a path at all.
+		const state = card({
+			source: "catalog",
+			path: "",
+			entries: [],
+			reading: "catalog · 3 of 12 albums",
+		});
+		const frame = renderFrame(state, plain, 90, 4, options());
+
+		assert.equal(frame.lines[3], fill(" reading catalog · 3 of 12 albums ", 90));
+		assert.equal(frame.lines.join("\n").includes("~/…"), false, "a label is not a path");
 	});
 });
 

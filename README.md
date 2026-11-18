@@ -30,8 +30,9 @@ history never reach the model's context.
   `esc` hides it, and the status bar keeps the now-playing line either way. See [Keys](#keys).
 - **The keyboard stays yours.** The card is not modal: it takes the keyboard only while it is expanded
   and focused, and `esc` hands it straight back to the editor, so nothing is trapped behind a window.
-- **Two sources.** Your own folders (v1) and the free [StreamBeats](https://streambeats.bandcamp.com/music)
-  catalog (later slice). Local files are read, never touched.
+- **Two sources.** Your own folders and the free [StreamBeats](https://streambeats.bandcamp.com/music)
+  catalog, in the same card. It opens in the catalog; `l` swaps to your library, and `l` again brings you
+  back to the album you were on. Local files are read, never touched. See [The catalog](#the-catalog).
 - **mpv plays.** The card drives a real `mpv` process over its JSON IPC socket, so playback survives the
   card being hidden and the audio is not tied to the terminal's redraw loop.
 
@@ -61,12 +62,32 @@ Some terminals need “Option as Meta” enabled before <kbd>⌥</kbd> reaches t
 | `enter` | Open the folder or play the track |
 | `space` | Pause or resume |
 | `n` `>`, `p` `<` | Next, previous |
-| `u`, `⌫` | Up one folder |
+| `u`, `⌫` | Up one folder, or out of an album |
+| `l` | Switch source: catalog ↔ your library |
 | `/` | Filter the current folder |
 | `s` | Stop and empty the queue |
 | `+` `-` | Volume |
 | `z` | Shuffle the rest of the queue |
 | `esc` | Hide the card (clears the filter first) |
+
+## The catalog
+
+The catalog is a second source of the same listing, not a second screen. It opens by default; `l` moves
+between it and your own folders, and each one remembers where you left it.
+
+- **Its index is a cache, and the cache is the point.** Metadata lands in
+  `$XDG_CACHE_HOME/pi-streambeats/catalog.json` (mode `0600`, written atomically), never inside your music
+  folder and never carrying an audio URL. A warm cache opens the card with **no network at all**.
+- **It revalidates itself.** After a day the next open re-reads the catalog **in the background**: the list
+  you see stays, the cursor stays on the album you were browsing, and a failed refresh says one short line
+  instead of throwing the list away.
+- **Progress is honest.** The footer says `reading catalog…` while the index is on its way — the total is not
+  known before that — and then `reading catalog · 3 of 12 albums`, counting albums that arrived *or* were
+  skipped as missing, so the count always reaches the end instead of sticking halfway.
+- **No cache and no network is not an error screen.** The card falls back to your library and says
+  `catalog unavailable · reopen to retry`. Reopening the card retries; nothing is silently empty.
+- **Playing costs one request.** A signed audio URL is resolved immediately before each play and never
+  stored: a cached URL is an expired URL. Nothing is downloaded — the catalog is streamed through `mpv`.
 
 ## Changing the keys
 
@@ -92,7 +113,7 @@ file next to it.
 ## What it will not do
 
 - **It will never write inside your music folder.** No sync, no renames, no downloads: the only files it
-  creates are its own `settings.json` and a socket.
+  creates are its own `settings.json`, its metadata cache and a socket.
 - **No accounts, no cookies, no telemetry.** There is nothing to log into.
 - **No system theme.** Colours come from the host's theme, so the card belongs to your terminal instead
   of fighting it.

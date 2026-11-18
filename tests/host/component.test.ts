@@ -6,7 +6,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Component, TuiMouseEvent } from "@earendil-works/pi-tui";
-import { type CardState, initialState, type PointerEvent, reduce } from "../../lib/core/model.ts";
+import {
+	type CardState,
+	currentView,
+	initialState,
+	type PointerEvent,
+	reduce,
+	type SourceView,
+} from "../../lib/core/model.ts";
 import { renderFrame, type ViewOptions } from "../../lib/core/view.ts";
 import { createCardComponent, overlayHeight } from "../../lib/host/component.ts";
 import type { LibraryEntry, Track, ViewTheme } from "../../lib/types.ts";
@@ -31,14 +38,20 @@ const entries: readonly LibraryEntry[] = [
 	{ kind: "track", track: BLUE },
 ];
 
-function card(overrides: Partial<CardState> = {}): CardState {
+/**
+ * The card showing the local album: the three listing fields travel flat and land on the library's own
+ * view, because the card is two sources now and the row tests are about the local one (S20).
+ */
+function card(overrides: Partial<CardState> & Partial<SourceView> = {}): CardState {
+	const { path = ALBUM, entries: rows = entries, cursor = 0, ...rest } = overrides;
+	const base = initialState({ libraryRoot: ROOT, ceiling: "/home/kike" });
 	return {
-		...initialState({ libraryRoot: ROOT, ceiling: "/home/kike" }),
+		...base,
 		presence: "visible",
 		size: "expanded",
-		path: ALBUM,
-		entries,
-		...overrides,
+		...rest,
+		source: "library",
+		sources: { ...base.sources, library: { path, entries: rows, cursor } },
 	};
 }
 
@@ -288,7 +301,7 @@ describe("the overlay component's pointer (S17)", () => {
 		// Row 1 of the listing, resolved from the frame's hit map: the cursor sat on the folder, and the
 		// screen coordinate was nonsense on purpose.
 		assert.deepEqual(seen, [{ kind: "click", index: 1 }]);
-		assert.equal(state().cursor, 1);
+		assert.equal(currentView(state()).cursor, 1);
 		assert.equal(state().playing?.id, BLUE.id);
 	});
 
@@ -340,11 +353,11 @@ describe("the overlay component's pointer (S17)", () => {
 		component.render(90);
 		component.handleMouse?.(mouse({ type: "wheel", wheelDelta: -3 }));
 		assert.deepEqual(seen.at(-1), { kind: "wheel", delta: -1 });
-		assert.equal(state().cursor, 0, "an upward notch at the first row stays there");
+		assert.equal(currentView(state()).cursor, 0, "an upward notch at the first row stays there");
 
 		component.handleMouse?.(mouse({ type: "wheel", wheelDelta: 4 }));
 		assert.deepEqual(seen.at(-1), { kind: "wheel", delta: 1 });
-		assert.equal(state().cursor, 1);
+		assert.equal(currentView(state()).cursor, 1);
 	});
 
 	it("consumes a repeated click, so a folder that just opened cannot receive the second one", () => {

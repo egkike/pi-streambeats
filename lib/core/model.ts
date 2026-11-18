@@ -6,9 +6,13 @@
  *
  * Two facts are deliberately kept apart: the listing the user is browsing and the queue that is
  * playing. Changing folders swaps the first and leaves the second alone (S11).
+ *
+ * The listing is also kept apart per SOURCE (S20): the catalog and the local library are two views of
+ * one card, and each remembers its own folder and its own cursor, so switching between them is a round
+ * trip and never a reset.
  */
 import { posix, win32 } from "node:path";
-import type { LibraryEntry, Track } from "../types.ts";
+import type { CatalogAlbum, CatalogAlbumListing, CatalogFailure, LibraryEntry, MusicSource, Track } from "../types.ts";
 
 /** Volume range, step and starting point (S11). The card owns it for the session and never persists it. */
 export const MIN_VOLUME = 0;
@@ -23,6 +27,21 @@ export const VOLUME_STEP = 5;
 export type Presence = "hidden" | "visible";
 export type CardSize = "corner" | "expanded";
 
+/** The card opens in the catalog (S20, L74); the local library is one key away and neither is remembered. */
+export const DEFAULT_SOURCE: MusicSource = "catalog";
+
+/**
+ * One source's own place on screen (S20). The two listings keep separate paths and cursors, so
+ * switching sources restores where you were instead of sending you back to the top — which is the
+ * identity rule of S3 applied to navigation.
+ */
+export interface SourceView {
+	/** The library's canonical folder, or the catalog's album slug. `""` is the catalog's album list. */
+	readonly path: string;
+	readonly entries: readonly LibraryEntry[];
+	readonly cursor: number;
+}
+
 /**
  * The queue (S11). It holds every track of the folder the playback started in plus the order they
  * will be played in, because shuffle permutes only what is left and turning it off has to be able
@@ -35,17 +54,28 @@ export interface Queue {
 	readonly playOrder: readonly Track[];
 	/** Index in `playOrder` of the track that is playing. */
 	readonly position: number;
+	/**
+	 * The source the tracks came from (S20). Auto-advance reads the queue and never the source on
+	 * screen: a catalog album that ends while the library is open must keep playing, not fall silent.
+	 */
+	readonly source: MusicSource;
 }
 
 export interface CardState {
-	/** The configured root (S14): the card starts here and the breadcrumb is relative to it. */
+	/** The configured root (S14): the library's first folder and the breadcrumb's base. */
 	readonly libraryRoot: string;
 	/** The highest folder navigation may reach (S14). An input, never derived from HOME in here. */
 	readonly ceiling: string;
-	/** The folder on screen (S14). */
-	readonly path: string;
-	readonly entries: readonly LibraryEntry[];
-	readonly cursor: number;
+	/** The listing on screen (S20). Read it through `currentView`, never by hand. */
+	readonly source: MusicSource;
+	/** Both listings, each with its own path and cursor (S20). */
+	readonly sources: Readonly<Record<MusicSource, SourceView>>;
+	/**
+	 * The catalog's index, as the last read announced it (S20). It is kept because going back from an
+	 * album to the album list must not touch the network, and because that list is where the cursor is
+	 * restored by slug (L75) — the same reason the queue keeps its own order.
+	 */
+	readonly catalogAlbums: readonly CatalogAlbum[];
 	readonly presence: Presence;
 	readonly size: CardSize;
 	/** True only while the card owns the keyboard: `l` requires it (S15). */
@@ -67,9 +97,10 @@ export interface CardState {
 	 */
 	readonly failure?: FolderFailure;
 	/**
-	 * The folder a scan is reading right now (S21). While it is set the footer says `reading <path>`:
-	 * a folder that is still arriving and a folder that is empty must not look the same, and the scan
-	 * happens on the input path, so the card paints before the answer exists.
+	 * What is being read right now (S21): the library folder a scan is reading, or the label the catalog's
+	 * read announced (`reading catalog · 3 of 12 albums`, L75). While it is set the footer says
+	 * `reading <it>`: a listing that is still arriving and an empty one must not look the same, and the
+	 * read happens on the input path, so the card paints before the answer exists.
 	 */
 	readonly reading?: string;
 	/**
@@ -116,6 +147,7 @@ export type KeyAction =
 	| "folder-up"
 	| "hide"
 	| "start-filter"
+	| "switch-source"
 	| "toggle-pause"
 	| "stop"
 	| "next"
@@ -177,6 +209,9 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
 	{ id: "u", label: "u", action: "folder-up", help: "up a folder", hint: true },
 	{ id: "backspace", label: "⌫", action: "folder-up", help: "up a folder", hint: false },
 	{ id: "/", label: "/", action: "start-filter", help: "filter", hint: true },
+	// One key and one hint for both directions (L79): the header says where you are, so `l` never has to
+	// change its words, and two keys for one round trip would have given the question two grammars.
+	{ id: "l", label: "l", action: "switch-source", help: "source", hint: true },
 	{ id: "s", label: "s", action: "stop", help: "stop", hint: true },
 	{ id: "+", label: "+", action: "volume-up", help: "vol", hint: true },
 	{ id: "-", label: "-", action: "volume-down", help: "vol", hint: true },
@@ -215,6 +250,9 @@ export type Effect =
  * Inputs: keys the card received, presence and focus changes owned by the host, and the facts the
  * I/O layer brings back. A result names the track it is about so a late report about a track that
  * already gave way cannot skip the wrong one.
+ *
+ * The `folder-*` facts are the library's and the `catalog-*` facts are the catalog's: they mirror each
+ * other on purpose, so one vocabulary covers two sources.
  */
 export type CardEvent =
 	| { readonly kind: "key"; readonly id: string }
@@ -236,6 +274,14 @@ export type CardEvent =
 	| { readonly kind: "focus" }
 	| { readonly kind: "blur" }
 	| { readonly kind: "folder-loaded"; readonly path: string; readonly entries: readonly LibraryEntry[] }
+	/** The catalog's album list arrived (S20): it is the level at `""`, and it arrives more than once. */
+	| { readonly kind: "catalog-albums"; readonly albums: readonly CatalogAlbum[] }
+	/** One album's tracks arrived (S20). It only lands on the album the card is showing. */
+	| { readonly kind: "catalog-album"; readonly album: CatalogAlbumListing }
+	/** A catalog read started (S20): the label the footer repeats, total included once it is known (L75). */
+	| { readonly kind: "catalog-reading"; readonly label: string }
+	/** The catalog could not be read (S20). The reason picks the message; the card keeps working on local. */
+	| { readonly kind: "catalog-failed"; readonly reason: CatalogFailure }
 	| { readonly kind: "track-ended"; readonly trackId: string }
 	| { readonly kind: "track-failed"; readonly trackId: string }
 	/** The session is shutting down (S6): the shell sends `quit` to mpv. */
@@ -259,9 +305,14 @@ export function initialState(config: CardConfig): CardState {
 	return {
 		libraryRoot: config.libraryRoot,
 		ceiling: config.ceiling,
-		path: config.libraryRoot,
-		entries: [],
-		cursor: 0,
+		source: DEFAULT_SOURCE,
+		sources: {
+			// The catalog's album list is the catalog's root, and the slug of an album is its folder (S20).
+			catalog: { path: "", entries: [], cursor: 0 },
+			// The library starts at the configured root and is read the first time it is looked at.
+			library: { path: config.libraryRoot, entries: [], cursor: 0 },
+		},
+		catalogAlbums: [],
 		presence: "hidden",
 		size: "corner",
 		focused: false,
@@ -274,14 +325,24 @@ export function initialState(config: CardConfig): CardState {
 }
 
 /**
+ * The listing on screen (S20). Both listings live in the state at once, so every reader goes through
+ * here instead of carrying a copy of `source` — two truths for the same listing is the defect the
+ * split exists to avoid.
+ */
+export function currentView(state: CardState): SourceView {
+	return state.sources[state.source];
+}
+
+/**
  * The rows the card shows (S3): the folder's listing narrowed by the active filter term (S18). Both
  * the cursor and the view read the listing through here, so there is one answer to "what is on
  * screen" and no second copy to keep in sync.
  */
 export function visibleEntries(state: CardState): readonly LibraryEntry[] {
+	const entries = currentView(state).entries;
 	const term = state.filter.toLowerCase();
-	if (term === "") return state.entries;
-	return state.entries.filter((entry) => rowName(entry).toLowerCase().includes(term));
+	if (term === "") return entries;
+	return entries.filter((entry) => rowName(entry).toLowerCase().includes(term));
 }
 
 /** What a row is called on screen, which is what the filter matches: never the path behind it. */
@@ -291,7 +352,7 @@ function rowName(entry: LibraryEntry): string {
 
 /** The row under the cursor, if the listing has one. */
 export function selectedEntry(state: CardState): LibraryEntry | undefined {
-	return visibleEntries(state)[state.cursor];
+	return visibleEntries(state)[currentView(state).cursor];
 }
 
 export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {}): Reduction {
@@ -309,7 +370,9 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 			};
 		case "folder-failed":
 			// The other way round: the failure is the news, so it takes the footer from an older notice and
-			// ends the read that just failed. The path is stored as it arrived (S5, S15).
+			// ends the read that just failed. The path is stored as it arrived (S5, S15). A verdict about a
+			// library folder is not a verdict about the album list on screen (S20).
+			if (state.source !== "library") return unchanged(state);
 			return {
 				state: { ...state, failure: { path: event.path, reason: event.reason }, notice: undefined, reading: undefined },
 				effects: [],
@@ -317,6 +380,7 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 		case "folder-reading":
 			// A new attempt supersedes the last verdict: while this folder is being read again, `cannot
 			// show` would be a lie about what the card is doing (S5, S21).
+			if (state.source !== "library") return unchanged(state);
 			return { state: { ...state, reading: event.path, failure: undefined }, effects: [] };
 		case "overlay":
 			return { state: state.presence === "visible" ? hidden(state) : shown(state, "corner"), effects: [] };
@@ -339,21 +403,20 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 		case "folder-loaded":
 			// The filter is scoped to one folder (S18): another listing arrives unfiltered. The highlight
 			// goes with it, because its index meant a row of the listing that just went away (S17).
-			return {
-				state: {
-					...state,
-					path: event.path,
-					entries: event.entries,
-					cursor: 0,
-					filter: "",
-					filtering: false,
-					hover: undefined,
-					notice: undefined,
-					failure: undefined,
-					reading: undefined,
-				},
-				effects: [],
-			};
+			return { state: folderLoaded(state, event.path, event.entries), effects: [] };
+		case "catalog-albums":
+			return { state: catalogAlbums(state, event.albums), effects: [] };
+		case "catalog-album":
+			return { state: catalogAlbum(state, event.album), effects: [] };
+		case "catalog-reading":
+			// A read in flight is not a verdict: the last failure stops being true the moment the card tries
+			// again, so the footer repeats the label instead of an older message (S20, S21).
+			if (state.source !== "catalog") return unchanged(state);
+			return { state: { ...state, reading: event.label, notice: undefined }, effects: [] };
+		case "catalog-failed":
+			// The reason is data and the sentence lives with the other notices, so a failure never becomes an
+			// untranslated provider error on the card (S20).
+			return { state: { ...state, notice: catalogUnavailable(event.reason), reading: undefined }, effects: [] };
 		case "track-ended":
 			if (state.playing?.id !== event.trackId) return unchanged(state);
 			return advance(state);
@@ -371,14 +434,28 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 	}
 }
 
-/** Notices the card prints in its footer (S11, S14). Copy lives here so it cannot drift per view. */
+/** Notices the card prints in its footer (S11, S14, S20). Copy lives here so it cannot drift per view. */
 const AT_HOME = "at home";
+/**
+ * The catalog's own ceiling (S20, L76): the album list has no parent, and saying so with the mold of the
+ * library's `at home` teaches one shape for "there is nowhere above this", in both sources.
+ */
+export const TOP_OF_CATALOG = "top of the catalog";
 const PLAYLIST_ENDED = "playlist ended";
 const SHUFFLE_ON = "shuffle on";
 const SHUFFLE_OFF = "shuffle off";
 
 function cannotOpen(title: string): string {
 	return `${title}: cannot open, skipping`;
+}
+
+/**
+ * Why the catalog is not there (S20, L75). There is no retry key on purpose: the retry is hiding and
+ * reopening the card, so the message names the gesture it expects — a way out that exists and is not
+ * announced is an invisible key with another name.
+ */
+function catalogUnavailable(reason: CatalogFailure): string {
+	return reason === "not-found" ? "album missing · reopen to retry" : "catalog unavailable · reopen to retry";
 }
 
 function unchanged(state: CardState): Reduction {
@@ -425,6 +502,8 @@ function pressKey(state: CardState, id: string, deps: ModelDeps): Reduction {
 			return clearFilterOrHide(state);
 		case "start-filter":
 			return startFilter(state);
+		case "switch-source":
+			return switchSource(state);
 		case "toggle-pause":
 			return togglePause(state);
 		case "stop":
@@ -465,8 +544,10 @@ function moveCursor(state: CardState, delta: number): Reduction {
 	const rows = visibleEntries(state);
 	if (rows.length === 0) return unchanged(state);
 
-	const cursor = Math.min(rows.length - 1, Math.max(0, state.cursor + delta));
-	return cursor === state.cursor ? unchanged(state) : { state: { ...state, cursor }, effects: [] };
+	const cursor = Math.min(rows.length - 1, Math.max(0, currentView(state).cursor + delta));
+	return cursor === currentView(state).cursor
+		? unchanged(state)
+		: { state: withView(state, state.source, { cursor }), effects: [] };
 }
 
 /* --- the pointer (S17) ----------------------------------------------------------------------- */
@@ -495,7 +576,7 @@ function hoverRow(state: CardState, index: number | undefined): Reduction {
 function clickRow(state: CardState, index: number, deps: ModelDeps): Reduction {
 	if (state.presence !== "visible") return unchanged(state);
 	if (visibleEntries(state)[index] === undefined) return unchanged(state);
-	return activate({ ...state, cursor: index }, deps);
+	return activate(withView(state, state.source, { cursor: index }), deps);
 }
 
 /**
@@ -525,7 +606,7 @@ function filterKey(state: CardState, id: string): Reduction {
 	switch (id) {
 		case "enter":
 			// Confirming keeps the term and puts the cursor on the first result (S18).
-			return { state: { ...state, filtering: false, cursor: 0 }, effects: [] };
+			return { state: withView({ ...state, filtering: false }, state.source, { cursor: 0 }), effects: [] };
 		case "escape":
 			return clearFilterOrHide(state);
 		case "backspace":
@@ -557,8 +638,8 @@ function typedCharacter(id: string): string | undefined {
 /** Set the term and keep the cursor inside whatever the listing is now (S18). */
 function setFilter(state: CardState, filter: string): Reduction {
 	const rows = visibleEntries({ ...state, filter }).length;
-	const cursor = Math.min(state.cursor, Math.max(0, rows - 1));
-	return { state: { ...state, filter, cursor }, effects: [] };
+	const cursor = Math.min(currentView(state).cursor, Math.max(0, rows - 1));
+	return { state: withView({ ...state, filter }, state.source, { cursor }), effects: [] };
 }
 
 /** Backspace edits code points, never half a surrogate pair. */
@@ -587,14 +668,14 @@ function activate(state: CardState, deps: ModelDeps): Reduction {
  * Ask for a folder and move the card there at once (S14): the rows arrive with the scan result, so
  * the breadcrumb follows the key instead of the round trip. Playback is untouched (S11), and the
  * filter does not travel to a folder it was never typed in (S18).
+ *
+ * In the catalog this is how an album is entered (S20): its slug is the folder, and the tracks arrive
+ * as a `catalog-album` event. One grammar, two sources.
  */
 function loadFolder(state: CardState, path: string): Reduction {
 	return {
 		state: {
-			...state,
-			path,
-			entries: [],
-			cursor: 0,
+			...withView(state, state.source, { path, entries: [], cursor: 0 }),
 			filter: "",
 			filtering: false,
 			notice: undefined,
@@ -607,13 +688,21 @@ function loadFolder(state: CardState, path: string): Reduction {
 
 /** `enter` on a track (S11): the whole folder becomes the queue, in folder order, from this track. */
 function playFrom(state: CardState, track: Track, deps: ModelDeps): Reduction {
-	const tracks = state.entries.flatMap((entry) => (entry.kind === "track" ? [entry.track] : []));
+	const tracks = currentView(state).entries.flatMap((entry) => (entry.kind === "track" ? [entry.track] : []));
 	const position = tracks.findIndex((candidate) => candidate.id === track.id);
 	if (position < 0) return unchanged(state);
 
 	const playOrder = state.shuffle ? shuffleFrom(tracks, position, deps) : tracks;
 	return {
-		state: { ...state, playing: track, paused: false, queue: { tracks, playOrder, position }, notice: undefined },
+		state: {
+			...state,
+			playing: track,
+			paused: false,
+			// The queue carries where its tracks came from (S20), so `advance` never has to look at the source
+			// on screen to know which listing it is walking.
+			queue: { tracks, playOrder, position, source: state.source },
+			notice: undefined,
+		},
 		effects: [{ kind: "play", trackId: track.id }],
 	};
 }
@@ -722,11 +811,15 @@ function swapTracks(tracks: Track[], left: number, right: number): void {
 	tracks[right] = leftTrack;
 }
 
-/** `u` and backspace (S14): up one folder, never above the ceiling, which arrived as an input. */
+/** `u` and backspace (S14, S20): up one folder, never above the ceiling, which arrived as an input. */
 function folderUp(state: CardState): Reduction {
-	if (state.path === state.ceiling) return { state: { ...state, notice: AT_HOME }, effects: [] };
+	// The catalog's two levels are `albums -> tracks` (S20), so its ceiling is its own album list.
+	if (state.source === "catalog") return catalogUp(state);
 
-	const parent = parentOf(state.path);
+	const path = currentView(state).path;
+	if (path === state.ceiling) return { state: { ...state, notice: AT_HOME }, effects: [] };
+
+	const parent = parentOf(path);
 	if (!parent) return { state: { ...state, notice: AT_HOME }, effects: [] };
 	return loadFolder(state, parent);
 }
@@ -740,4 +833,176 @@ function parentOf(path: string): string | undefined {
 	const flavour = posix.isAbsolute(path) ? posix : win32;
 	const parent = flavour.dirname(path);
 	return parent === path ? undefined : parent;
+}
+
+/* --- the two sources (S20) ------------------------------------------------------------------- */
+
+/** One source's view replaced, with the other source left exactly as it was (S20). */
+function withView(state: CardState, source: MusicSource, patch: Partial<SourceView>): CardState {
+	const sources: Record<MusicSource, SourceView> = {
+		...state.sources,
+		[source]: { ...state.sources[source], ...patch },
+	};
+	return { ...state, sources };
+}
+
+/**
+ * The library's listing arrived (S5, S21). It lands in the library's own view even when the catalog is
+ * on screen — the answer belongs to the folder that was asked for, not to whatever is being looked at
+ * — and only a listing that is actually on screen takes the footer with it.
+ */
+function folderLoaded(state: CardState, path: string, entries: readonly LibraryEntry[]): CardState {
+	const stored = withView(state, "library", { path, entries, cursor: 0 });
+	if (state.source !== "library") return stored;
+	return {
+		...stored,
+		filter: "",
+		filtering: false,
+		hover: undefined,
+		notice: undefined,
+		failure: undefined,
+		reading: undefined,
+	};
+}
+
+/** `l`: the other source, restored where it was (S20, L79). */
+function switchSource(state: CardState): Reduction {
+	const source: MusicSource = state.source === "catalog" ? "library" : "catalog";
+	const view = state.sources[source];
+	return {
+		state: {
+			...state,
+			source,
+			// A filter is scoped to one listing and is not inherited by another (S18): the other source
+			// never had this term typed into it.
+			filter: "",
+			filtering: false,
+			hover: undefined,
+			// The path and the cursor are the source's own and stay untouched above: coming back lands where
+			// you left, never at the top. What is dropped is what described the listing being left.
+			notice: undefined,
+			failure: undefined,
+			reading: undefined,
+		},
+		// A library view that was never read is asked for, exactly as `enter` asks for a folder: the shell owns
+		// the reading, and its own path is where it left off — or `libraryRoot` if it never started. The catalog
+		// asks for nothing here: its read is the network's, it arrives with its own effect (slice 3), and a
+		// `load-folder` carrying an album slug would ask the filesystem about a name that is not a path.
+		effects: source === "library" && view.entries.length === 0 ? [{ kind: "load-folder", path: view.path }] : [],
+	};
+}
+
+/**
+ * The catalog's album list arrived (S20). It is also the answer to a revalidation, so it must not move
+ * the user (L75): the cursor follows the album it was on by slug, and a list that no longer holds it
+ * clips instead of pointing at whatever happened to land on that index.
+ */
+function catalogAlbums(state: CardState, albums: readonly CatalogAlbum[]): CardState {
+	const rows = albumRows(albums);
+	const catalog = state.sources.catalog;
+	const atAlbumList = catalog.path === "";
+	const view = atAlbumList ? { path: "", entries: rows, cursor: keepAlbumCursor(catalog, rows) } : catalog;
+	const stores: Record<MusicSource, SourceView> = { ...state.sources, catalog: view };
+	const stored = { ...state, catalogAlbums: albums, sources: stores };
+	if (state.source !== "catalog") return stored;
+	return { ...stored, reading: undefined, notice: undefined };
+}
+
+/**
+ * One album's tracks arrived (S20). They only land on the album the card is showing: a page that
+ * answered for an album the user already left is late news, and it cannot paint over another one.
+ */
+function catalogAlbum(state: CardState, album: CatalogAlbumListing): CardState {
+	const catalog = state.sources.catalog;
+	if (catalog.path !== album.slug) return state;
+	const rows = trackRows(album);
+	const stored = withView(state, "catalog", {
+		entries: rows,
+		// A revalidation of the album you are browsing clips the cursor instead of sending you to row one.
+		cursor: Math.min(catalog.cursor, Math.max(0, rows.length - 1)),
+	});
+	return state.source === "catalog" ? { ...stored, reading: undefined } : stored;
+}
+
+/** `u` inside the catalog (S20, L76): an album goes back to the album list, and the album list says so. */
+function catalogUp(state: CardState): Reduction {
+	const catalog = state.sources.catalog;
+	// No parent, and no pretending otherwise: the same mold as `at home`, naming the source so the two
+	// ceilings cannot be confused for one another.
+	if (catalog.path === "") return { state: { ...state, notice: TOP_OF_CATALOG }, effects: [] };
+
+	const rows = albumRows(state.catalogAlbums);
+	const album = rows.findIndex((row) => row.kind === "folder" && row.folder.path === catalog.path);
+	return {
+		state: {
+			...withView(state, "catalog", { path: "", entries: rows, cursor: Math.max(0, album) }),
+			// The listing changed, so the term does too (S18). Going up needs no read: the index is here.
+			filter: "",
+			filtering: false,
+			notice: undefined,
+		},
+		effects: [],
+	};
+}
+
+/** The album list as rows (S20): an album is a folder whose path is its slug, so `enter` and `u` work. */
+function albumRows(albums: readonly CatalogAlbum[]): readonly LibraryEntry[] {
+	return albums.map((album) => ({ kind: "folder", folder: { path: album.slug, name: album.title } }));
+}
+
+/**
+ * One album's tracks as rows (S20). The identity is `origin + id` (S3): the signed URL expires and the
+ * album and track slugs do not, so the row is named after what cannot go stale.
+ *
+ * The album's **title** travels on the row because a catalog track has no directory to be labelled by:
+ * the status line reads a folder from the id and would print `catalog:<slug>` (S12, L84).
+ */
+function trackRows(album: CatalogAlbumListing): readonly LibraryEntry[] {
+	return album.tracks.map((track) => ({
+		kind: "track",
+		track: {
+			id: catalogTrackId(album.slug, track.slug),
+			title: track.title,
+			origin: "catalog",
+			durationMs: track.durationMs,
+			album: album.title,
+		},
+	}));
+}
+
+/**
+ * The lyric of L75: a new album on top of the list cannot move what you were looking at. The cursor is
+ * resolved by the album's slug — its identity — and only an album that disappeared clips it.
+ */
+function keepAlbumCursor(catalog: SourceView, rows: readonly LibraryEntry[]): number {
+	const selected = catalog.entries[catalog.cursor];
+	const slug = selected?.kind === "folder" ? selected.folder.path : undefined;
+	const found = slug === undefined ? -1 : rows.findIndex((row) => row.kind === "folder" && row.folder.path === slug);
+	if (found >= 0) return found;
+	return Math.min(catalog.cursor, Math.max(0, rows.length - 1));
+}
+
+/** The prefix of a catalog track's identity, so album and track slugs are never concatenated by hand. */
+const CATALOG_ID = "catalog:";
+
+/**
+ * A catalog track's stable identity (S3, S20): `catalog:<albumSlug>/<trackSlug>`. Never the signed URL —
+ * that is a target, it expires, and it is resolved again before every play.
+ */
+export function catalogTrackId(albumSlug: string, trackSlug: string): string {
+	return `${CATALOG_ID}${albumSlug}/${trackSlug}`;
+}
+
+/**
+ * The album and track a catalog id names, or undefined when the id is not one. Exported so the resolver
+ * of the next slice asks instead of splitting a string itself: one format, one reader.
+ */
+export function parseCatalogTrackId(
+	id: string,
+): { readonly albumSlug: string; readonly trackSlug: string } | undefined {
+	if (!id.startsWith(CATALOG_ID)) return undefined;
+	const parts = id.slice(CATALOG_ID.length).split("/");
+	const [albumSlug, trackSlug] = parts;
+	if (parts.length !== 2 || !albumSlug || !trackSlug) return undefined;
+	return { albumSlug, trackSlug };
 }

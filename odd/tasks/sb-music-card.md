@@ -200,9 +200,9 @@ recuerda pero sí persiste su `libraryRoot`.
 - **Sin caché y sin red:** la card **cae a la biblioteca local y lo avisa en el pie**, en vez de quedarse en un
   catálogo vacío. Con caché presente el arranque no toca la red en absoluto. Es una divergencia deliberada con el de
   referencia, que se queda, dice `scraping catalog…` y espera un reintento.
-- **La superficie (fila de pestañas vs una tecla anunciada) queda diferida**: el estado se modela con `source` para
-  que las pestañas sean después una decisión de vista y no un cambio de modelo. Con mouse en el host (S17) y sin él
-  en el de referencia, una tecla sin chrome no se puede clickear; eso se decide al dibujar.
+- **Cambio de fuente: una tecla, ida y vuelta — decidido en L79.** `l` lleva **una** acción (`switch-source`) y por lo tanto **un solo hint** en el pie: `l source`. El encabezado dice dónde estás —`StreamBeats` o el breadcrumb de la biblioteca—, así que el hint no cambia de texto según el lado y no hay dos teclas para aprender. Cada fuente recuerda **su propia carpeta y su propio cursor**: volver te devuelve donde estabas, nunca al tope, que es la misma regla de identidad de S3 aplicada a la navegación.
+  Se descartó la **fila de pestañas** por costo —una fila de alto y un tipo de hit nuevo para el mouse de S17— y las
+  **dos teclas** (`l` biblioteca, `c` catálogo) por gramática: dos slots en un pie de 78 columnas que ya lleva doce.
 
 **Carga y refresco del catálogo — decidido en L75.** El catálogo reusa el molde de lectura que dejó T21: mientras se
 lee, el pie lo dice; nunca se pinta una lista vacía sin explicación (S20). Sin spinner animado, sin el error crudo
@@ -340,7 +340,7 @@ Requisitos, todos verificables:
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
 | T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
 | T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help` y tabla del README | worker | **hecho** — verificado por el dueño en el host (L59) | `08ba81d` (PR #59) |
-| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — **especificada y congelada por el dueño** (L74): no arranca hasta que la descongele | — |
+| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | **hecho** — cuatro rebanadas y **verificado por el dueño en el host** (L86) | `8a03144`, `c780e39`, `e27ba6d`, `fb6c50e`, `851816a`, `cdd312e`, `7403a0c` |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
 | T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | inline | **hecho** — verificado por el dueño en el host (L64) | `0f8baed` (PR #66) |
@@ -351,6 +351,7 @@ Requisitos, todos verificables:
 | T33 | S8 | `importSpecifiers()` (el otro helper de frontera) no ve especificadores entre comillas simples, así que dos guardas viejas son ciegas a `import "node:fs"` escrito así | inline | **hecho** — se borró el segundo parser en vez de parchearlo (L73) | — |
 | T31 | S22 | `R2-002`: el tope de diez líneas de `modeLines()` vive sólo en los tests; quien lea `host.ts` no ve que `--help` está justo en el borde | inline | **hecho** — se quitó la falta de holgura en vez de etiquetarla: 8 de 10, dos de margen (L73) | — |
 | T32 | S8 | `R3-002`: `settle()` polléa ~1 s y, si el disco tarda más, el test falla con un mensaje que culpa al listado en vez de reportar el timeout | inline | **hecho** — falla como timeout que nombra presupuesto, fila y frame; 5 s (L73) | — |
+| T34 | S20 | `R3-temp-empty-refetch` de la review de T14.2: una carpeta local **vacía** se vuelve a escanear en cada viaje de ida y vuelta, porque `switch-source` sólo pide lectura cuando `entries.length === 0` y no recuerda si ya se pidió | inline | abierta — no bloquea T14: la card se comporta bien, sólo gasta un escaneo de más | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
@@ -374,6 +375,8 @@ de tareas escrita a mano es exactamente lo que envejeció en el archivo de regla
 | **`sync` / descargas** | Fuera de S20: el catálogo se navega y se reproduce, no se descarga. La caché es de metadatos, nunca de audio | El dueño lo pida, o la reproducción en streaming deje de alcanzar | L2, S20 |
 | **Temas propios** | Los colores salen del tema del host, sin paletas propias | El dueño lo pida | AGENTS.md, TUI Rules |
 | **Pantalla de settings dentro de la card** | Las teclas se cambian con `/sb-music --keys` y el archivo, no con una UI | El dueño lo pida, o `--keys` deje de alcanzar | S22 |
+| **Un índice parcialmente irreconocible** (`R4-002`) | `parseAlbumIndex` saltea los ítems del grid que no matchean el patrón de slug. Sólo un índice **vacío** es `scrape`, así que un cambio parcial de markup devuelve un catálogo recortado que después se cachea 24 h | El catálogo muestre menos álbumes que el sitio, o el grid cambie de forma | L80, review de T14.1 |
+| **Orden de pistas sin número** (`R3-003`) | El fallback `track_num = rows.length` puede colisionar con números explícitos, y entonces el orden queda apoyado en la estabilidad del sort en vez de en el payload. Cosmético: los slugs siguen siendo únicos | Una página mezcle pistas numeradas y sin numerar | L80, review de T14.1 |
 
 **Cerradas por dejar de ser ciertas** — se retiran en vez de quedar acá mintiendo: el **catálogo Bandcamp en
 streaming** ya no es exclusión, es `S20` / `T14`; el **mouse** ya no es exclusión, `S17` está entregada (`T13`,
@@ -1712,3 +1715,237 @@ el feedback loop. Eso es «cómo trabajamos» y está bien donde está.
 nombraba cuatro tareas. Con el disparador real, hoy quedan abiertas **T12 y T14**, y las dos están congeladas por el
 dueño. O sea que el riesgo del hub está más cerca de lo que la lista hacía creer — que es exactamente lo que pasa
 cuando el estado se guarda en el lugar equivocado.
+
+L78 (T14 descongelada: el catálogo arranca). Pedido del dueño, verbatim: **"Vamos con T14 (catálogo)"**. Es el
+descongelamiento que L74 dejó explícitamente fuera: la spec ya estaba escrita y congelada, así que este ciclo
+**implementa, no re-debate**. Issue del carril de código: **#72** (`feat: the StreamBeats catalog as a second
+source (T14)`), con `status:approved` pre-marcado porque el dueño autorizó este ciclo en la conversación.
+
+Lo que NO se reabre, porque ya está decidido y escrito en S20: navegación con la misma gramática (`enter`/`u`),
+`top of the catalog` (L76) en vez de silencio, filtro sobre el listado visible (S18) que se limpia al cambiar de
+nivel, identidad `origin + id` y cola que lleva su fuente, la cola no mezcla fuentes, caché de metadatos con TTL de
+24 h y sin ninguna URL de audio adentro, caída a local con aviso nombrando el gesto, y `fetch` inyectado con los dos
+HTML reales como fixtures.
+
+Rebanadas, porque el total pasa la heurística de ~400 líneas autoradas del archivo de reglas y una sola unidad no es
+revisable: **(1)** `lib/catalog/` — parseo del índice y del tralbum, `fetch` inyectado, caché atómica `0600` con TTL,
+fixtures; **(2)** modelo — `source`, niveles `albums → tracks`, `top of the catalog`, cola con fuente, `origin + id`;
+**(3)** host — carga con progreso honesto, caída a local con aviso, revalidación en segundo plano conservando el
+cursor por slug. Docs (README y S14/S20) viajan con la rebanada que las vuelve falsas.
+
+**La única decisión que queda abierta es la que L74 difirió a propósito**: cómo se cambia de fuente en pantalla
+(fila de pestañas vs una tecla anunciada en el pie). El estado ya modela `source`; sin ninguna de las dos, la
+biblioteca local queda inalcanzable, así que se decide al dibujar la rebanada 3, no antes.
+
+L79 (el cambio de fuente, decidido: una tecla, ida y vuelta). Pregunta del dueño, verbatim: **"Hay una duda que me
+quedó: Para pasar del catalogo a la Lib de musicas creo que sería con la tecla l... y para volver de la lib al
+catalogo como sería?"**. Es exactamente la decisión que L74 había diferido, y llega cuando tenía que llegar: antes de
+dibujar, no después.
+
+**La respuesta a "cómo se vuelve" es la misma tecla.** `l` lleva **una** acción (`switch-source`), no dos: el pie
+anuncia `l source` y el encabezado dice dónde estás, así que el hint no cambia de texto según el lado. Dos teclas
+habrían gastado dos slots en un pie de 78 columnas que ya lleva doce, y habrían dado dos gramáticas para una sola
+pregunta —volver es cambiar de fuente otra vez, no ir a otro lado—. La fila de pestañas se descartó por costo: una
+fila de alto y un tipo de hit nuevo en el mouse de S17. Queda escrito en **S20**, no acá al lado, porque una enmienda
+al lado es cómo el documento se contradice a sí mismo (L76).
+
+**Lo que la tecla arrastra, y hay que decir:** cada fuente recuerda **su propia carpeta y su propio cursor**, así que
+el viaje de ida y vuelta no pierde el lugar —volver te devuelve donde estabas, nunca al tope—. La cola sigue pegada a
+su fuente, que ya lo decía S20. Y una advertencia de historia: **`l` ya existió** y se retiró en T17, cuando el ciclo
+de tamaño dejó de depender del foco (L41); vuelve con otro trabajo. Una tecla que cambia de significado se confunde
+sólo si el documento no lo dice, y esto lo dice.
+
+L80 (T14, rebanada 1 cerrada: el catálogo se lee, se parsea y se cachea). Código nuevo en `lib/catalog/`:
+`parse.ts` (índice y tralbum, puro), `http.ts` (puerto de red con `fetch` **inyectado**) y `cache.ts` (metadatos,
+tmp+rename, `0750`/`0600`, TTL de 24 h). Vocabulario en `lib/types.ts` (`CatalogAlbum`, `CatalogTrack`,
+`CatalogAlbumListing`, `CatalogCache`, `CatalogFailure`, `CatalogResult`). `451` tests / `102` suites en verde,
+`pnpm check` completo en verde (lint + typecheck + test).
+
+**Cuatro decisiones que la rebanada tuvo que tomar, y por qué:**
+
+1. **`neutralizeName` se mudó de `lib/library/names.ts` a `lib/core/names.ts`.** El título de un álbum llega de
+   la red y es tan no confiable como un nombre de archivo (S5, AGENTS.md); `catalog` es hermano de `library`, no su
+   hijo, así que importar el helper de un hermano era una flecha de dependencia que no existe. Ahora `catalog` y
+   `library` bajan a `core`, que es donde vive la regla de texto. `tests/library/names.test.ts` pasó a
+   `tests/core/names.test.ts`.
+2. **La URL de audio se parsea en una función aparte** (`parseTrackUrl`) de la que produce metadatos
+   (`parseAlbumPage`). No es cosmética: la caché no tiene *forma* donde guardar un token, así que la invariante
+   «jamás se persiste» deja de depender de que alguien se acuerde y pasa a ser estructural. Un test la pina sobre el
+   archivo escrito.
+3. **La tolerancia es por ítem, no por página.** Un álbum sin título cae al slug humanizado —perder el nombre lindo
+   es menos grave que perder el álbum—; una pista sin `mp3-128` se saltea porque nada podría resolverla nunca; y un
+   índice con **cero** álbumes es `scrape`, nunca una lista vacía (la mitigación que S20 ya había declarado).
+4. **Los fixtures son extractos reales, no páginas enteras** (187 KB y 311 KB): bytes verbatim de
+   `streambeats.bandcamp.com`, con el wrapper reconstruido y documentado en `tests/fixtures/catalog/README.md`.
+   `biome ci` los ignora (`files.includes` con `"!tests/fixtures"`), porque un HTML no se lintea con reglas de JS.
+   Dos guardas nuevas en `tests/boundary.test.ts`: `lib/catalog/{parse,http}.ts` no importan I/O de Node, y nadie
+   fuera de `extensions/` llama a un `fetch` ambiente.
+
+**Hallazgo de plataforma, que costó un test colgado:** `mkdirSync(recursive: true)` sobre un filesystem virtual
+(`/proc`) **no falla rápido, gira**. El test que probaba «una caché que no se puede escribir devuelve `false`» usaba
+`/proc/inexistente/...` y colgó el runner 120 s sin una línea de salida. Se arregló con un fallo real y barato —el
+padre es un **archivo**, así que es `ENOTDIR` inmediato— y de paso destapó un bug de la implementación: el `rmSync`
+del temporal, con `force: true`, **también tira `ENOTDIR`**, así que la limpieza ahora está guardada y la función
+igual contesta `false`. La lección es de test, no de producto: un caso de falla tiene que fallar rápido.
+
+**Siguiente (rebanada 2):** el modelo con `source`, los niveles `albums → tracks`, `top of the catalog`, la cola con
+su fuente y la identidad `origin + id`. La superficie de cambio de fuente ya está decidida (L79): `l`, ida y vuelta.
+
+L81 (la review de la rebanada 1: aprobada, y los hallazgos que sí valían). El dueño pidió correr la review nativa
+aunque el assess dijera `reviewDue: false` (`medium`, `under_budget`). Corrió con tres lentes —`risk`, `resilience`,
+`reliability`— sobre `e4ab3ff..c780e39` y **aprobó** el candidato con **nueve hallazgos advisory**, ninguno
+bloqueante: el proveedor no abrió corrección ni ofrece transición de corrección para este candidato. La autoridad
+quedó quemada en `review-46860454c775ab26`.
+
+La decisión del dueño, verbatim: **"Endurecer ahora, antes del PR"**. Cinco de los nueve cambian comportamiento
+observable y se arreglaron en una unidad propia:
+
+1. **`R3-001` + `R4-003`**: un 429/5xx se clasificaba como `scrape` y no se reintentaba. Contarle al lector que «el
+   markup cambió» cuando el servidor tuvo un mal minuto manda a la causa equivocada y se saltea el reintento que
+   existe justo para eso. Ahora `408|425|429|5xx` es `network` **y usa el reintento**.
+2. **`R4-004`**: el timeout propio se reintentaba, así que el techo real eran ~60 s. El timeout **es** el techo: un
+   abort propio ahora es terminal. El peor caso son 30 s.
+3. **`R4-001`**: un álbum cuyas pistas no eran reproducibles volvía como lectura exitosa con lista vacía — y una
+   lista vacía es *truthy*, así que el `scrape` nunca se levantaba y el hueco se cacheaba 24 h. Ahora cero pistas es
+   `scrape`.
+4. **`R1-temp-symlink`**: el temporal era `catalog.json.<pid>.tmp`, un nombre predecible que quien pueda escribir en
+   el directorio de caché puede pre-crear como symlink y la escritura lo seguiría. Ahora lleva `randomUUID()`.
+5. **`R1-cache-duration` + `R3-002`**: la caché aceptaba un `durationMs` que no fuera número, y escribía uno no
+   finito que `JSON.stringify` volvía `null` — una caché «escrita con éxito» garantizada ilegible al arrancar. Ahora
+   se exige finito y positivo, y **no se escribe** una caché que no se podría leer de vuelta.
+
+**Dos quedan como riesgo aceptado con disparador**, en la tabla de arriba: el índice parcialmente irreconocible
+(`R4-002`) —la tolerancia de S20 es por ítem a propósito— y el orden de pistas sin número (`R3-003`), cosmético
+porque el slug sigue siendo único.
+
+Evidencia: `38` tests en `tests/catalog/` (antes 32; los seis nuevos se vieron en rojo primero), `tsc` limpio en
+`lib/catalog` y `tests/catalog`.
+
+L82 (T14, rebanada 2 cerrada: el modelo sabe de dos fuentes). `CardState` cambia de forma: `source` más
+`sources: Record<MusicSource, SourceView>`, y **desaparecen** `path`/`entries`/`cursor` del tope. Toda lectura pasa
+por `currentView(state)`. `Queue` lleva su `source`. `488` tests / `112` suites, `pnpm check` en verde (venía de
+451/102).
+
+**Lo que el brief fijó y se cumplió:** `l` es **una** acción (`switch-source`) con un hint (`l source`), y el viaje
+de ida y vuelta devuelve cada fuente a **su** carpeta y **su** cursor. El catálogo tiene dos niveles (`""` es la
+lista de álbumes, el slug son sus pistas) y `top of the catalog` en la raíz. La identidad es `origin + id`
+(`catalogTrackId` / `parseCatalogTrackId`) y la cola avanza por su propio `playOrder`, así que la fuente que se está
+mirando no decide nada. Los cuatro eventos `catalog-*` espejan los `folder-*`, y una actualización del índice
+conserva el cursor **por slug** (L75).
+
+**Ocho decisiones que el brief no fijaba y el worker declaró**, todas razonables: la fuente por defecto es catálogo
+(L74) y por eso el host sólo escanea la biblioteca cuando está a la vista; `catalog-failed` usa los textos de
+S20/L75 (`catalog unavailable · reopen to retry`, y `album missing · reopen to retry` para `not-found`); `reading`
+es compartido y el del catálogo se imprime tal cual (pasarlo por `breadcrumb` imprimiría una ruta de HOME que no
+existe); `folder-*` sólo habla en el pie con la biblioteca a la vista, así que una respuesta tardía no repinta la
+otra fuente; `catalogAlbums` vive en el estado porque `u` desde un álbum tiene que volver sin leer y el encabezado
+necesita el título, no el slug; `u` desde un álbum deja el cursor en el álbum de donde vino; `switch-source` limpia
+además `notice`/`failure`/`reading`/`hover`; y `l` se anuncia junto a `/`.
+
+**Una corrección mía sobre el diff:** `switch-source` emitía `{ kind: "load-folder", path: "" }` al volver al
+catálogo, y el test lo pineaba. Era dato falso —una ruta vacía o un slug de álbum no son paths— y lo único que
+impedía que el scanner contestara «no existe esa carpeta» era una guarda en el host. Ahora el efecto sale **sólo**
+para la biblioteca; la lectura del catálogo llega con su propio efecto en la rebanada 3. Test cambiado con el
+motivo escrito.
+
+**Transitorio declarado hasta la rebanada 3:** la card abre en el catálogo y el catálogo todavía no tiene loader, así
+que abre vacía hasta que se aprieta `l`. Es el costo de haber partido por modelo y no por host, y lo cierra la
+rebanada 3 con la carga, el progreso y la caída a local.
+
+**Dos deudas anotadas por el worker, con dueño:** la etiqueta de carpeta del S12 para un id de catálogo resuelve al
+**slug** del álbum y no a su título (`now-playing.ts` estaba fuera de las superficies de esta rebanada), y el README
+todavía dice que el catálogo es «later slice». Las dos son de la rebanada 3.
+
+**Estrategia de entrega, para que no se pierda:** el total de T14 pasa la heurística de ~400 líneas autoradas, así
+que va **un solo PR** al cerrar la rebanada 3, con `size:exception` y `Closes #72`, y lo mergea el dueño. Chained PRs
+no aplican porque cada PR exige cerrar una issue aprobada, y cerrar #72 con dos tercios del trabajo sería mentirle al
+gate.
+
+L83 (la review de la rebanada 2: aprobada, y lo que dejó). Dos lentes —`readability` y `reliability`— sobre
+`c780e39..fb6c50e` porque era un cambio de forma del estado, sin I/O nueva. **Aprobada**, autoridad quemada en
+`review-631300eb4aef6a86`, tres hallazgos advisory y ninguno bloqueante.
+
+- **`R2-default-source-empty-catalog` (WARNING)** — dice exactamente el transitorio que L82 ya había declarado: la
+  card abre en el catálogo y el catálogo no tiene loader, así que se ve una lista vacía sin etiqueta y sin aviso
+  hasta apretar `l`. No se arregla con un parche: **lo cierra la rebanada 3**, que está en curso.
+- **`R3-temp-empty-refetch` (SUGGESTION)** — real y anotado como **T34**: `switch-source` pide lectura cuando el
+  listado está vacío y no recuerda que ya la pidió, así que una carpeta legítimamente vacía se re-escanea en cada
+  ida y vuelta. No bloquea T14.
+- **`R2-reading-label-source-coupling` (SUGGESTION)** — el pie decide cómo imprimir `state.reading` según
+  `state.source`, y la invariante «un `reading` siempre pertenece a la fuente que se está viendo» hoy la sostienen
+  las guardas del reducer y los comentarios, no el tipo. Se deja como observación: cerrarla con tipos costaría un
+  campo por fuente y el riesgo real es una etiqueta mal impresa en una carrera entre dos lecturas, que la guarda de
+  token de T21 ya hace improbable.
+
+L84 (T14, rebanada 3 cerrada: el catálogo carga, cae a local y suena). La card abre en el catálogo y el catálogo
+existe: `lib/host/host.ts` gana `openCatalog`/`readCatalog`/`catalogFailed`/`ensureCatalog` con el mismo latch y
+guarda de token que dejó T21, `extensions/sb-music.ts` es la raíz de composición del `fetch` ambiente, de la caché y
+del resolver, y `createResolver` pide el token **antes de cada play** (`expiresAt` de 5 minutos, nunca persistido).
+`506` tests / `115` suites, `pnpm check` verde (venía de 488/112). El transitorio de L82 —«abre vacía»— queda
+cerrado, y con él el hallazgo `R2-default-source-empty-catalog` de la review de la rebanada 2.
+
+**Las cuatro filas de L75, implementadas como están escritas:** caché tibia pinta sin tocar la red; caché fría con
+red pinta el marco, trae el índice y después los álbumes con `reading catalog…` y luego
+`reading catalog · N of M albums` contando **resueltos**; caché fría sin red cae a la biblioteca; y la revalidación
+de una caché vieja corre en segundo plano bajo un token de pasada, así que una respuesta que perdió su carrera no
+escribe nada.
+
+**Seis decisiones que el brief no fijaba y el worker declaró en vez de esconder:** (1) la caché entra **inyectada**
+como tercer dep (`read`/`write`/`isFresh`) porque `lib/host` no puede importar `lib/catalog` — la dirección va al
+revés, y la guarda de frontera lo impone; (2) no hay efecto `read-catalog`: la lectura arranca desde `show()` y desde
+`dispatch()` con `ensureCatalog()`, que es lo que hace que `l` vuelva a pedir; (3) los álbumes cacheados se
+**recuerdan** en un mapa de sesión y se despachan al entrar, porque `catalog-album` sólo aterriza en el álbum que se
+está mirando; (4) la frase de la caída se **re-aplica una vez** cuando llega el listado de la biblioteca, porque
+`folder-loaded` limpia el pie y si no la sentencia viviría milisegundos; (5) la raíz de composición acepta un
+`{ fetch }` de test, que es la única forma de ejercitar el resolver sin abrir un socket; (6) entrar a un álbum que
+nadie leyó lo lee al momento, con el título del álbum como etiqueta.
+
+**Dos cosas que quedan abiertas y dichas:** la etiqueta de carpeta de S12 para una pista del catálogo todavía
+imprime el slug (`catalog:<album>`), porque `now-playing.ts` estaba fuera de las superficies; y la frase
+`catalog unavailable · reopen to retry` es más amplia que el comportamiento después de la caída —la card queda en la
+biblioteca, así que reabrir muestra la biblioteca y el reintento real ocurre con `l`— aunque las dos vías
+reintentan de verdad, porque el latch sólo lo pone una lectura exitosa.
+
+L85 (T14 implementada: lo que cierra la rebanada 3, y lo que falta). Dos cosas que L82/L84 dejaron abiertas y se
+cerraron acá, cada una con su evidencia:
+
+1. **La etiqueta de S12 para una pista del catálogo.** Imprimía `catalog:<albumSlug>` porque `folderLabel` deriva la
+   carpeta del id y un id de catálogo no tiene carpeta. Ahora el **título del álbum viaja en la fila** (`Track.album`)
+   y el segmento lo prefiere; una pista local sigue etiquetándose por su directorio y la vista no aprende nada de
+   ninguna de las dos fuentes. El test se vio **en rojo** con el fallback puesto y verde con el arreglo.
+2. **El README decía que el catálogo era «later slice»** y no mencionaba `l`, que es la tecla sin la cual la segunda
+   fuente es inalcanzable. Ahora documenta las dos fuentes, la tecla, dónde vive la caché de metadatos (`0600`, fuera
+   de la carpeta de música), la revalidación de 24 h en segundo plano, las dos formas del contador de progreso, la
+   caída a local con su frase y que cada play cuesta una request porque la URL firmada no se guarda.
+
+`507` tests / `115` suites, `pnpm check` verde. La rama lleva **siete commits** y el candidato completo de T14 pasa la
+heurística de ~400 líneas con holgura, así que el PR va con `size:exception` y `Closes #72`, y el merge es del dueño.
+
+**Lo que falta para cerrar la fila T14 no es código: es la prueba del dueño en el host.** `AGENTS.md` (Feedback
+Loop) dice que una integración no está lista cuando el gate está verde sino cuando abre en Pi, y este documento ya
+cerró filas así cinco veces. La prueba concreta: `pi -e ./extensions/sb-music.ts`, abrir la card (tiene que abrir en
+el catálogo y traerlo), apretar `l` y ver la biblioteca, volver con `l`, entrar a un álbum, reproducir una pista
+(el estado tiene que decir el álbum, no el slug) y, con `SB_MUSIC_DEBUG=/tmp/sb-music.log`, confirmar que la segunda
+apertura no toca la red.
+
+**Dos cosas quedan declaradas y abiertas, ninguna bloqueante:** T34 (una carpeta local vacía se re-escanea en cada
+viaje de ida y vuelta) y la frase `catalog unavailable · reopen to retry`, que después de la caída es más amplia que
+el gesto real —la card queda en la biblioteca y el reintento ocurre con `l`— aunque las dos vías reintentan.
+
+L86 (T14 cerrada: la prueba del dueño en el host, y el delivery). Pedido del dueño, verbatim: **"Ya hice las pruebas y
+funcionaron perfecto"**. Con eso se cumple la condición que este documento exige para cerrar cualquier fila —`AGENTS.md`,
+Feedback Loop: la integración no está lista cuando el gate está verde sino cuando abre en Pi— y la fila T14 pasa a
+**hecho**. La prueba fue la que quedó escrita en L85: abrir la card y que traiga el catálogo con su progreso, `l` a la
+biblioteca y `l` de vuelta al mismo álbum, entrar a un álbum, reproducir una pista con el álbum en la línea de estado, y
+reabrir con la caché tibia sin tocar la red.
+
+Delivery: rama `feat/catalog-source`, **ocho commits** de unidades revisables, un solo PR con `size:exception` y
+`Closes #72` porque el total (3574 líneas autoradas) pasa la heurística de carga de review del archivo de reglas. Las dos
+rebanadas grandes tienen **review nativa aprobada y quemada** (`review-46860454c775ab26` con tres lentes,
+`review-631300eb4aef6a86` con dos); el candidato completo dio `reviewDue: false` (`medium`, `under_budget`) y el dueño
+eligió probar en el host antes del PR. Sus nueve más tres hallazgos advisory están saldados, aceptados con disparador o
+anotados como **T34**.
+
+**Una consecuencia honesta sobre la tabla de arriba:** con T14 cerrada, la fila `abierta` que queda es **T12** (Windows,
+congelada por el dueño) y **T34** (el re-escaneo de una carpeta vacía). El disparador del hub —«no quede ninguna fila
+`abierta`»— **no se cumple todavía**, y no se cumple por decisiones pendientes del dueño, no por trabajo trabado.
