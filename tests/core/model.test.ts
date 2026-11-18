@@ -156,7 +156,7 @@ describe("the starting state (S15, S14, S11, S20)", () => {
 		assert.equal(view(state).path, "", "the catalog's root is the album list");
 		assert.deepEqual(view(state).entries, []);
 		assert.equal(view(state).cursor, 0);
-		assert.deepEqual(state.sources.library, { path: ROOT, entries: [], cursor: 0 });
+		assert.deepEqual(state.sources.library, { path: ROOT, entries: [], cursor: 0, loaded: false });
 		assert.equal(state.playing, undefined);
 		assert.equal(state.paused, false);
 		assert.equal(state.queue, undefined);
@@ -1152,6 +1152,41 @@ describe("the key that switches sources (S13, S20)", () => {
 	});
 });
 
+describe("reading a source only when it was never read (T34)", () => {
+	it("does not re-read a library folder that was read and is legitimately empty", () => {
+		// An empty array means two different things: "nobody looked" and "there is nothing there". Asking
+		// again on every round trip spends a disk scan on an answer the card already has.
+		const emptyFolder = loaded(local(visible(start())), `${ROOT}/Empty`, []);
+		assert.deepEqual(view(emptyFolder).entries, [], "the folder really is empty");
+		assert.equal(emptyFolder.source, "library");
+
+		// The assertion has to be on the trip *back*: pressing `l` reports the effects of the switch it
+		// performs, and measuring the trip away would only prove that the catalog asks for nothing.
+		const back = press(local(emptyFolder), "l");
+
+		assert.equal(back.state.source, "library");
+		assert.deepEqual(back.effects, [], "a folder that was read is not read again");
+	});
+
+	it("still reads a view nobody has read", () => {
+		const reduction = press(visible(start()), "l");
+
+		assert.equal(reduction.state.source, "library");
+		assert.deepEqual(reduction.effects, [{ kind: "load-folder", path: ROOT }]);
+	});
+
+	it("still retries a folder whose read failed, because a failure is not an answer", () => {
+		// A latch that only looked at `entries` would look right here by accident; one that remembered the
+		// request instead of the answer would leave the card empty for the session after one bad mount.
+		const failed = reduce(local(visible(start())), { kind: "folder-failed", path: ROOT, reason: "missing" }).state;
+
+		const back = press(local(failed), "l");
+
+		assert.equal(back.state.source, "library");
+		assert.deepEqual(back.effects, [{ kind: "load-folder", path: ROOT }]);
+	});
+});
+
 describe("switching sources (S20, L79)", () => {
 	it("moves to the other source and asks for it when it has never been read", () => {
 		const reduction = switchSource(visible(start()));
@@ -1395,7 +1430,7 @@ describe("a read that lands while the other source is on screen (S20)", () => {
 		const withNotice = reduce(catalog, { kind: "catalog-failed", reason: "network" }).state;
 		const landed = loaded(withNotice, ALBUM, album());
 
-		assert.deepEqual(landed.sources.library, { path: ALBUM, entries: album(), cursor: 0 });
+		assert.deepEqual(landed.sources.library, { path: ALBUM, entries: album(), cursor: 0, loaded: true });
 		assert.equal(landed.notice, "catalog unavailable · reopen to retry", "the catalog keeps its own message");
 		assert.equal(landed.source, "catalog", "and the user stays where they were");
 	});

@@ -51,7 +51,7 @@ function card(overrides: Partial<CardState> & Partial<SourceView> = {}): CardSta
 		size: "expanded",
 		...rest,
 		source: "library",
-		sources: { ...base.sources, library: { path, entries: rows, cursor } },
+		sources: { ...base.sources, library: { path, entries: rows, cursor, loaded: true } },
 	};
 }
 
