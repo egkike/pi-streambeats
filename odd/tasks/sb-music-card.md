@@ -352,6 +352,7 @@ Requisitos, todos verificables:
 | T31 | S22 | `R2-002`: el tope de diez líneas de `modeLines()` vive sólo en los tests; quien lea `host.ts` no ve que `--help` está justo en el borde | inline | **hecho** — se quitó la falta de holgura en vez de etiquetarla: 8 de 10, dos de margen (L73) | — |
 | T32 | S8 | `R3-002`: `settle()` polléa ~1 s y, si el disco tarda más, el test falla con un mensaje que culpa al listado en vez de reportar el timeout | inline | **hecho** — falla como timeout que nombra presupuesto, fila y frame; 5 s (L73) | — |
 | T34 | S20 | `R3-temp-empty-refetch` de la review de T14.2: una carpeta local **vacía** se vuelve a escanear en cada viaje de ida y vuelta, porque `switch-source` sólo pide lectura cuando `entries.length === 0` y no recuerda si ya se pidió | inline | **hecho** — el listado recuerda si fue leído (`SourceView.loaded`), así que una carpeta vacía ya leída no se re-escanea y un fallo sigue reintentando (L88) | `L88` |
+| T35 | — | **Release `v0.1.0`**: `version` a `0.1.0`, `RELEASING.md` (semver, comandos, rollback), sección `Install` en el README con el `git:` pinneable y plataformas honestas, y la guarda de CI que falla si el tag no coincide con `package.json`. El acto —`git tag -a v0.1.0`, `gh release create --generate-notes`— lo mueve el dueño o lo muevo yo con su permiso | inline | abierta — **dispara cuando no quede ninguna otra fila abierta**, y va **antes** de publicar en el hub (L89) | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
@@ -371,7 +372,7 @@ de tareas escrita a mano es exactamente lo que envejeció en el archivo de regla
 
 | Riesgo o exclusión | Qué es | Revisar cuando | Origen |
 |---|---|---|---|
-| **Publicación en el hub de Gentle** | El repo no lleva ningún topic, ni siquiera `gentle-hub-project`, que es el que lo hace aparecer en el hub. Publicar una tarjeta que lleva a un README sin nada instalable gasta la primera impresión | **No quede ninguna fila `abierta` en `## Tasks`** y no haya hallazgos de review pendientes de arreglar. Ese día se agregan los topics y el hub lo crawlea en horas | L59, verbatim del dueño |
+| **Publicación en el hub de Gentle** | El repo no lleva ningún topic, ni siquiera `gentle-hub-project`, que es el que lo hace aparecer en el hub. Publicar una tarjeta que lleva a un README sin nada instalable gasta la primera impresión | **No quede ninguna fila `abierta` en `## Tasks`** y no haya hallazgos de review pendientes de arreglar — o sea **después de T35** (el release), que es la última fila que queda abierta. Ese día se agregan los topics y el hub lo crawlea en horas | L59, verbatim del dueño |
 | **`sync` / descargas** | Fuera de S20: el catálogo se navega y se reproduce, no se descarga. La caché es de metadatos, nunca de audio | El dueño lo pida, o la reproducción en streaming deje de alcanzar | L2, S20 |
 | **Temas propios** | Los colores salen del tema del host, sin paletas propias | El dueño lo pida | AGENTS.md, TUI Rules |
 | **Pantalla de settings dentro de la card** | Las teclas se cambian con `/sb-music --keys` y el archivo, no con una UI | El dueño lo pida, o `--keys` deje de alcanzar | S22 |
@@ -1997,3 +1998,27 @@ una respuesta y no se vuelve a escanear; una carpeta que falló sigue siendo una
 TDD observado: un test en rojo (el re-escaneo), dos guardas verdes antes y después, y después verde con el campo
 nuevo. `510` tests / `116` suites, `pnpm check` verde (venía de 507/115): tres tests nuevos y dos expectativas de
 forma del estado actualizadas (`loaded: false` al abrir, `loaded: true` al aterrizar un listado).
+
+L89 (el release entra al backlog: modelo 2, después de los pendientes y antes del hub). Pedido del dueño, verbatim:
+**"Vamos a ir con el 2. Tag + GitHub Release pero lo haremos recien cuando terminemos los pendientes y antes del hub.
+Puedes poner esto en la lista de pendientes?"**
+
+**Por qué el 2 y no el 3:** un tag con su GitHub Release da lo que un paquete necesita para gestionarse —refs
+pinneables, changelog y rollback por tag— sin abrir cuenta de npm ni agregar un secreto de entrega. Publicar en npm
+exige **cuenta propia** (el registro es otro sistema: la cuenta de GitHub no autentica el publish; sí presta OIDC para
+provenance y trusted publishing, que es lo que abarataría el día que se haga). Y cambia el gobierno: el merge del dueño
+es hoy el último portón, y un publish no lo respeta; por eso, si algún día entra, el workflow tendrá que negarse a
+publicar si el tag no apunta a un commit sobre `main` con `gate` verde.
+
+**Orden decidido, y queda escrito en dos lugares para que no se pueda leer al revés:** T35 dispara **cuando no quede
+ninguna otra fila abierta**, y la fila del hub ahora lo dice explícitamente —«después de T35»—, así que el hub no puede
+adelantarse al release. Hoy la única otra abierta es T12 (Windows), congelada por el dueño.
+
+**Qué contiene T35, para que el día que se abra no haya que re-discutirlo:** `version` a `0.1.0`; `RELEASING.md` con la
+política semver (`0.x`: minor = cambio que el usuario nota, patch = arreglo), los comandos y el rollback
+(`pi install git:…@v0.1.0`); la sección `Install` del README con el `git:` pinneable, los requisitos y las plataformas
+**honestas** (Linux soportado, macOS con `ipc probe` en CI, Windows todavía no); y una guarda de CI que falle si el tag
+`v*` no coincide con `package.json#version`, porque un pin que miente es peor que no tener pin.
+
+**Qué reabriría el 3 (npm):** que se publique en el hub y la instalación corta importe, que alguien pida
+`pi install npm:…`, o que moleste tener que avisar «bajate `main` otra vez».
