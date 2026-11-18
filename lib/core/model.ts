@@ -40,6 +40,13 @@ export interface SourceView {
 	readonly path: string;
 	readonly entries: readonly LibraryEntry[];
 	readonly cursor: number;
+	/**
+	 * Whether a read has filled this view at least once (T34). It is not derivable from `entries`: an empty
+	 * array means "nobody looked" and "there is nothing there" at the same time, and the two want opposite
+	 * things — the first asks the shell, the second does not. A failed read leaves it false on purpose, so
+	 * the next visit retries instead of showing an empty folder for the rest of the session.
+	 */
+	readonly loaded: boolean;
 }
 
 /**
@@ -308,9 +315,9 @@ export function initialState(config: CardConfig): CardState {
 		source: DEFAULT_SOURCE,
 		sources: {
 			// The catalog's album list is the catalog's root, and the slug of an album is its folder (S20).
-			catalog: { path: "", entries: [], cursor: 0 },
+			catalog: { path: "", entries: [], cursor: 0, loaded: false },
 			// The library starts at the configured root and is read the first time it is looked at.
-			library: { path: config.libraryRoot, entries: [], cursor: 0 },
+			library: { path: config.libraryRoot, entries: [], cursor: 0, loaded: false },
 		},
 		catalogAlbums: [],
 		presence: "hidden",
@@ -852,7 +859,9 @@ function withView(state: CardState, source: MusicSource, patch: Partial<SourceVi
  * — and only a listing that is actually on screen takes the footer with it.
  */
 function folderLoaded(state: CardState, path: string, entries: readonly LibraryEntry[]): CardState {
-	const stored = withView(state, "library", { path, entries, cursor: 0 });
+	// `loaded` is set by a read that succeeded, whatever it found: an empty folder that was read is an
+	// answer, while a folder that failed to read never gets here and stays askable.
+	const stored = withView(state, "library", { path, entries, cursor: 0, loaded: true });
 	if (state.source !== "library") return stored;
 	return {
 		...stored,
@@ -884,11 +893,12 @@ function switchSource(state: CardState): Reduction {
 			failure: undefined,
 			reading: undefined,
 		},
-		// A library view that was never read is asked for, exactly as `enter` asks for a folder: the shell owns
-		// the reading, and its own path is where it left off — or `libraryRoot` if it never started. The catalog
-		// asks for nothing here: its read is the network's, it arrives with its own effect (slice 3), and a
-		// `load-folder` carrying an album slug would ask the filesystem about a name that is not a path.
-		effects: source === "library" && view.entries.length === 0 ? [{ kind: "load-folder", path: view.path }] : [],
+		// A library view that was **never read** is asked for, exactly as `enter` asks for a folder: the shell
+		// owns the reading, and its own path is where it left off — or `libraryRoot` if it never started. What
+		// is asked is the request, not an empty listing: a folder that was read and happens to hold nothing is
+		// an answer, and re-scanning it on every round trip spends the disk on something already known (T34).
+		// The catalog asks for nothing here: its read is the network's and arrives with its own effect.
+		effects: source === "library" && !view.loaded ? [{ kind: "load-folder", path: view.path }] : [],
 	};
 }
 
@@ -901,7 +911,9 @@ function catalogAlbums(state: CardState, albums: readonly CatalogAlbum[]): CardS
 	const rows = albumRows(albums);
 	const catalog = state.sources.catalog;
 	const atAlbumList = catalog.path === "";
-	const view = atAlbumList ? { path: "", entries: rows, cursor: keepAlbumCursor(catalog, rows) } : catalog;
+	const view: SourceView = atAlbumList
+		? { path: "", entries: rows, cursor: keepAlbumCursor(catalog, rows), loaded: catalog.loaded }
+		: catalog;
 	const stores: Record<MusicSource, SourceView> = { ...state.sources, catalog: view };
 	const stored = { ...state, catalogAlbums: albums, sources: stores };
 	if (state.source !== "catalog") return stored;

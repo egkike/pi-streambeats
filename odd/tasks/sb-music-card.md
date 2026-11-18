@@ -351,7 +351,7 @@ Requisitos, todos verificables:
 | T33 | S8 | `importSpecifiers()` (el otro helper de frontera) no ve especificadores entre comillas simples, así que dos guardas viejas son ciegas a `import "node:fs"` escrito así | inline | **hecho** — se borró el segundo parser en vez de parchearlo (L73) | — |
 | T31 | S22 | `R2-002`: el tope de diez líneas de `modeLines()` vive sólo en los tests; quien lea `host.ts` no ve que `--help` está justo en el borde | inline | **hecho** — se quitó la falta de holgura en vez de etiquetarla: 8 de 10, dos de margen (L73) | — |
 | T32 | S8 | `R3-002`: `settle()` polléa ~1 s y, si el disco tarda más, el test falla con un mensaje que culpa al listado en vez de reportar el timeout | inline | **hecho** — falla como timeout que nombra presupuesto, fila y frame; 5 s (L73) | — |
-| T34 | S20 | `R3-temp-empty-refetch` de la review de T14.2: una carpeta local **vacía** se vuelve a escanear en cada viaje de ida y vuelta, porque `switch-source` sólo pide lectura cuando `entries.length === 0` y no recuerda si ya se pidió | inline | abierta — no bloquea T14: la card se comporta bien, sólo gasta un escaneo de más | — |
+| T34 | S20 | `R3-temp-empty-refetch` de la review de T14.2: una carpeta local **vacía** se vuelve a escanear en cada viaje de ida y vuelta, porque `switch-source` sólo pide lectura cuando `entries.length === 0` y no recuerda si ya se pidió | inline | **hecho** — el listado recuerda si fue leído (`SourceView.loaded`), así que una carpeta vacía ya leída no se re-escanea y un fallo sigue reintentando (L88) | `L88` |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
@@ -1973,3 +1973,27 @@ cambios chicos; el arnés sigue teniendo su propia regla para eso.
 **Y una aclaración que este documento se debe:** L34 cita la regla retirada («Sin commit: AGENTS.md pide pedido
 explícito del dueño»). Es historia y **no se reescribe**: un `L` que cita una regla vigente en su momento sigue siendo
 cierto como registro; lo que no puede pasar es que el archivo de reglas la siga mostrando.
+
+L88 (T34 cerrado: una carpeta vacía no es una carpeta sin leer). Pedido del dueño, verbatim: **"Luego hagamos solo el
+T34"**. El defecto venía de la review de la rebanada 2 (`R3-temp-empty-refetch`, L83): `switch-source` pedía lectura
+cuando el listado estaba vacío, y **una lista vacía significa dos cosas** que el reducer no podía distinguir —«nadie
+miró» y «no hay nada»— que quieren lo contrario la una de la otra.
+
+**El arreglo es recordar la respuesta, no el tamaño.** `SourceView` gana `loaded: boolean`: lo pone una lectura que
+llegó, lo deja en `false` un fallo (a propósito, para que un mount roto se reintente en la visita siguiente), y la
+pregunta pasa a ser «¿esta vista se leyó alguna vez?» en vez de «¿cuántas filas tiene?». Una carpeta vacía leída es
+una respuesta y no se vuelve a escanear; una carpeta que falló sigue siendo una pregunta.
+
+**Dos cosas que vale registrar de este ciclo, porque fueron error mío:**
+
+1. **El primer test pasaba por la razón equivocada.** Medía los efectos del viaje *de ida* (`local(local(x))` y después
+   mirar el `l` siguiente), que son los del cambio a catálogo —donde no hay efecto, por diseño—. Habría quedado un
+   verde que no probaba nada. Se reescribió para medir el viaje **de vuelta**, que es donde sale el `load-folder`, y
+   ahí sí se vio en rojo.
+2. **Chequear el rojo del test nuevo no alcanza; hay que mirar que el rojo sea el correcto.** Los dos tests que
+   custodian el cambio («una vista nunca leída sí se pide», «un fallo sí reintenta») pasaban antes del arreglo, y eso
+   es la prueba de que el arreglo no rompe lo que tiene que conservar.
+
+TDD observado: un test en rojo (el re-escaneo), dos guardas verdes antes y después, y después verde con el campo
+nuevo. `510` tests / `116` suites, `pnpm check` verde (venía de 507/115): tres tests nuevos y dos expectativas de
+forma del estado actualizadas (`loaded: false` al abrir, `loaded: true` al aterrizar un listado).
