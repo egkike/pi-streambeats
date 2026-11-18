@@ -41,6 +41,17 @@ function fakeFetch(answers: readonly (() => Promise<{ status: number; text: stri
 
 const ok = (text: string) => () => Promise.resolve({ status: 200, text });
 
+/**
+ * Node's `AbortSignal.timeout` sets an **unref'd** timer, so when the only pending work in the process is
+ * that timer the loop can resolve before it fires: Node 22.19's runner then reports the test as
+ * `cancelledByParent` and cancels everything after it (CI, node 22.19.0, PR #73). A test that waits on the
+ * module's own timeout holds the loop itself, and says why.
+ */
+function keepLoopAlive(ms: number): () => void {
+	const timer = setTimeout(() => {}, ms);
+	return () => clearTimeout(timer);
+}
+
 describe("createCatalogHttp (S20)", () => {
 	it("reads the album index from the real page bytes", async () => {
 		const http = createCatalogHttp({ fetch: fakeFetch([ok(MUSIC)]).fetch });
@@ -121,8 +132,12 @@ describe("createCatalogHttp (S20)", () => {
 				init.signal.addEventListener("abort", () => reject(new Error("aborted")));
 			});
 		const http = createCatalogHttp({ fetch: fake, retryDelayMs: 0, timeoutMs: 5, sleep: () => Promise.resolve() });
-
-		assert.deepEqual(await http.readIndex(), { failure: "network", ok: false });
+		const alive = keepLoopAlive(200);
+		try {
+			assert.deepEqual(await http.readIndex(), { failure: "network", ok: false });
+		} finally {
+			alive();
+		}
 	});
 
 	it("resolves the signed URL of one track by slug, on demand", async () => {
@@ -174,8 +189,13 @@ describe("createCatalogHttp (S20)", () => {
 			timeoutMs: 5,
 		});
 
-		assert.deepEqual(await http.readIndex(), { failure: "network", ok: false });
-		assert.equal(calls.length, 1);
+		const alive = keepLoopAlive(200);
+		try {
+			assert.deepEqual(await http.readIndex(), { failure: "network", ok: false });
+			assert.equal(calls.length, 1);
+		} finally {
+			alive();
+		}
 	});
 
 	it("refuses to call an album with nothing playable a successful read", async () => {
