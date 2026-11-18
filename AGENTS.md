@@ -97,8 +97,8 @@ extensions → host → {library, player} → core → types
   conecta al socket (Linux/macOS) o al named pipe (Windows), verifica el round-trip y sale distinto de cero si
   falla. La CI lo corre en macOS contra un mpv instalado con Homebrew.
 - **macOS no corre el suite.** `lint`, `typecheck` y `test` corren sólo en Ubuntu: el pool de runners de macOS
-  sirve aproximadamente un job por run, y pedirle dos (la matriz del `check` más el `ipc probe`) dejaba al que
-  perdía la carrera cancelado a los 15 minutos, con `gate` en rojo por infraestructura y no por código. En macOS
+  sirve aproximadamente un job por run, así que pedirle dos deja al que pierde la carrera cancelado por
+  infraestructura y no por código (L77). En macOS
   queda **el `ipc probe`**, que es el único que necesita macOS de verdad, y corre cuando el filtro de paths ve
   transporte. La lógica de darwin se cubre en Linux porque las funciones dependientes de plataforma son puras y
   reciben `platform` (S19). Un camino exclusivo de darwin necesita un test que lo cubra desde Linux, o un job
@@ -196,8 +196,7 @@ commit → assess → review nativa si está debida (las correcciones van como c
 ```
 
 - **`git switch main` no trae commits.** Antes de ramificar: `git pull --ff-only`. Una `main` local atrasada hace que el
-  assess mida el candidato contra un `origin/main` más nuevo y cuente como propio el trabajo ya mergeado (medí 1596
-  líneas en vez de 26 por esto).
+  assess mida el candidato contra un `origin/main` más nuevo y cuente como propio el trabajo ya mergeado (L77).
 - Los comandos de delivery van **solos** y con `cd` literal. Mezclar cambio y entrega en un mismo comando se
   rechaza a propósito, y en pipes el guard no puede atribuir el directorio.
 - **Nunca se empuja una rama que no es la chequeada en el directorio actual.** El guard evalúa el candidato del
@@ -217,25 +216,14 @@ commit → assess → review nativa si está debida (las correcciones van como c
 
 ## Riesgos aceptados
 
-Un riesgo aceptado se escribe acá con **el disparador que lo reabre**. Si no tiene disparador, no está
-aceptado: está olvidado.
+Un riesgo aceptado vive en `odd/tasks/<feature>.md` como fila con **el disparador que lo reabre**. Acá no se guarda
+ninguno: este archivo no tiene `L` ni fila, así que una lista de riesgos escrita acá envejece sin que ninguna
+herramienta lo avise —pasó con la parentela del hub, que seguía nombrando tres tareas ya cerradas (L77)—. Si un
+riesgo no tiene disparador, no está aceptado: está olvidado.
 
-- **Publicación en el hub de Gentle diferida.** El repo no lleva ningún topic todavía, incluido
-  `gentle-hub-project`, que es el que lo hace aparecer en el hub. Publicar una tarjeta que lleva a un README
-  sin nada instalable gasta la primera impresión, y los topics se agregan después en un comando.
-  **Revisar cuando** el backlog de v1 esté cerrado: sin tareas abiertas en `odd/tasks/sb-music-card.md` (hoy
-  T10, T12, T21 y T22) y sin hallazgos de review pendientes de arreglar. El disparador anterior —"que exista un
-  slice que corra de verdad"— **ya se cumplió** y el dueño lo reemplazó por éste: la publicación va al final, con el
-  proyecto terminado, no con el primero que funcione (L59). Ese día se agregan los topics y el hub lo crawlea en
-  horas.
+## Fuera de alcance
 
-## Fuera de alcance (v1)
+Lo que una versión excluye vive en el documento de la feature, con el disparador que lo reabre. Acá queda sólo el
+criterio: lo que está fuera de alcance es una **decisión pendiente**, nunca una omisión. Si no tiene disparador, no
+está fuera de alcance, está olvidado.
 
-`sync`/descargas, temas propios y pantalla de settings dentro de la card. Cada uno es una decisión pendiente, no
-una omisión. El **catálogo Bandcamp en streaming** salió de esta lista: es la **S20 / T14** del documento de tareas
-y su ciclo arranca después de la duración y del endurecimiento. Toda decisión de producto que viva acá necesita
-un disparador que la reabra; si no lo tiene, no está fuera de alcance, está olvidada.
-
-El **mouse no está acá**: S17 lo pide (click sobre una fila la selecciona y activa, rueda recorre la
-lista, hover resalta), `L12` registró la decisión del dueño ("Mouse completo") y `T6` ya entrega el
-mapa de `hits` del render. Lo que falta es el cableado en el host, no una decisión de alcance.

@@ -106,7 +106,8 @@ inclusive como techo; si `libraryRoot` está fuera de HOME, el techo es `library
 él (`StreamBeats/Chillhop`, como el artboard); si está por encima, se muestra con `~/…`. Nunca se muestran rutas
 absolutas con `/home/<user>`. `libraryRoot` por default es el directorio de música XDG (`XDG_MUSIC_DIR` de
 `user-dirs.dirs`, fallback `~/Music`), **sin** sufijo `StreamBeats`. Ni la carpeta ni el cursor se persisten
-entre sesiones: la card siempre abre en `libraryRoot`.
+entre sesiones: la card abre en la **fuente por defecto**, que es el catálogo (S20), y la biblioteca local abre en
+`libraryRoot` cuando se cambia a ella — nunca al revés, y la fuente tampoco se recuerda.
 
 S15 — Tres estados. **Oculta (estado inicial):** nada en pantalla; la barra de estado es la única superficie de
 música (S12). **Esquina (por defecto al mostrarse):** la card vive abajo a la derecha, chica y anclada, y muestra
@@ -178,9 +179,56 @@ persisten** (`AGENTS.md`, Security); todo lo que llega de la red es entrada no c
 estado humano en la UI, la card nunca crashea por red); los caracteres de control se neutralizan antes de renderizar,
 igual que un nombre de archivo.
 
-Decisiones **abiertas**: sólo queda (c) cómo se presenta en la card la mezcla de dos fuentes sin romper la
-navegación de una sola lista (S3/S15); el precedente del proyecto de referencia es catálogo como lista principal y
-biblioteca local como modo aparte, y se decide al abrir T14.
+**Presentación de las dos fuentes — decidido en L74.** El catálogo y la biblioteca local son **dos fuentes de un
+mismo listado**, no dos pantallas: el estado lleva `source` (`catalog` | `library`), la card **abre siempre en el
+catálogo** y la navegación, el filtro y el mouse se comportan igual en las dos. `S14` se enmienda en una línea: la
+card abre en la fuente por defecto; la biblioteca local abre en `libraryRoot` **cuando se cambia a ella**. La fuente
+**no se recuerda** entre sesiones —el default es el default—, al revés del proyecto de referencia, que tampoco lo
+recuerda pero sí persiste su `libraryRoot`.
+
+- **Navegación, una sola gramática:** `enter` entra o reproduce, `u` sube un nivel **dentro de la fuente actual**. En
+  el catálogo eso es `pistas → álbumes`; en el nivel de álbumes `u` no tiene a dónde ir y lo dice con el mismo molde
+  del `at home` local: **`top of the catalog`** (L76). No en silencio, y sin fingir un error: no hay nada roto. `esc` sigue ocultando la card (S15), que es otra cosa que «atrás».
+- **Filtro (S18), mismo alcance:** filtra **el listado visible**. En álbumes filtra álbumes; en pistas de un álbum
+  filtra esas pistas. Cambiar de nivel cambia el listado y por lo tanto limpia el término, que es la regla que S18
+  ya tiene: no se hereda un filtro de una lista a otra.
+- **Identidad y cola:** `origin + id`, nunca el target efímero (S3). La cola **lleva su fuente** y el avance
+  automático pregunta por la fuente de la **cola**, no por la que se está mirando. Ese acoplamiento es un defecto
+  observable en el proyecto de referencia (`autoAdvance` ramifica según el modo mirado) y no se copia.
+- **La cola no mezcla fuentes** en v1: una cola es de una fuente. Coincide con la decisión del de referencia, que
+  las separa con centinelas.
+- **Sin caché y sin red:** la card **cae a la biblioteca local y lo avisa en el pie**, en vez de quedarse en un
+  catálogo vacío. Con caché presente el arranque no toca la red en absoluto. Es una divergencia deliberada con el de
+  referencia, que se queda, dice `scraping catalog…` y espera un reintento.
+- **La superficie (fila de pestañas vs una tecla anunciada) queda diferida**: el estado se modela con `source` para
+  que las pestañas sean después una decisión de vista y no un cambio de modelo. Con mouse en el host (S17) y sin él
+  en el de referencia, una tecla sin chrome no se puede clickear; eso se decide al dibujar.
+
+**Carga y refresco del catálogo — decidido en L75.** El catálogo reusa el molde de lectura que dejó T21: mientras se
+lee, el pie lo dice; nunca se pinta una lista vacía sin explicación (S20). Sin spinner animado, sin el error crudo
+del proveedor en la card.
+
+| Situación | Qué hace | Qué dice el pie |
+|---|---|---|
+| Caché tibia | Pinta desde `catalog.json`; **no toca la red** salvo la revalidación en segundo plano | Nada |
+| Caché fría, hay red | Pinta el marco, trae el índice y después los álbumes | `reading catalog…` y luego `reading catalog · 3 of 12 albums` |
+| Caché fría, sin red | **Cae a local al instante** | `catalog unavailable · reopen to retry` |
+| Revalidación falla | Sigue mostrando lo cacheado | un aviso corto; la lista no se pierde |
+
+1. **Sin tecla nueva de reintento.** Se reintenta **ocultando y reabriendo** la card. Por eso el aviso de falla
+   **nombra el gesto**: una salida que existe y no se anuncia es una tecla invisible con otro nombre.
+2. **Revalidación en segundo plano con TTL**, en silencio cuando funciona. El `fetched_at` ya está en el archivo de
+   caché. TTL de **24 h**, confirmado por el dueño (L76); el catálogo cambia cuando StreamBeats publica, que no es
+   horario. No bloquea la apertura y no compite con el camino de input: es la misma disciplina de T21 (token, y una
+   respuesta vieja no escribe estado).
+3. **Progreso honesto en el contador.** El mensaje arranca sin total (`reading catalog…`) porque el total no se
+   conoce hasta parsear el índice; después pasa a `reading catalog · 3 of 12 albums`. Dos precisiones que el
+   contador necesita para no mentir: cuenta **resueltos** —llegados o salteados por 404, según la tolerancia de
+   L33—, así siempre llega al total y nunca se clava; y **los álbumes aparecen a medida que llegan**, porque con 12
+   páginas mostrar 3 enseguida es más útil que una lista en blanco durante veinte segundos.
+4. **La revalidación no mueve al usuario.** Cuando llega una lista nueva se aplica **conservando el cursor por
+   slug**, no por índice: un álbum nuevo arriba no puede cambiar lo que estabas mirando. Si el álbum que mirabas
+   desapareció, el cursor se recorta. Es la misma regla de identidad de S3 que ya rige la cola.
 
 **Mecanismo resuelto** (investigado en `egkike/streambeats-player`, `internal/catalog/`, L33). Bandcamp embeda el
 catálogo en el HTML; no hace falta API ni selectores:
@@ -292,7 +340,7 @@ Requisitos, todos verificables:
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
 | T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
 | T26 | S22 | `/sb-music --keys` lee y reconfigura las teclas: validación, escritura atómica, `--help` y tabla del README | worker | **hecho** — verificado por el dueño en el host (L59) | `08ba81d` (PR #59) |
-| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
+| T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — **especificada y congelada por el dueño** (L74): no arranca hasta que la descongele | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
 | T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | inline | **hecho** — verificado por el dueño en el host (L64) | `0f8baed` (PR #66) |
@@ -313,6 +361,23 @@ El diseño no es una tarea aparte: `design/sb-music-card/handoffs.json` da por i
 (la card real es `lib/core/view.ts` + `lib/host/component.ts`, T6 y T9). `03-mini-card.html` **no se implementó y no
 debe implementarse**: quedó superado por la implementación, que es más chica (L61). Se conserva como referencia de la
 dirección «card de esquina», no como especificación.
+
+## Riesgos aceptados y fuera de alcance
+
+Un riesgo o una exclusión viven acá como **fila con el disparador que lo reabre**, no en `AGENTS.md` (L77). El
+disparador se lee **de este mismo documento** —«no queda ninguna fila `abierta`»— en vez de nombrar tareas: una lista
+de tareas escrita a mano es exactamente lo que envejeció en el archivo de reglas.
+
+| Riesgo o exclusión | Qué es | Revisar cuando | Origen |
+|---|---|---|---|
+| **Publicación en el hub de Gentle** | El repo no lleva ningún topic, ni siquiera `gentle-hub-project`, que es el que lo hace aparecer en el hub. Publicar una tarjeta que lleva a un README sin nada instalable gasta la primera impresión | **No quede ninguna fila `abierta` en `## Tasks`** y no haya hallazgos de review pendientes de arreglar. Ese día se agregan los topics y el hub lo crawlea en horas | L59, verbatim del dueño |
+| **`sync` / descargas** | Fuera de S20: el catálogo se navega y se reproduce, no se descarga. La caché es de metadatos, nunca de audio | El dueño lo pida, o la reproducción en streaming deje de alcanzar | L2, S20 |
+| **Temas propios** | Los colores salen del tema del host, sin paletas propias | El dueño lo pida | AGENTS.md, TUI Rules |
+| **Pantalla de settings dentro de la card** | Las teclas se cambian con `/sb-music --keys` y el archivo, no con una UI | El dueño lo pida, o `--keys` deje de alcanzar | S22 |
+
+**Cerradas por dejar de ser ciertas** — se retiran en vez de quedar acá mintiendo: el **catálogo Bandcamp en
+streaming** ya no es exclusión, es `S20` / `T14`; el **mouse** ya no es exclusión, `S17` está entregada (`T13`,
+`T24`) y verificada en el host.
 
 ## Log
 
@@ -1553,3 +1618,97 @@ el de T31 trabajaba (era el pliegue de T32), así que su `pnpm check` pudo compi
 Pasó, pero lo declaró. Dos escritores en el mismo worktree es un riesgo de review real, y el verde no lo cancela.
 
 `pnpm check` verde: **417 tests / 94 suites**, biome 36 archivos, `tsc` limpio.
+L74 (T14 especificada: las dos fuentes, decididas). Discusión de producto antes de implementar. El dueño aprobó
+modelar el estado **como si las pestañas fueran a existir**, y pidió primero mirar el proyecto hermano
+(`egkike/streambeats-player`, clon local en `Proyectos/reproductor-musica`) para no rediseñar lo ya andado.
+
+**Lo que el hermano aporta, y coincide:** catálogo como modo por defecto, **una tecla** para cambiar de fuente
+anunciada en el pie, techo de la biblioteca recortado en el **estado** y no en la vista, arranque que **no toca la red
+si hay caché**, caché de metadatos atómica y `0600` con las `stream_url` blanqueadas antes de guardar (hay un test que
+lo pina), identidad partida (catálogo `(albumSlug, trackSlug)` + URL efímera; local, path), y cola que **nunca se
+mezcla**, separada con centinelas. No es una sorpresa: sus decisiones son las que L33 ya había citado.
+
+**Lo que NO se copia, y por qué:** su `autoAdvance` ramifica según el modo que se está *mirando* y no la fuente que
+está *sonando*, así que un tema del catálogo que termina con la biblioteca abierta cae en `playlist ended`; pinta la
+fila que suena por título en el catálogo y por índice en lo local, dos verdades para el mismo glifo; le agrega «¿está
+instalado mpv?» a los errores de red; e indexa el prefetch por slug de pista sin el álbum. Y una que en este proyecto
+sería una violación de S13: su `u` **se escapó de la tabla de teclas** y por eso no aparece en la fila de ayudas.
+
+Las cuatro decisiones del dueño, verbatim: (1) sin caché y sin red, **"caer a local con aviso"**; (2) navegación,
+**"Hoy ya tenemos u para subir a carpeta padre y enter para entrar, podríamos mantener eso?"** — sí: `u` y `enter`
+conservan su significado en las dos fuentes, y `u` en la raíz del catálogo responde con el molde del `at home` en vez
+de callarse; (3) filtro, **"Si estás en lista de albunes filtra albunes y si estás en lista de musicas filtra musicas
+de ese albun, se puede así?"** — sí, y es casi gratis porque S18 ya define el filtro sobre el **listado visible** y lo
+limpia cuando el listado cambia; (4) persistencia, **"No recordamos"**.
+
+Queda **diferida** una sola cosa, declarada a propósito: si la fuente se muestra como fila de pestañas o como una
+tecla anunciada. El estado ya la soporta. **T14 no arranca**: el dueño la congeló ("Solo te aviso T14 y T12 todavía No
+los hagas") y esta entrada no cambia eso.
+L75 (T14: cómo se carga y se refresca el catálogo). Tres definiciones del dueño, verbatim: **"1. sin tecla nueva, 2.
+revalidar en segundo plano con un TTL, sin mensaje cuando funciona, 3. reading catalog · 3 of 12 albums con
+progreso"**.
+
+La primera tiene una consecuencia que hay que decir: si el reintento es ocultar y reabrir, entonces **el aviso de
+falla nombra el gesto** (`catalog unavailable · reopen to retry`). Una salida que existe pero no se anuncia es una
+tecla invisible con otro nombre, y este documento ya pagó eso con `u` escapándose de la tabla en el proyecto hermano.
+
+La segunda entra como **revalidación en segundo plano con TTL de 24 h**, en silencio cuando funciona y con un aviso
+corto cuando no. El `fetched_at` ya estaba en la caché desde S20; lo que se agrega es la regla de cuándo mirarlo. Se
+eligió TTL y no refresco manual porque el usuario nunca tiene que pensar en esto; y se eligió "en silencio" porque un
+aviso que aparece cuando todo anda enseña a ignorar los avisos.
+
+La tercera obligó a precisar tres cosas que el mensaje solo no dice, y que si quedan implícitas el contador miente:
+(a) el total no existe hasta parsear el índice, así que hay **dos formas** del mensaje —`reading catalog…` y después
+`reading catalog · 3 of 12 albums`—; (b) el contador cuenta **resueltos**, llegados o salteados por 404 según la
+tolerancia de L33, así llega siempre al total y nunca se clava a mitad de camino, que es lo que se ve como cuelgue;
+(c) **la lista crece a medida que llega**, porque con doce páginas mostrar tres enseguida es más útil que veinte
+segundos de blanco.
+
+Y una cuarta que salió de la segunda: la revalidación **conserva el cursor por slug, no por índice**. Si un álbum
+nuevo aparece arriba mientras mirabas otro, la lista se actualiza y tu cursor se queda donde estaba. Es la regla de
+identidad de S3 aplicada al listado, y es la misma lección de T24: nada se resuelve por la posición de una fila que
+pudo cambiar debajo.
+L76 (el aviso de la raíz, el TTL confirmado, y un defecto de proceso que encontró el propio dueño). Decisiones,
+verbatim: **"TTL de 24 h está ok"** y **"El aviso: top of the catalog"**. El aviso entra en S20 como
+`top of the catalog`, en paralelo con el `at home` del techo local: misma forma, una sola vez aprendida, y nombra la
+fuente para no confundirse con el techo de la biblioteca. El TTL deja de ser una propuesta mía y pasa a estar
+confirmado por el dueño.
+
+**La corrección que importaba, y que era mía:** `S14` seguía diciendo «la card siempre abre en `libraryRoot`»
+mientras `S20` afirmaba lo contrario. Dos frases del mismo archivo que se contradicen. La enmienda estaba escrita
+*al lado* de `S20` como nota, que es exactamente cómo se producen estas contradicciones: se documenta la excepción
+en el lugar nuevo y no se toca el lugar viejo. Ahora `S14` dice lo que corresponde y no queda nada que desmentir.
+
+**El defecto de proceso que el dueño vio: `AGENTS.md` guarda estado, no sólo reglas.** Tres bloques suyos no son
+«cómo trabajamos»: `Riesgos aceptados` (que lista el estado del backlog y los ids de tarea), `Fuera de alcance (v1)`
+(que apunta a `S20`/`T14`, `S17`/`L12`/`T6`) y las justificaciones con historia de incidentes. La prueba de que eso se
+pudre no es teórica: su parentela decía **«hoy T10, T12, T21 y T22»**, y el mismo día se cerraron T10, T21 y T22.
+Ninguna herramienta lo avisa, porque `AGENTS.md` no tiene `L` ni fila: no hay dónde ponerlo al día.
+
+Criterio acordado con el dueño, y desde ahora regla: **`AGENTS.md` dice cómo trabajamos** (convenciones,
+invariantes, carriles, delivery, estándares de test) y **el documento de la feature dice qué construimos y en qué
+estado** (alcance, riesgos aceptados con disparador, tareas, decisiones, todo con `L` y con fila para poder
+corregirlo). El recorte de esos tres bloques queda propuesto y **no ejecutado**: se mueve cuando el dueño lo revise.
+L77 (recorte de `AGENTS.md` ejecutado, con su evidencia preservada). Pedido del dueño: **"Dale al recorte"**.
+`AGENTS.md` deja de guardar estado y se queda con las reglas y los punteros.
+
+**Lo que salió y dónde fue:** los riesgos aceptados y el fuera de alcance pasan a `## Riesgos aceptados y fuera de
+alcance` en este documento, como filas con disparador. El del hub queda redactado con un disparador que se lee de
+`## Tasks` —«no quede ninguna fila `abierta`»— en vez de nombrar tareas: la parentela que decía «hoy T10, T12, T21 y
+T22» ya nombraba tres tareas cerradas, y nombrar tareas a mano es precisamente lo que se pudre. Además se retiran
+las dos entradas que habían dejado de ser ciertas —el catálogo (ahora S20/T14) y el mouse (entregado en T13/T24)—
+porque una exclusión vencida en la lista hace leer el alcance más corto de lo que es.
+
+**Las dos justificaciones con historia se acortaron** y su evidencia quedó acá, que es donde se puede corregir: una
+`main` local atrasada hizo que el assess midiera **1596 líneas en vez de 26**, contando como propio trabajo ya
+mergeado; y el pool de macOS dejaba al job que perdía la carrera **cancelado a los 15 minutos**, con `gate` en rojo
+por infraestructura y no por código. Las reglas se quedan en `AGENTS.md`; el número que las explica no tiene por qué
+viajar en el archivo que todos leen primero.
+
+**Lo que no se tocó:** Git Governance, la review nativa, las invariantes de arquitectura, los estándares de test y
+el feedback loop. Eso es «cómo trabajamos» y está bien donde está.
+
+**Una consecuencia que conviene mirar de frente:** con la lista vieja, el disparador del hub parecía lejos porque
+nombraba cuatro tareas. Con el disparador real, hoy quedan abiertas **T12 y T14**, y las dos están congeladas por el
+dueño. O sea que el riesgo del hub está más cerca de lo que la lista hacía creer — que es exactamente lo que pasa
+cuando el estado se guarda en el lugar equivocado.
