@@ -708,8 +708,11 @@ describe("/sb-music --keys reads and edits the keys (S22)", () => {
 
 		await h.commands.get("sb-music")?.handler("--help", h.ctx);
 
-		const text = report(h).join("\n");
-		assert.match(text, /\/sb-music\s+open the card/);
+		const lines = report(h);
+		const text = lines.join("\n");
+		// The no-argument mode rides on the header line: a third `/sb-music` row was worth more as headroom
+		// than as a prefix the user already typed (T31).
+		assert.equal(lines[0], "sb-music · keys and syntax · /sb-music opens the card");
 		assert.match(text, /\/sb-music --keys\s+print the keys in effect; writes nothing/);
 		assert.match(text, /--keys overlay=<key>/);
 		assert.match(text, /=default/);
@@ -739,8 +742,10 @@ describe("/sb-music --keys reads and edits the keys (S22)", () => {
 		assert.equal(report(h)[0], '--help takes no argument, so "--keys" is not one');
 	});
 
-	it("prints --help inside the ten lines the widget keeps, where nothing is left (T28)", async () => {
-		// The cap is reached exactly: one more line here is silently dropped by the host, table included.
+	it("prints --help inside the ten lines the widget keeps, with two to spare (T28, T31)", async () => {
+		// Zero headroom was the defect: at exactly ten, the next line anyone adds is dropped by the host in
+		// silence while every `--keys` report still fits. Eight leaves two lines of room — and the count is
+		// still exact, so an added line fails here, loudly, instead of disappearing in the user's terminal.
 		const h = harness();
 		register(h);
 
@@ -749,8 +754,8 @@ describe("/sb-music --keys reads and edits the keys (S22)", () => {
 		const lines = report(h);
 		assert.equal(
 			lines.length,
-			MAX_WIDGET_LINES,
-			`the help report is ${lines.length} lines; the host keeps ${MAX_WIDGET_LINES}`,
+			MAX_WIDGET_LINES - 2,
+			`the help report is ${lines.length} lines; the pinned budget is ${MAX_WIDGET_LINES - 2} of the ${MAX_WIDGET_LINES} the host keeps`,
 		);
 	});
 
