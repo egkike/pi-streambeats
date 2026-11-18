@@ -670,13 +670,17 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		];
 	}
 
+	/**
+	 * The `--help` report: eight lines of the ten the widget above the editor keeps, so a line added here
+	 * still fits instead of being dropped without a word, and the exact count is pinned in
+	 * `tests/host/host.test.ts` (S22, T28, T31). What has to survive is the command, its modes and the
+	 * pair syntax — which is why there is no `/sb-music --help` row: the user just ran it (S22).
+	 */
 	function helpLines(): string[] {
 		return [
-			"sb-music · keys and syntax",
-			"  /sb-music                        open the card",
+			"sb-music · keys and syntax · /sb-music opens the card",
 			"  /sb-music --keys                 print the keys in effect; writes nothing",
 			"  /sb-music --keys overlay=<key>   change one or more keys; all or nothing, =default restores",
-			"  /sb-music --help                 this text",
 			...SHORTCUT_NAMES.map(shortcutRow),
 			`inside the card · ${insideCardKeys()}`,
 		];
