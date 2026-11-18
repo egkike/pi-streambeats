@@ -704,6 +704,30 @@ describe("navigating up (S14)", () => {
 	});
 });
 
+describe("the card says what it is reading (S21, L62)", () => {
+	// The scan runs on the input path, so the card paints before the listing exists. Without this state
+	// an empty folder and a folder that has not arrived yet look exactly the same.
+	it("records the folder the host started to read", () => {
+		const reading = reduce(playingB(), { kind: "folder-reading", path: ALBUM }).state;
+
+		assert.equal(reading.reading, ALBUM);
+	});
+
+	it("clears it when the listing arrives", () => {
+		const reading = reduce(playingB(), { kind: "folder-reading", path: ALBUM }).state;
+
+		assert.equal(loaded(reading, ALBUM, []).reading, undefined);
+	});
+
+	it("clears it when the read fails, so the failure owns the footer alone", () => {
+		const reading = reduce(playingB(), { kind: "folder-reading", path: ALBUM }).state;
+		const failed = reduce(reading, { kind: "notice", text: "cannot show /x: missing" }).state;
+
+		assert.equal(failed.reading, undefined);
+		assert.equal(failed.notice, "cannot show /x: missing");
+	});
+});
+
 describe("the filter over the current folder (S18)", () => {
 	it("opens with / and keeps browsing the very same folder and listing", () => {
 		const state = browsingAlbum();

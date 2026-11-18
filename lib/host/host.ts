@@ -96,8 +96,11 @@ export interface SbMusicDeps {
 	readonly settingsFile: string;
 	/** The atomic writer `--keys` saves through (S22), injected like every other side effect here. */
 	readonly saveSettings: (settings: Settings) => SaveResult;
-	/** The folder scanner (S5). Synchronous by contract; a failure is data, never an exception. */
-	readonly scan: (path: string) => ScanResult;
+	/**
+	 * The folder scanner (S5, S21). Asynchronous by contract: it runs on the host's input path, so it
+	 * returns before the listing exists. A failure is data, never a rejection.
+	 */
+	readonly scan: (path: string) => Promise<ScanResult>;
 	/** The player for one session (S6), created on `session_start`, never in the factory. */
 	readonly createPlayer: (report: (report: PlayerReport) => void) => Player;
 	/** Time source for the elapsed clock; defaults to `Date.now`. */
@@ -156,6 +159,13 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	/** What the player has told us about each track this session (issue #42). */
 	const knownDurations = new Map<string, number>();
 	let loaded = false;
+	/**
+	 * Which request may write state (S21). With an asynchronous scan two reads can overlap, and the one
+	 * that answers last would otherwise win even when it is the folder the card already left. Only the
+	 * newest token is allowed through, and `readingPath` keeps one folder from being read twice.
+	 */
+	let loadToken = 0;
+	let readingPath: string | undefined;
 	let wantsFocus = false;
 	let closing = false;
 
@@ -230,18 +240,54 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		return undefined;
 	}
 
-	function loadFolder(path: string): boolean {
-		const result = deps.scan(path);
-		if (!result.ok) {
-			// S5 asks for the failure as a state, not as a toast that fades: the footer keeps saying it,
-			// with the path, until the card loads something else.
-			const message = `cannot show ${result.path}: ${result.failure.kind}`;
+	function loadFolder(path: string): void {
+		// The same read is already in flight: showing the card again must not ask twice.
+		if (readingPath === path) return;
+		const token = ++loadToken;
+		readingPath = path;
+		// Say what is being read before it arrives: an empty folder and one still arriving look the same
+		// otherwise, and this is painted from the input path, which returns here (S21, L62).
+		dispatch({ kind: "folder-reading", path });
+		let scan: Promise<ScanResult>;
+		try {
+			scan = deps.scan(path);
+		} catch {
+			// A dep that throws instead of answering would escape into the editor with `readingPath` already
+			// set, locking this folder for the rest of the session. The contract says it does not throw;
+			// this keeps a broken one local instead of silently disabling every later read of the folder.
+			readingPath = undefined;
+			const message = `cannot show ${path}: reader failed`;
 			dispatch({ kind: "notice", text: message });
 			ctx?.ui.notify(message, "warning");
-			return false;
+			return;
 		}
-		dispatch({ kind: "folder-loaded", path: result.path, entries: result.entries });
-		return true;
+		void scan.then(
+			(result) => {
+				if (token !== loadToken) return;
+				readingPath = undefined;
+				if (!result.ok) {
+					// S5 asks for the failure as a state, not as a toast that fades: the footer keeps saying it,
+					// with the path, until the card loads something else.
+					const message = `cannot show ${result.path}: ${result.failure.kind}`;
+					dispatch({ kind: "notice", text: message });
+					ctx?.ui.notify(message, "warning");
+					return;
+				}
+				// The latch is set only by a read that worked (L46): a failure leaves it false and the next
+				// show asks again, instead of leaving the card empty for the whole session.
+				loaded = true;
+				dispatch({ kind: "folder-loaded", path: result.path, entries: result.entries });
+			},
+			// `scan` never rejects (S21). If it ever does, that is a bug, and a bug must not become an
+			// unhandled rejection that takes the session down.
+			() => {
+				if (token !== loadToken) return;
+				readingPath = undefined;
+				const message = `cannot show ${path}: reader failed`;
+				dispatch({ kind: "notice", text: message });
+				ctx?.ui.notify(message, "warning");
+			},
+		);
 	}
 
 	/** Execute the model's requests. The keyboard is handed back only when the card is dismissed. */
@@ -459,7 +505,8 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		if (!loaded) {
 			// Latch only a load that worked. Latching first meant a library that was not ready when the
 			// card opened left it empty for the whole session, with no key to try again (S5, T16).
-			loaded = loadFolder(state.path);
+			// The latch now lives inside the read, because the answer arrives after this returns (S21).
+			loadFolder(state.path);
 		}
 
 		if (overlay && overlay.size !== state.size) {
@@ -548,6 +595,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		state = initialState({ libraryRoot: deps.settings.libraryRoot, ceiling: deps.ceiling });
 		playback = undefined;
 		loaded = false;
+		// A read that started in the previous session must not land in this one (S21).
+		loadToken += 1;
+		readingPath = undefined;
 		wantsFocus = false;
 		player = deps.createPlayer(onReport);
 		stopTick = schedule(() => {

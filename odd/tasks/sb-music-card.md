@@ -220,10 +220,27 @@ revisable porque tienen respaldo y costo desiguales. Nada de esto es una feature
 4. **Tick permanente** (`host.ts`, `defaultTick`): el `setInterval` de 1 s se agenda siempre y `refresh()` no
    filtra nada salvo `!ctx || closing`, así que fuerza `requestRender(true)` **cada segundo durante toda la
    sesión**, incluso sin música y sin overlay. Defecto de costo, no de correctitud: no tiene `S#` que lo respalde.
-5. **Scanner sincrónico** (`scan` es "synchronous by contract" y usa `realpathSync`/`readdirSync`/`statSync`):
-   se ejecuta dentro de `onKey` y de `show()`, en el camino de input del host. Una carpeta grande o un mount de
-   red congelan el editor. Arreglarlo **cambia el contrato** del dep y rompe dos tests que pinan la sincronía
-   (`tests/host/host.test.ts`): es una unidad propia, no un ítem de bolsa.
+5. **Scanner asíncrono** (T21). `scan` deja de ser "synchronous by contract": usa `realpath`/`readdir`/`stat`
+   de `node:fs/promises` y devuelve una promesa, porque corre dentro de `onKey` y de `show()`, en el camino de input
+   del host, y una carpeta grande o un mount de red congelaban el editor. La falla sigue siendo **dato**
+   (`ScanResult`), nunca una excepción, y el core sigue puro y sincrónico: el resultado entra como el evento
+   `folder-loaded` que ya existía, sin que el core vea una promesa en su vida.
+   - **Camino de input.** `handleInput`, `dispatch` y `applyEffects` siguen devolviendo `void`. Un `load-folder`
+     **arranca** la lectura y vuelve; la respuesta entra después como evento. Ningún camino del host espera una
+     promesa, porque el host no puede esperarla: `Component.handleInput` es sincrónico por contrato.
+   - **Guarda de secuencia.** Sólo el resultado del **último** pedido puede escribir estado; uno viejo se descarta.
+     Sin ella, entrar a una carpeta y enseguida a otra deja ganar a la primera si resuelve más tarde, y la card
+     muestra la carpeta equivocada. La introduce este cambio: con `scan` sincrónico el problema no existía.
+   - **Estado de lectura (decisión del dueño, L62).** Mientras una lectura está en vuelo el pie dice
+     `reading <ruta>`. La card no se pinta vacía: una carpeta vacía y una carpeta que todavía no llegó se ven
+     igual, y es justo en el mount lento donde esa diferencia importa. El fallo reemplaza la lectura con su
+     `notice`, que sigue mandando en el pie.
+   - **Latch de L46 intacto.** Se pone en el éxito, dentro del camino async; un fallo lo deja en `false` y el
+     próximo `show()` reintenta. Lo que cambia es dónde se asigna, no la regla.
+   Rompe el `ReturnType<typeof scanFolder>` de los tests del scanner, que ahora esperan la promesa, y deja
+   intactos los dos tests del host que pinan la sincronía: **el pedido sigue saliendo en el camino de input**, lo
+   que deja de ser sincrónico es la **respuesta**. Eso es lo que hay que conseguir —que el editor no espere el
+   disco—, no diferir el pedido, que sólo agregaría una vuelta sin quitar la espera.
 
 Orden decidido (L34): este ciclo es **sólo T15**. Endurecimiento es T16, en su propio ciclo y con su propio
 recorte; (1), (2) y (3) son los que tienen respaldo directo.
@@ -278,7 +295,7 @@ Requisitos, todos verificables:
 | T14 | S20 | Catálogo StreamBeats como segunda fuente: resolver listado + URL de audio por play, sin persistir tokens | worker | abierta — arranca después de la duración y el endurecimiento (L32) | — |
 | T15 | S12, S15 | Duración total desde el player: consulta disparada por `file-loaded` y transporte a las tres superficies | worker | **hecho** — verificado por el dueño en el host (L37) | `e3af22b` (insuficiente), `17f002b` |
 | T16 | S21 | Endurecimiento: latch del scan, rechazos del player, `ctrl+c` cierra la card, tick ocioso | inline | **hecho** — verificado por el dueño en el host (L50); el reenvío de `ctrl+c` a Pi sigue en T22 | `5435f72` (latch, rechazos, tick, PR #46), `7140488` (cierre por `ctrl+c`, PR #49) |
-| T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | worker | abierta — unidad propia, cambia el contrato (L46) | — |
+| T21 | S21 | Scanner asíncrono: el dep `scan` deja de ser sincrónico y el dispatch pasa a esperar sin congelar la TUI | inline | **hecho** — verificado por el dueño en el host (L64) | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | worker | abierta — bloqueada por la API del host (L48) | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
@@ -1273,3 +1290,58 @@ El canvas sólo entiende `queued`, `sent`, `in_progress` e `implemented` (`canva
 entrada huérfana de `handoffs.json` —la fila deja de mentir sobre su estado— y el motivo quedó escrito donde se lee:
 un aviso al principio del artboard y este `L61`. `chosen` sigue apuntando a `03` porque la dirección elegida es
 correcta; lo que envejeció es el contenido del mockup, no la decisión.
+L62 (T21 arrancado: el contrato asíncrono y el estado de lectura). Pedido del dueño, verbatim: "Dale al T21".
+`S21.5` se reescribe con el contrato que se congela —promesa, falla como dato, camino de input sin esperar, guarda
+de secuencia— y con una decisión de producto que la spec vieja no tomaba: qué se ve mientras la lectura está en
+vuelo. Se presentaron tres opciones y el dueño eligió, verbatim: "Estado «leyendo <ruta>…» en el pie
+(recomendada)". Las otras dos eran pintar la card vacía y llenarla después —barato, pero afirma "carpeta vacía"
+durante segundos justo en el mount lento que motiva la tarea— y diferir el paint hasta que llegue el scan, que en
+ese mismo mount hace que el comando parezca no hacer nada.
+
+La guarda de secuencia **no** la pidió S21.5 y entra igual: es un defecto que el cambio de contrato **crea**. Hoy,
+con `scan` sincrónico, dos pedidos no pueden solaparse; con una promesa, sí, y el que resuelve último gana aunque
+sea el pedido viejo. Un cambio que introduce una condición de carrera y no la cierra no está terminado, aunque
+compile.
+L63 (T21 implementado). Cinco archivos: `lib/library/scan.ts` pasa a `node:fs/promises` (`realpath`/`readdir`/`stat`)
+y devuelve una promesa; `lib/host/host.ts` arranca la lectura y vuelve, con token de secuencia, `readingPath` para no
+leer dos veces la misma carpeta y el latch de `L46` movido al éxito; `lib/core/model.ts` gana el campo `reading` y el
+evento `folder-reading`; `lib/core/view.ts` lo pinta en el pie con la **misma forma del breadcrumb** —nunca una ruta
+absoluta de HOME, que S15 prohíbe y un test ya pinaba—; `extensions/sb-music.ts` no cambia, porque el tipo nuevo lo
+absorbe.
+
+**Una corrección a S21.5, que ya estaba escrita y ahora se sabe falsa:** decía que arreglar esto «rompe dos tests
+que pinan la sincronía». No los rompe. El pedido al scanner sigue saliendo **sincrónicamente** desde `handleInput` y
+`show()`, y eso es lo correcto: lo que deja de ser sincrónico es la **respuesta**. Diferir el pedido no habría
+quitado ninguna espera, sólo habría agregado una vuelta. La spec se corrigió en el mismo commit.
+
+**Sobre el test-first, con honestidad:** escribí los tests y la implementación en la misma pasada, así que el primer
+run fue el suite completo y no un RED aislado. Lo que sí verifiqué es que el test de la carrera es *load-bearing*:
+quitando el chequeo del token, `drops an answer for a folder the card already left` falla y el resto sigue verde.
+Restaurado y verde otra vez. Un test que no se puede romper no prueba nada.
+
+Tests nuevos: dos en `scan.test.ts` (promesa, y falla por la promesa sin tirar), tres en `model.test.ts` (registra,
+limpia al llegar, limpia al fallar), dos en `view.test.ts` (breadcrumb y que el fallo manda), tres en
+`host.test.ts` (vuelve sin esperar, descarta la respuesta vieja, no lee dos veces la misma carpeta, y sobrevive
+un dep que tira). Todos los de `scanFolder` pasan a `await`. `pnpm check` verde: **396 tests / 91 suites**, biome 35
+archivos, `tsc` limpio.
+
+**Verificación independiente (`gentle-ai-verify`, riesgo ítem 4):** siete afirmaciones, siete HOLDS —scan asíncrono
+sin `*Sync` y con rechazo imposible, camino de input sin `await`, token sin corredor (los dos callbacks chequean
+antes de tocar `readingPath`/`loaded`/`dispatch`), latch sólo en éxito, `reading` limpio en los dos desenlaces con
+breadcrumb, y `lib/core` sin `async`. Devolvió **un agujero residual real**: si un dep mentiroso lanzaba
+sincrónicamente, el throw escapaba al editor **con `readingPath` ya seteado**, y esa carpeta quedaba trabada para
+toda la sesión —un candado invisible que ningún test cubría—. Se cerró con un `try/catch` alrededor de la llamada y
+un test que lo pinea; esta vez el RED se observó aislado, como corresponde: falló ese test solo, 53 en verde.
+
+**Pendiente para cerrar la fila**, la prueba del dueño en el host: `pi -e ./extensions/sb-music.ts`, abrir una
+carpeta grande y una lenta, ver que el editor sigue respondiendo mientras se lee, que el pie dice `reading <carpeta>`
+y que después aparece la lista. Es la misma lección de siempre: el gate verde no es la prueba.
+
+**Hallazgo que no es mío y no toqué:** el `notice` de fallo sigue imprimiendo la ruta absoluta (`cannot show
+/home/…: missing`), que contradice la regla de S15 sobre rutas de HOME. Queda anotado como follow-up: cambiarlo
+toca un test que pina el mensaje de S5, y no entra en esta unidad.
+L64 (T21 cerrada). Verificación del dueño en el host, verbatim: "Ya hice la prueba... abrí la carpeta mp3 e hice
+busquedas / y funcionó bien". La navegación a una carpeta real y el filtro seguido por teclado son el camino que
+el cambio tocaba: cada `/` sobre la carpeta recién leída pasa por el estado de lectura, por el token y por el
+latch. El caso del mount lento sigue sin medirse con un reloj, y no se afirma que esté medido: lo que está
+probado es que el camino funciona y que el editor no esperó al disco en ninguno de esos pasos.

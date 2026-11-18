@@ -297,7 +297,7 @@ function harness(editor: Component | null = EDITOR): Harness {
 
 function register(
 	h: Harness,
-	scan: (path: string) => ScanResult = (path) => ({ ok: true, path, entries: ENTRIES }),
+	scan: (path: string) => ScanResult | Promise<ScanResult> = (path) => ({ ok: true, path, entries: ENTRIES }),
 	terminalColumns?: () => number,
 ): void {
 	registerSbMusic(h.pi, {
@@ -311,7 +311,7 @@ function register(
 		},
 		scan: (path) => {
 			h.scanCalls.push(path);
-			return scan(path);
+			return Promise.resolve(scan(path));
 		},
 		createPlayer: (report) => {
 			// The harness needs the callback, so it is captured here and used by `report`.
@@ -993,6 +993,102 @@ describe("the card's state is owned by the model (S8)", () => {
 
 		assert.deepEqual(h.scanCalls, [ROOT, `${ALBUM}/Extras`]);
 	});
+
+	it("comes back from the input path while the folder is still being read (S21)", async () => {
+		// `scan` used to be synchronous by contract, so the read happened inside `handleInput` and `show()`.
+		// A big folder or a network mount froze the editor; now the request leaves and the answer returns.
+		const h = harness();
+		const answers = new Map<string, (result: ScanResult) => void>();
+		register(h, (path) =>
+			path === ROOT
+				? { ok: true, path, entries: ENTRIES }
+				: new Promise<ScanResult>((resolve) => answers.set(path, resolve)),
+		);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		clickAt(component, lineOf(component, "Extras"));
+
+		// The click already returned with the folder unread, so the card says so instead of painting an
+		// empty folder -- which is exactly what a synchronous scan never had to say.
+		assert.match(frameOf(h), /reading /);
+		assert.equal(h.playerCalls.length, 0, "and the input path touched no playback");
+
+		answers.get(`${ALBUM}/Extras`)?.({ ok: true, path: `${ALBUM}/Extras`, entries: [] });
+		await flush();
+
+		assert.doesNotMatch(frameOf(h), /reading /, "the footer goes back to the hints once the answer lands");
+	});
+
+	it("drops an answer for a folder the card already left (S21)", async () => {
+		// With an asynchronous read two of them overlap, and the one that answers last is not necessarily
+		// the one the card asked for last. Without a token the older read would paint over the newer one.
+		const h = harness();
+		const answers = new Map<string, (result: ScanResult) => void>();
+		register(h, (path) =>
+			path === ROOT
+				? { ok: true, path, entries: ENTRIES }
+				: new Promise<ScanResult>((resolve) => answers.set(path, resolve)),
+		);
+		await start(h);
+		await open(h);
+		const component = h.overlays[0]?.component;
+
+		// Into `Extras`, then back up before it answers, then answer the stale one last.
+		clickAt(component, lineOf(component, "Extras"));
+		component?.handleInput?.("u");
+
+		answers.get(ALBUM)?.({ ok: true, path: ALBUM, entries: [trackRow(ALBUM, "Kept.mp3")] });
+		answers.get(`${ALBUM}/Extras`)?.({
+			ok: true,
+			path: `${ALBUM}/Extras`,
+			entries: [trackRow(`${ALBUM}/Extras`, "Stale.mp3")],
+		});
+		await flush();
+
+		assert.match(frameOf(h), /Kept/, "the card keeps the folder it asked for last");
+		assert.doesNotMatch(frameOf(h), /Stale/, "and the folder it already left cannot paint over it");
+	});
+
+	it("does not ask the scanner twice for the folder it is already reading (S21)", async () => {
+		const h = harness();
+		register(h, () => new Promise<ScanResult>(() => {}));
+		await start(h);
+		await open(h);
+
+		// Hide and show again while the first read is still in flight.
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+
+		assert.equal(h.scanCalls.length, 1, "one read, not one per show");
+	});
+
+	it("survives a scanner that throws instead of answering, and does not lock the folder (S21)", async () => {
+		// The typed contract is a promise that never rejects, so a synchronous throw is a dep that lies.
+		// It must not escape into the editor, and it must not leave the folder unreadable for the session.
+		const h = harness();
+		let calls = 0;
+		register(h, (path) => {
+			calls += 1;
+			if (calls === 1) throw new Error("boom");
+			return { ok: true, path, entries: ENTRIES };
+		});
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.match(frameOf(h), /cannot show/, "the failure is said, not thrown at the editor");
+
+		// Not locked: showing the card again asks the scanner again and the listing arrives.
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await h.shortcuts.get("ctrl+alt+m")?.handler(h.ctx);
+		await flush();
+
+		assert.equal(h.scanCalls.length, 2, "the folder is asked for again");
+		assert.match(frameOf(h), /Arcade Dreams/, "and the listing lands");
+	});
 });
 
 describe("the card never asks for more room than the terminal has (issue #42)", () => {
@@ -1160,6 +1256,16 @@ function lineOf(component: Component | undefined, name: string): number {
 	const index = lines.findIndex((line) => line.includes(name));
 	assert.ok(index >= 0, `${name} is on the card`);
 	return index;
+}
+
+/** The frame the newest overlay is drawing: the card is rebuilt on size changes, so never hold one. */
+function frameOf(h: Harness): string {
+	return h.overlays.at(-1)?.component.render(90).join("\n") ?? "";
+}
+
+/** One row of a listing, for a fake scan that has to be told apart from another folder's answer. */
+function trackRow(dir: string, name: string): LibraryEntry {
+	return { kind: "track", track: { id: `${dir}/${name}`, title: name, origin: "local" } };
 }
 
 /** One press-and-release on the same cell: what the host turns into the `click` the card reduces. */
