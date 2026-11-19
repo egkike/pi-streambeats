@@ -18,7 +18,15 @@ import { DEFAULT_VOLUME, parseCatalogTrackId } from "../lib/core/model.ts";
 import { registerSbMusic } from "../lib/host/host.ts";
 import { ceilingFor } from "../lib/library/paths.ts";
 import { scanFolder } from "../lib/library/scan.ts";
-import { createMpvPlayer, type PlayerSocket, type SpawnedProcess } from "../lib/player/mpv.ts";
+import {
+	createMpvPlayer,
+	discoverMpv,
+	diskProbe,
+	MPV_NAME,
+	type MpvDiscoveryContext,
+	type PlayerSocket,
+	type SpawnedProcess,
+} from "../lib/player/mpv.ts";
 import { loadSettings, type Platform, saveSettings, settingsPath } from "../lib/settings.ts";
 import type { ResolveResult, Track, TrackResolver } from "../lib/types.ts";
 
@@ -45,9 +53,12 @@ const ambientFetch: CatalogFetch = async (url, init) => {
 /**
  * The two things a test has to replace at the root, and production never does. `fetch` is injected for
  * the same reason S20 gives for the whole catalog: a test that opens the card must not open a socket.
+ * `probe` is the same rule for finding mpv (S6): discovery confirms the binary by RUNNING it, so a test
+ * hands in the answers instead of executing whatever mpv the machine happens to have.
  */
 export interface SbMusicOverrides {
 	readonly fetch?: CatalogFetch;
+	readonly probe?: Pick<MpvDiscoveryContext, "exists" | "run">;
 }
 
 /**
@@ -102,8 +113,20 @@ export default function sbMusic(pi: ExtensionAPI, overrides: SbMusicOverrides = 
 		catalog,
 		catalogCache: { read: readCatalogCache, write: writeCatalogCache, isFresh: isCatalogFresh },
 		catalogCachePath: catalogCachePath(context),
-		createPlayer: (onReport) =>
-			createMpvPlayer({
+		createPlayer: (onReport) => {
+			// Asked once per session: the resolver is pure and receives the platform, the environment, the
+			// setting and the two pieces of I/O (S6, T12).
+			const mpv = discoverMpv({
+				platform,
+				env,
+				configured: settings.mpvPath,
+				...(overrides.probe ?? diskProbe),
+			});
+			// S6: a binary that exists and does not answer is a state for the user. It is said here, at the one
+			// moment the answer is known, instead of waiting for a play that would fail with a vaguer reason.
+			if (!mpv.ok) onReport({ kind: "unavailable", message: mpv.message });
+
+			return createMpvPlayer({
 				// Explicit argv and `shell: false`: no path, title or file name is ever interpolated.
 				spawn: (command, args) =>
 					spawn(command, [...args], { stdio: ["ignore", "ignore", "pipe"], shell: false }) as unknown as SpawnedProcess,
@@ -114,7 +137,14 @@ export default function sbMusic(pi: ExtensionAPI, overrides: SbMusicOverrides = 
 				platform,
 				env,
 				home,
+				// The confirmed binary is one more injected value: the player stays testable without a process. A failed
+				// discovery is **not** a licence to look at PATH again — the resolver already did, and a `mpvPath` the
+				// user set and got wrong must fail as *that* path instead of quietly playing a different binary. So
+				// the configured value is handed over as-is; with nothing configured the bare name is exactly the
+				// lookup discovery just found empty, which keeps the old behaviour without pretending it was a choice.
+				mpvPath: mpv.ok ? mpv.command : settings.mpvPath?.trim() || MPV_NAME[platform],
 				volume: DEFAULT_VOLUME,
-			}),
+			});
+		},
 	});
 }

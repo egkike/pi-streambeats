@@ -1,8 +1,9 @@
 /**
  * The IPC target and mpv's argv (S6, S19). `ipcTarget` stays pure for every path that can be pure:
- * the platform, the environment, the uid, the home directory, and — only when no private base
- * exists — an injected function that makes a fresh unpredictable directory (R1-001). None of these
- * tests needs mpv, a socket or a music folder, and no path here is a fixed `/home/<user>`.
+ * the platform, the environment, the uid, the home directory, the random source the Windows pipe is
+ * named from, and — only when no private base exists — an injected function that makes a fresh
+ * unpredictable directory (R1-001). None of these tests needs mpv, a socket or a music folder, and no
+ * path here is a fixed `/home/<user>`.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -74,9 +75,69 @@ describe("the IPC target (S6, S19)", () => {
 		assert.throws(() => ipcTarget({ platform: "linux", env: {}, uid: 1000 }), /private directory/);
 	});
 
-	it("names a Windows pipe after the user: a pipe has no directory", () => {
-		const target = ipcTarget({ platform: "win32", env: {}, uid: 1000 });
-		assert.equal(target, "\\\\.\\pipe\\pi-streambeats-1000");
+	it("names a Windows pipe with a per-player random suffix, because Windows has no uid to name it after", () => {
+		const target = ipcTarget({
+			platform: "win32",
+			env: {},
+			uid: 0,
+			random: () => "8f14e45f-ceea-467f-a9c1-8b5d0f2a3c11",
+		});
+
+		assert.equal(target, "\\\\.\\pipe\\pi-streambeats-8f14e45f-ceea-467f-a9c1-8b5d0f2a3c11");
+	});
+
+	it("is not the machine-global name every Windows process can sit on", () => {
+		// The triangulation for the finding this slice closes: the default suffix is the injected random
+		// source, so a fixed source still must not produce `pi-streambeats-0` — the name two sessions and two
+		// users shared before, when the uid fallback was all Windows had.
+		const target = ipcTarget({ platform: "win32", env: {}, uid: 0, random: () => "q3w8e1" });
+
+		assert.equal(target, "\\\\.\\pipe\\pi-streambeats-q3w8e1");
+		assert.notEqual(target, "\\\\.\\pipe\\pi-streambeats-0");
+	});
+
+	it("gives two players different pipe names when their random sources differ", () => {
+		const first = ipcTarget({ platform: "win32", env: {}, uid: 0, random: () => "aaaa1111" });
+		const second = ipcTarget({ platform: "win32", env: {}, uid: 0, random: () => "bbbb2222" });
+
+		assert.notEqual(first, second, "two mpv children must not fight over one pipe");
+	});
+
+	it("gives two players the same pipe name from the same source, so the name is a value and not a side effect", () => {
+		const one = ipcTarget({ platform: "win32", env: {}, uid: 0, random: () => "same-source" });
+		const two = ipcTarget({ platform: "win32", env: {}, uid: 0, random: () => "same-source" });
+
+		assert.equal(one, two);
+	});
+
+	it("differs on every call when the default source decides, so nothing can predict the next pipe", () => {
+		const first = ipcTarget({ platform: "win32", env: {}, uid: 0 });
+		const second = ipcTarget({ platform: "win32", env: {}, uid: 0 });
+
+		assert.notEqual(first, second);
+		for (const target of [first, second]) {
+			assert.match(target, /^\\\\\.\\pipe\\pi-streambeats-[0-9a-f-]{36}$/, "the default is a uuid, not a counter");
+		}
+	});
+
+	it("keeps the uid inside the private directory on unix: the pipe is the only target without a path", () => {
+		// The uid rule did not move: it is the Windows pipe, which has no directory, that needed an identity.
+		const linux = ipcTarget({
+			platform: "linux",
+			env: { XDG_RUNTIME_DIR: "/run/user/1000" },
+			uid: 1000,
+			random: () => "ignored-on-unix",
+		});
+
+		assert.equal(linux, "/run/user/1000/pi-streambeats/mpv.sock");
+	});
+
+	it("refuses a Windows pipe named from nothing, which would be the shared name again", () => {
+		assert.throws(
+			() => ipcTarget({ platform: "win32", env: {}, uid: 0, random: () => "" }),
+			/random source/,
+			"an empty suffix is `pi-streambeats-`, a name every player would collide on",
+		);
 	});
 });
 

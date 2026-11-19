@@ -15,7 +15,10 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	createMpvPlayer,
+	discoverMpv,
+	type MpvDiscoveryContext,
 	type MpvValue,
+	mpvKnownLocations,
 	type Player,
 	type PlayerDeps,
 	type PlayerReport,
@@ -236,6 +239,179 @@ function createHarness(overrides: Partial<PlayerDeps> = {}): Harness {
 		attempts: () => attempts,
 	};
 }
+
+/* --- finding mpv (S6) ----------------------------------------------------------------------- */
+
+interface World {
+	readonly ctx: MpvDiscoveryContext;
+	/** Every command the resolver really ran, in order: a candidate nobody ran was never tried. */
+	readonly runs: string[];
+}
+
+/**
+ * A world for the pure resolver: the paths that exist, the commands that answer `--version`, and the
+ * environment. Nothing here touches the disk and nothing executes a binary — both halves are injected (S9).
+ */
+function world(options: {
+	readonly exists?: readonly string[];
+	readonly answers?: readonly string[];
+	readonly configured?: string;
+	readonly platform?: "linux" | "darwin" | "win32";
+	readonly path?: string;
+}): World {
+	const runs: string[] = [];
+	return {
+		runs,
+		ctx: {
+			platform: options.platform ?? "linux",
+			env: options.path === undefined ? {} : { PATH: options.path },
+			configured: options.configured,
+			exists: (path) => (options.exists ?? []).includes(path),
+			run: (command) => {
+				runs.push(command);
+				const answers = options.answers ?? [];
+				return answers.includes(command) ? { ok: true } : { ok: false, reason: `${command} printed no version` };
+			},
+		},
+	};
+}
+
+describe("finding mpv (S6)", () => {
+	it("lets the path in settings win over PATH and over every known location", () => {
+		// The user's own answer is not a hint: it is the answer, so nothing else is even probed.
+		const { ctx, runs } = world({
+			configured: "/opt/mpv/bin/mpv",
+			path: "/usr/local/bin:/usr/bin",
+			exists: ["/opt/mpv/bin/mpv", "/usr/local/bin/mpv", "/usr/bin/mpv"],
+			answers: ["/opt/mpv/bin/mpv", "/usr/local/bin/mpv", "/usr/bin/mpv"],
+		});
+
+		assert.deepEqual(discoverMpv(ctx), { ok: true, command: "/opt/mpv/bin/mpv" });
+		assert.deepEqual(runs, ["/opt/mpv/bin/mpv"]);
+	});
+
+	it("prefers PATH over a known location", () => {
+		const { ctx } = world({
+			path: "/usr/local/sbin:/opt/bin",
+			exists: ["/opt/bin/mpv", "/usr/bin/mpv"],
+			answers: ["/opt/bin/mpv", "/usr/bin/mpv"],
+		});
+
+		assert.deepEqual(discoverMpv(ctx), { ok: true, command: "/opt/bin/mpv" });
+	});
+
+	it("finds a known location when PATH has nothing", () => {
+		const { ctx } = world({
+			path: "/usr/local/bin:/opt/bin:nothing-here",
+			exists: ["/usr/bin/mpv"],
+			answers: ["/usr/bin/mpv"],
+		});
+
+		assert.deepEqual(discoverMpv(ctx), { ok: true, command: "/usr/bin/mpv" });
+	});
+
+	it("returns the command it confirmed by running it, not merely the one that exists", () => {
+		const { ctx, runs } = world({ path: "/opt/bin", exists: ["/opt/bin/mpv"], answers: ["/opt/bin/mpv"] });
+
+		const found = discoverMpv(ctx);
+
+		assert.equal(found.ok, true);
+		assert.deepEqual(runs, found.ok ? [found.command] : [], "the answer is the binary that answered --version");
+	});
+
+	it("turns a candidate that exists but does not answer into the failure state, never into the next candidate", () => {
+		// S6: detection may not announce success until the binary answers a real run. A silent fallback would
+		// announce a working mpv when the one the user pointed at is broken.
+		const { ctx, runs } = world({
+			configured: "/opt/mpv/bin/mpv",
+			exists: ["/opt/mpv/bin/mpv", "/usr/bin/mpv"],
+			answers: ["/usr/bin/mpv"],
+		});
+
+		const found = discoverMpv(ctx);
+
+		assert.equal(found.ok, false);
+		assert.match(found.ok ? "" : found.message, /\/opt\/mpv\/bin\/mpv/, "the failure names the binary that failed");
+		assert.deepEqual(runs, ["/opt/mpv/bin/mpv"], "the working candidate is never tried behind the user's back");
+	});
+
+	it("does not walk past a broken candidate on PATH either", () => {
+		const { ctx, runs } = world({
+			path: "/opt/bin:/usr/bin",
+			exists: ["/opt/bin/mpv", "/usr/bin/mpv"],
+			answers: ["/usr/bin/mpv"],
+		});
+
+		const found = discoverMpv(ctx);
+
+		assert.equal(found.ok, false);
+		assert.match(found.ok ? "" : found.message, /\/opt\/bin\/mpv/);
+		assert.deepEqual(runs, ["/opt/bin/mpv"]);
+	});
+
+	it("names the configured path that is not there instead of quietly ignoring the setting", () => {
+		const { ctx, runs } = world({
+			configured: "/nowhere/mpv",
+			exists: ["/usr/bin/mpv"],
+			answers: ["/usr/bin/mpv"],
+		});
+
+		const found = discoverMpv(ctx);
+
+		assert.equal(found.ok, false);
+		assert.match(found.ok ? "" : found.message, /\/nowhere\/mpv/);
+		assert.deepEqual(runs, [], "nothing was run, so nothing may announce success");
+	});
+
+	it("reports an mpv that is nowhere as a reachable failure that names where it looked", () => {
+		const { ctx } = world({ path: "/opt/bin" });
+
+		const found = discoverMpv(ctx);
+
+		assert.equal(found.ok, false);
+		const message = found.ok ? "" : found.message;
+		assert.match(message, /mpv/);
+		assert.match(message, /PATH/, "the message says what was searched, so the user can act on it");
+	});
+
+	it("keeps Windows' own names: mpv.exe, a semicolon PATH and the path the installer really uses", () => {
+		// Verified on Windows 11 (L15): `winget install shinchiro.mpv` leaves the binary in Program Files and
+		// out of PATH, so the known location is the one that makes discovery work there.
+		const installed = "C:\\Program Files\\MPV Player\\mpv.exe";
+		const fromPath = world({
+			platform: "win32",
+			path: "C:\\Tools;C:\\Other",
+			exists: ["C:\\Other\\mpv.exe"],
+			answers: ["C:\\Other\\mpv.exe"],
+		});
+		assert.deepEqual(discoverMpv(fromPath.ctx), { ok: true, command: "C:\\Other\\mpv.exe" });
+
+		const bare = world({ platform: "win32", exists: [installed], answers: [installed] });
+		assert.deepEqual(discoverMpv(bare.ctx), { ok: true, command: installed });
+	});
+
+	it("finds Homebrew's mpv on macOS, where nothing installs into /usr/bin", () => {
+		const homebrew = "/opt/homebrew/bin/mpv";
+		const { ctx } = world({ platform: "darwin", exists: [homebrew], answers: [homebrew] });
+
+		assert.deepEqual(discoverMpv(ctx), { ok: true, command: homebrew });
+	});
+
+	it("claims only the locations this project can defend, and no package manager's guess", () => {
+		// Locking the lists down is the point: a candidate is a claim about where a binary lives, and an
+		// invented scoop/chocolatey path would send the user to a directory that never had mpv in it.
+		assert.deepEqual(mpvKnownLocations("linux"), ["/usr/bin/mpv", "/usr/local/bin/mpv"]);
+		assert.deepEqual(mpvKnownLocations("darwin"), ["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv"]);
+		assert.deepEqual(mpvKnownLocations("win32"), ["C:\\Program Files\\MPV Player\\mpv.exe"]);
+
+		const all = [...mpvKnownLocations("linux"), ...mpvKnownLocations("darwin"), ...mpvKnownLocations("win32")];
+		assert.equal(
+			all.some((location) => /scoop|chocolatey|choco/i.test(location)),
+			false,
+			"nobody documented those layouts, so no candidate may name them",
+		);
+	});
+});
 
 /* --- the tests ------------------------------------------------------------------------------- */
 

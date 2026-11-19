@@ -236,6 +236,35 @@ describe("shortcut edits (S22)", () => {
 	});
 });
 
+describe("the mpv path (S6)", () => {
+	// A binary outside PATH is a real Windows case (L15): the installer leaves mpv in Program Files and out of
+	// PATH, so the settings key is the way the user points at it.
+	it("defaults to empty, which means 'find it', never a bare command", () => {
+		assert.equal(DEFAULT_SETTINGS.mpvPath, "");
+	});
+
+	it("reads the path a user set", () => {
+		writeSettings(JSON.stringify({ mpvPath: "/opt/mpv/bin/mpv" }));
+
+		assert.equal(loadSettings(ctx()).settings.mpvPath, "/opt/mpv/bin/mpv");
+	});
+
+	it("falls back to the default for a value that is not a path, and names the key it ignored", () => {
+		writeSettings(JSON.stringify({ mpvPath: 42 }));
+
+		const result = loadSettings(ctx());
+
+		assert.equal(result.settings.mpvPath, "");
+		assert.match(result.warning ?? "", /mpvPath/);
+	});
+
+	it("writes the key into the file it creates, so it is discoverable without the docs", () => {
+		loadSettings(ctx());
+
+		assert.equal(JSON.parse(readFileSync(filePath(), "utf8")).mpvPath, "");
+	});
+});
+
 describe("broken files fail soft (S2)", () => {
 	it("returns defaults plus a warning on malformed JSON and does not overwrite the file", () => {
 		writeSettings("{ this is not json");

@@ -30,6 +30,13 @@ export interface Shortcuts {
 export interface Settings {
 	/** Absolute path of the music library (S14). The only value without a constant default. */
 	readonly libraryRoot: string;
+	/**
+	 * An absolute path to the mpv binary (S6). Empty or absent means "find it": PATH first, then the places
+	 * each platform's installer really uses. A value here wins over both, because it is the user's own answer.
+	 * Optional because a file written before this key existed has no field for it, and "absent" and "empty"
+	 * must both mean the same thing rather than becoming two defaults.
+	 */
+	readonly mpvPath?: string;
 	readonly shortcuts: Shortcuts;
 	/** Swaps the geometric glyph family for ASCII on terminals where the former is double width (S16). */
 	readonly asciiGlyphs: boolean;
@@ -37,6 +44,7 @@ export interface Settings {
 
 /** The constant half of the defaults. `libraryRoot` is derived per user, so it is not here (S14). */
 export const DEFAULT_SETTINGS: Omit<Settings, "libraryRoot"> = {
+	mpvPath: "",
 	shortcuts: {
 		overlay: "ctrl+alt+z",
 		playPause: "ctrl+alt+space",
@@ -144,6 +152,10 @@ export function mergeSettings(raw: unknown, defaults: Settings): { settings: Set
 	if (!root && raw.libraryRoot !== undefined) ignored.push("libraryRoot");
 	const libraryRoot = root ?? defaults.libraryRoot;
 
+	// An empty string is "not set", not a command called nothing: it would spawn a nameless binary (S6).
+	const mpvPath = text(raw.mpvPath);
+	if (!mpvPath && raw.mpvPath !== undefined) ignored.push("mpvPath");
+
 	let asciiGlyphs = defaults.asciiGlyphs;
 	if (typeof raw.asciiGlyphs === "boolean") asciiGlyphs = raw.asciiGlyphs;
 	else if (raw.asciiGlyphs !== undefined) ignored.push("asciiGlyphs");
@@ -164,6 +176,7 @@ export function mergeSettings(raw: unknown, defaults: Settings): { settings: Set
 
 	const settings: Settings = {
 		libraryRoot,
+		mpvPath: mpvPath ?? defaults.mpvPath,
 		shortcuts: shortcuts as unknown as Shortcuts,
 		asciiGlyphs,
 	};
