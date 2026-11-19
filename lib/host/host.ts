@@ -87,6 +87,14 @@ type CommandArgs =
 	| { readonly kind: "trailing"; readonly argument: string }
 	| { readonly kind: "unknown"; readonly argument: string };
 
+/**
+ * What a catalog pass is, as one value (R3-001). The two flags it replaces could be combined freely, and the
+ * combination that mattered — reusing pages while counting them — would print a counter that walks a pass nobody
+ * is waiting on. Reuse is the refresh of a served entry and nothing else: the albums it may reuse are the ones
+ * `serveCache` just painted, so the counter and reuse are exclusive by construction, not by a guard in the loop.
+ */
+type CatalogPass = "cold" | "refresh" | "partial-refresh";
+
 /** `/sb-music` with no argument opens the card; `--keys` and `--help` are the two text modes (S22). */
 function parseCommandArgs(raw: string): CommandArgs {
 	const [first, ...rest] = raw
@@ -418,13 +426,13 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			// asked, and nothing is said while it works (L75).
 			catalogLoaded = true;
 			serveCache(cache);
-			void readCatalog(token, true, cache.partial === true);
+			void readCatalog(token, cache.partial === true ? "partial-refresh" : "refresh");
 			return;
 		}
 		// The message has two forms because the total does not exist until the index is parsed (L75): the
 		// footer starts without it and only then can it say `3 of 12`.
 		dispatch({ kind: "catalog-reading", label: "catalog…" });
-		void readCatalog(token, false, false);
+		void readCatalog(token, "cold");
 	}
 
 	/** Paint from the cache, and remember its albums for the moments they are entered (S20). */
@@ -434,17 +442,19 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	/**
-	 * One pass over the catalog: the index and then the albums it announces, in index order. `revalidating` is
-	 * the background refresh of a served cache, which says nothing in the footer while it works (L75).
-	 * `reuseCached` is on only when the entry being refreshed was degraded — the one read allowed to skip an
-	 * album page instead of downloading it again (R4-001).
+	 * One pass over the catalog: the index and then the albums it announces, in index order. The `pass` decides the
+	 * two things that differ between them: a refresh of a served cache says nothing in the footer while it works
+	 * (L75), and only the refresh of a **degraded** entry may skip an album page instead of downloading it again
+	 * (R4-001).
 	 *
 	 * Every answer is checked against the pass token before it touches the state, and a pass that lost its
 	 * race writes nothing — the same discipline T21 established for folder reads, applied to the network.
 	 */
-	async function readCatalog(token: number, revalidating: boolean, reuseCached: boolean): Promise<void> {
+	async function readCatalog(token: number, pass: CatalogPass): Promise<void> {
 		const reader = deps.catalog;
 		if (!reader) return;
+		const revalidating = pass !== "cold";
+		const reuse = pass === "partial-refresh";
 
 		let index: CatalogResult<readonly CatalogAlbum[]>;
 		try {
@@ -463,7 +473,17 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 
 		// The index is the list, so it is the read that worked: it sets the latch even if a later album fails.
 		catalogLoaded = true;
-		dispatch({ kind: "catalog-albums", albums: index.value });
+		// A partial index says "these are the rows I could read", never "these are the albums that exist" (R4-002).
+		// The rows it could not read are the albums already known under a slug it did not announce — the unreadable
+		// id is a grid row, not a slug, so nothing else can point at them. They follow the announced ones in both
+		// the frame and the file, or the card would show one list and store another. A whole index speaks for every
+		// row, so it keeps nothing: a removal the site really made goes as soon as the index is trustworthy.
+		const unreadable = index.partial;
+		const announced = new Set(index.value.map((album) => album.slug));
+		const kept =
+			unreadable === undefined ? [] : [...catalogListings.values()].filter((listing) => !announced.has(listing.slug));
+		const list: readonly CatalogAlbum[] = [...index.value, ...albumsOf(kept)];
+		dispatch({ kind: "catalog-albums", albums: list });
 		const total = index.value.length;
 		if (!revalidating) dispatch({ kind: "catalog-reading", label: catalogProgress(0, total) });
 
@@ -475,14 +495,13 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			// is its whole reason to exist: the row it lost cannot be asked for by name, so the index is all it has.
 			// A whole stale entry must download them again — a track added to an album that already existed is only
 			// discoverable on its page, and reusing would freeze that album's track list for good (R4-001).
-			if (known && reuseCached) {
+			if (known && reuse) {
 				// The title comes from the index: it is free and fresher than the copy the cache froze.
 				const reused: CatalogAlbumListing = { slug: album.slug, title: album.title, tracks: known.tracks };
 				catalogListings.set(album.slug, reused);
 				listings.push(reused);
-				// Counted at once, so the counter says what is true: this album is resolved, nobody waits on it.
-				resolved += 1;
-				if (!revalidating) dispatch({ kind: "catalog-reading", label: catalogProgress(resolved, total) });
+				// Nothing is counted here, and nothing could be: reuse only happens on the refresh of a served entry,
+				// and a refresh prints no counter — there is no one waiting on this pass (R3-001).
 				continue;
 			}
 
@@ -506,9 +525,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			if (!revalidating) dispatch({ kind: "catalog-reading", label: catalogProgress(resolved, total) });
 		}
 
-		// Settle the footer: the last label would otherwise stay up after the pass ended, and the index is the
-		// list's final truth anyway — the model keeps the cursor by slug when it accepts it (L75).
-		dispatch({ kind: "catalog-albums", albums: index.value });
+		// Settle the footer: the last label would otherwise stay up after the pass ended, and the list is the one
+		// the pass means anyway — the model keeps the cursor by slug when it accepts it (L75).
+		dispatch({ kind: "catalog-albums", albums: list });
 		catalogInFlight = false;
 
 		if (listings.length === 0) {
@@ -517,7 +536,6 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			catalogFailed("scrape", revalidating);
 			return;
 		}
-		const unreadable = index.partial;
 		if (unreadable !== undefined) {
 			// A partly read index is served and remembered under the short TTL (R4-001). The pass ends normally —
 			// the list is up and usable — so the notice comes after the final dispatch that settles the footer,
@@ -531,7 +549,7 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		// Every pass that finished is written (R4-001): a degradation is a hole in the index, not a reason to make
 		// the next open pay for the whole catalog again. A whole index promotes the entry — no stamp — so the day
 		// is back the moment the site heals, and the apology goes with the stamp.
-		writeCatalog(listings, unreadable !== undefined);
+		writeCatalog([...listings, ...kept], unreadable !== undefined);
 	}
 
 	/**
