@@ -106,12 +106,16 @@ export function createCatalogHttp(options: CatalogHttpOptions): CatalogHttp {
 			if (!page.ok) return { ok: false, failure: page.failure };
 
 			const grid = readAlbumGrid(page.text);
-			// The explicit failure S20 asks for: an empty grid is markup we no longer read, never a catalog
-			// with nothing in it. A list that silently renders zero rows is the failure this replaces — and a
-			// grid we could only partly read is that same failure one row earlier: the albums we did not
-			// recognize would be cached for 24 h as if the site had shrunk.
-			if (grid.albums.length === 0 || grid.unrecognized > 0) return { ok: false, failure: "scrape" };
-			return { ok: true, value: grid.albums };
+			// The explicit failure S20 asks for, and only that one: an empty grid is markup we no longer read,
+			// never a catalog with nothing in it. A list that silently renders zero rows is the failure this
+			// replaces. A **partly** read grid is not that failure: S20's tolerance is per album ("falla sólo si
+			// no se scrapeó cero álbumes"), so the albums that did arrive are served and the rows that did not are
+			// carried as data — one unreadable row must not take the catalog offline and send a cold start to the
+			// local library. The field is omitted, not empty, when the grid was read whole: one shape per fact.
+			if (grid.albums.length === 0) return { ok: false, failure: "scrape" };
+			return grid.unreadable.length === 0
+				? { ok: true, value: grid.albums }
+				: { ok: true, value: grid.albums, partial: grid.unreadable };
 		},
 
 		async readAlbum(slug: string): Promise<CatalogResult<readonly CatalogTrack[]>> {

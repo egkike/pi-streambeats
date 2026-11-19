@@ -353,6 +353,7 @@ Requisitos, todos verificables:
 | T32 | S8 | `R3-002`: `settle()` polléa ~1 s y, si el disco tarda más, el test falla con un mensaje que culpa al listado en vez de reportar el timeout | inline | **hecho** — falla como timeout que nombra presupuesto, fila y frame; 5 s (L73) | — |
 | T34 | S20 | `R3-temp-empty-refetch` de la review de T14.2: una carpeta local **vacía** se vuelve a escanear en cada viaje de ida y vuelta, porque `switch-source` sólo pide lectura cuando `entries.length === 0` y no recuerda si ya se pidió | inline | **hecho** — el listado recuerda si fue leído (`SourceView.loaded`), así que una carpeta vacía ya leída no se re-escanea y un fallo sigue reintentando (L88) | `L88` |
 | T36 | S20 | `R4-002` + `R3-003`: un índice que sólo se reconoce en parte se cachea 24 h como un catálogo más chico, y a una pista sin número se le inventa uno que puede colisionar o saltar el orden | inline | **hecho** — la guarda de forma cuenta las filas ilegibles y las levanta como `scrape`, y el orden deja de inventar números (L90) | `L90` |
+| T37 | S20 | `R3-001` + `R4-001` + `R4-002` de la review de T36: la guarda `unrecognized > 0 → scrape` contradice S20 («falla sólo si no se scrapeó cero álbumes», L243/L696) y en arranque en frío manda la card a la biblioteca por una sola fila ilegible; además el conteo se descarta y la deriva no deja traza | worker | **hecho** — el índice parcial se sirve con las filas ilegibles como dato, no se cachea, deja traza y el pie lo dice (L91) | `L91` |
 | T35 | — | **Release `v0.1.0`**: `version` a `0.1.0`, `RELEASING.md` (semver, comandos, rollback), sección `Install` en el README con el `git:` pinneable y plataformas honestas, y la guarda de CI que falla si el tag no coincide con `package.json`. El acto —`git tag -a v0.1.0`, `gh release create --generate-notes`— lo mueve el dueño o lo muevo yo con su permiso | inline | abierta — **dispara cuando no quede ninguna otra fila abierta**, y va **antes** de publicar en el hub (L89) | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
@@ -2055,3 +2056,44 @@ Evidencia: `pnpm check` verde (`515` tests / `116` suites; `tests/catalog/` pasa
 antes del arreglo —el export faltante y el orden— y los seis comportamientos que ya existían con su test intacto: orden
 por número, dedupe por slug, fallback de título desde el slug, página sin grid, índice vacío → `scrape`, y duración
 ausente cuando el payload no la trae (issue #78, PR de esta rama).
+
+L91 (T37: los tres hallazgos no bloqueantes de T36, y un defecto de spec mío). Pedido del dueño, verbatim: **"Listo el
+merge. Luego arreglemos esos 3 hallazgos del review"**. Decisión de copy, también del dueño: aviso en el pie
+(`catalog partly read · reopen to retry`), no silencio y no umbral.
+
+**El hallazgo R3-001 era un defecto de spec, y el defecto era mío.** La guarda de T36 hacía `unrecognized > 0 → scrape`.
+S20 dice, en tres lugares de este mismo documento (L243, L696, L1779): «un álbum 404 o una página malformada se saltea;
+falla sólo si no se scrapeó **cero** álbumes», y «un índice con **cero** álbumes es `scrape`». Yo había convertido «una
+fila ilegible» en «cero álbumes». La review lo vio desde afuera sin conocer la línea; tenía razón, y el error no fue de
+tolerancia sino de haber endurecido una regla que el dueño ya había escrito.
+
+**El mapa del flujo de falla cambió el diagnóstico.** Lo que creí blast radius total era parcial: con caché vencida la
+caché vieja se sigue sirviendo y hay un aviso (`lib/host/host.ts:413-417`, test en `tests/host/host.test.ts:1698`). El
+daño real estaba en **arranque en frío**: `catalogFailed` con `revalidating === false` despacha `key "l"` y la card cae
+a la biblioteca local, así que una fila ilegible costaba el catálogo entero justo cuando no hay respaldo. Y R4-002 se
+confirmó doble: `unrecognized` se calculaba en `parse.ts:95` y sólo se consumía en `http.ts:113`, `lib/catalog/` no
+loguea nada y `SB_MUSIC_DEBUG` nunca tocaba el catálogo — grid parcial y grid vacío dejaban la misma traza: ninguna.
+
+**Lo que se hizo.** `AlbumGrid.unrecognized: number` pasa a **`unreadable: readonly string[]`**, con el
+`data-item-id` de cada fila ilegible en orden de página; un conteo dice que algo está mal, un id dice qué fila ir a
+mirar. `readIndex` vuelve a S20: cero álbumes → `scrape`; si hay álbumes, `ok: true` con `partial` cuando hay filas
+ilegibles, **campo omitido cuando el grid se leyó entero** (ausente y vacío no pueden ser dos formas del mismo hecho). El
+host sirve el índice parcial, **no escribe la caché** de esa pasada —un catálogo recortado no se congela 24 h, se
+auto-cura al volver a abrir— y deja una traza `catalog partial` con los ids. El modelo gana el evento `catalog-partial`
+y el pie dice `catalog partly read · reopen to retry`.
+
+**Una desviación de la spec que mandé, y por qué se acepta.** El worker agregó una guarda que yo no había pedido:
+`state.source === "catalog"` antes de despachar el aviso, para que una revalidación de fondo no imprima una frase de
+catálogo en el pie de la biblioteca. Es la misma regla que ya usa `catalogFailed`, y la pinneó con triangulación: sacó
+la guarda, vio `│ catalog partly read · reopen to retry │` bajo el encabezado de la biblioteca, la repuso. Se queda.
+
+**La asimetría deliberada que no se tocó:** una pasada donde fallan páginas de álbum sigue cacheando el subconjunto que
+sobrevivió (`tests/host/host.test.ts:1633`). Es otra tolerancia y es correcta: un álbum caído se ve en la lista, una
+fila perdida del índice no.
+
+Evidencia: RED propios vistos antes de cada regla (el campo, el `ok:true`, el evento inexistente, la escritura de caché
+`1 !== 0`, el aviso `0 !== 1`), y uno **honesto**: el test de host «no cae a la biblioteca con un índice parcial» estaba
+verde antes y después, porque la decisión vive en `http.ts`; queda como guarda desde el lado del host, no como rojo.
+`pnpm check` verde: **521 tests / 116 suites** (venía de 515/116), `tests/boundary.test.ts` 13/13 — `lib/core` siguió
+puro y sincrónico. El test del grid vacío quedó **sin tocar y verde**: es la prueba de que se preservó la regla de S20
+mientras se aflojaba la que T36 había endurecido de más (issue #80, PR de esta rama).

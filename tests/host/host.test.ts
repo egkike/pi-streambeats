@@ -1679,6 +1679,74 @@ describe("the catalog opens, loads and revalidates (S20, L75)", () => {
 		);
 	});
 
+	// A grid the parser could only partly read (S20, L90): the albums it did read, plus the id of the row it
+	// could not. The card serves the list; what it must not do is treat the hole as if it were the whole site.
+	const partlyReadOf = (): CatalogScript["readIndex"] => () =>
+		Promise.resolve({ ok: true, value: [CHILLHOP], partial: ["album-2"] });
+
+	it("serves a partly read index without freezing the hole into the cache (S20)", async () => {
+		const h = harness();
+		h.options.catalog = { readIndex: partlyReadOf(), readAlbum: albumsOf() };
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.match(frameOf(h), /Chillhop/, "the albums it could read are on the card");
+		assert.equal(h.catalogWrites.length, 0, "a partial read is not a catalog worth 24 h of cache");
+	});
+
+	it("does not fall back to the library for a partly read index (S20)", async () => {
+		// The rule S20 asks for: the read fails only when it scraped ZERO albums. One unreadable row used to
+		// send a cold start to the local library, which is a catalog taken offline by a single grid row.
+		const h = harness();
+		h.options.catalog = { readIndex: partlyReadOf(), readAlbum: albumsOf() };
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.deepEqual(h.scanCalls, [], "the library was never scanned: this is still the catalog");
+		assert.match(frameOf(h), /sb-music StreamBeats/, "and the card says which source it is on");
+	});
+
+	it("says the catalog was partly read once, in one sentence (S20)", async () => {
+		// One notice for one pass: the degradation is a fact about the index, not about each album, and the
+		// sentence names the gesture that retries it like every other footer notice (L75).
+		const h = harness();
+		h.options.catalog = { readIndex: partlyReadOf(), readAlbum: albumsOf() };
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		const notice = "catalog partly read · reopen to retry";
+		assert.equal(frameOf(h).split(notice).length - 1, 1, "the footer says it once");
+		assert.equal(h.frames.filter((frame) => frame.includes(notice)).length, 1, "and only one pass said it");
+		assert.match(frameOf(h), /Chillhop/, "while the albums that did arrive stay on the card");
+	});
+
+	it("keeps a catalog sentence off the library's footer when the reader moved away (S20)", async () => {
+		// A revalidation can finish after the reader switched sources, and a hole in the catalog has nothing to
+		// say about the folder on screen. The pass still writes nothing: the site's hole is not the cache's.
+		const h = harness();
+		const index = defer<CatalogResult<readonly CatalogAlbum[]>>();
+		h.options.catalog = { readIndex: () => index.promise, readAlbum: albumsOf() };
+		h.options.cache = cacheOf([listingOf(CHILLHOP)], h.now.value - 25 * 60 * 60 * 1000);
+		register(h);
+		await start(h);
+		await open(h);
+		h.overlays.at(-1)?.component.handleInput?.("l");
+		await flush();
+		assert.match(frameOf(h), /Arcade Dreams/, "the library is on screen");
+
+		index.answer({ ok: true, value: [CHILLHOP, LOFI], partial: ["album-2"] });
+		await flush();
+
+		assert.doesNotMatch(frameOf(h), /catalog partly read/, "the catalog's degradation stays its own");
+		assert.equal(h.catalogWrites.length, 0, "and a partial read never replaces the cache");
+	});
+
 	it("paints a stale cache first and revalidates it behind the reader's back", async () => {
 		const h = harness();
 		const index = defer<CatalogResult<readonly CatalogAlbum[]>>();

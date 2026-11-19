@@ -1376,6 +1376,15 @@ describe("the catalog says what it is doing (S20, L75)", () => {
 
 		assert.equal(failed.notice, "album missing · reopen to retry");
 	});
+
+	it("says the catalog was only partly read, and names the gesture that retries it (S20)", () => {
+		// The list is up and usable, so this is not a failure: one sentence says the index had a hole, and it
+		// names the same retry a failure names, because the card has only one gesture either way (L75, L90).
+		const partial = reduce(browsingCatalog(), { kind: "catalog-partial" }).state;
+
+		assert.equal(partial.notice, "catalog partly read · reopen to retry");
+		assert.equal(partial.reading, undefined, "a finished read stops claiming to be reading");
+	});
 });
 
 describe("a queue belongs to its source (S20)", () => {

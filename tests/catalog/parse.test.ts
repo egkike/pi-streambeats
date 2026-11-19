@@ -65,10 +65,10 @@ describe("readAlbumGrid (S20)", () => {
 		assert.deepEqual(readAlbumGrid(fixture("album-404.html")).albums, []);
 	});
 
-	it("counts a grid row whose album link it could not read, instead of shrinking the catalog quietly", () => {
+	it("names the row whose album link it could not read, instead of shrinking the catalog quietly", () => {
 		// The tolerance is per item, and it is about a title: an album that loses its name keeps its row. A
-		// row whose link moved is different — the album is gone — and a list that quietly got shorter would be
-		// cached for 24 h as if the site had shrunk.
+		// row whose link moved is different — the album is gone — so the row is reported by the id the site
+		// gave it: a count says "something is off", an id says which row to go look at.
 		const html = [
 			'<li data-item-id="album-1"><a href="/album/electric"><p class="title">Electric<br></p></li>',
 			'<li data-item-id="album-2"><a href="/album/groovy?from=grid"><p class="title">Groovy<br></p></li>',
@@ -76,22 +76,23 @@ describe("readAlbumGrid (S20)", () => {
 
 		assert.deepEqual(readAlbumGrid(html), {
 			albums: [{ slug: "electric", title: "Electric" }],
-			unrecognized: 1,
+			unreadable: ["album-2"],
 		});
 	});
 
-	it("counts nothing as unrecognized when the skip was a duplicate slug", () => {
-		// The one benign skip: the same album shown twice is not markup we failed to read.
+	it("reports no unreadable row when the skip was a duplicate slug", () => {
+		// The one benign skip: the same album shown twice is not markup we failed to read, so it must not
+		// reach the caller as a degradation it would then have to explain.
 		const html = [
 			'<li data-item-id="album-1"><a href="/album/nocturnal"><p class="title">Nocturnal<br></p></li>',
 			'<li data-item-id="album-2"><a href="/album/nocturnal"><p class="title">Nocturnal<br></p></li>',
 		].join("\n");
 
-		assert.equal(readAlbumGrid(html).unrecognized, 0);
+		assert.deepEqual(readAlbumGrid(html).unreadable, []);
 	});
 
-	it("reads the whole captured grid without an unrecognized row", () => {
-		assert.equal(readAlbumGrid(fixture("music-grid.html")).unrecognized, 0);
+	it("reads the whole captured grid without an unreadable row", () => {
+		assert.deepEqual(readAlbumGrid(fixture("music-grid.html")).unreadable, []);
 	});
 });
 

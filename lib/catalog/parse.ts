@@ -18,8 +18,8 @@
 import { neutralizeName } from "../core/names.ts";
 import type { CatalogAlbum, CatalogTrack } from "../types.ts";
 
-/** One grid item: the row that carries an album's link and its title. */
-const GRID_ITEM = /<li data-item-id="album-[^"]*"[\s\S]*?<\/li>/g;
+/** One grid item: the row that carries an album's link and its title, kept with its own id. */
+const GRID_ITEM = /<li data-item-id="(album-[^"]*)"[\s\S]*?<\/li>/g;
 const ALBUM_LINK = /<a href="\/album\/([a-z0-9-]+)"/;
 /** The title is the text before the artist override, which the grid puts after a `<br>`. */
 const ALBUM_TITLE = /<p class="title">([\s\S]*?)<br/;
@@ -67,41 +67,49 @@ function displayTitle(raw: string | undefined, slug: string): string {
 }
 
 /**
- * One index page as the parser saw it (S20): the albums it announced, and how many rows it could not
- * read as an album at all.
+ * One index page as the parser saw it (S20): the albums it announced, and which rows it could not read as
+ * an album at all.
  */
 export interface AlbumGrid {
 	readonly albums: CatalogAlbum[];
-	/** Grid rows that were an album item but carried no `/album/<slug>` link. */
-	readonly unrecognized: number;
+	/**
+	 * The `data-item-id` of every grid row that was an album item but carried no `/album/<slug>` link, in page
+	 * order. An id and not a count: a count says something is off, an id says which row to go look at, and the
+	 * caller that has to leave a trace has nothing to write without it (L90).
+	 */
+	readonly unreadable: readonly string[];
 }
 
 /**
- * The albums the index page announces, in page order, one per slug (S20), plus the count of rows that
- * could not be read. An item whose title markup moved keeps its row under a humanized slug: losing the
- * pretty name is a smaller failure than losing an album, and the identity — what the card navigates by —
- * was never the title. A row whose **link** moved is not that case: the album is gone, so the caller is
- * told, and a partly read grid can be raised as the same explicit failure as an empty one instead of
- * shrinking into a list that gets cached.
+ * The albums the index page announces, in page order, one per slug (S20), plus the rows that could not be
+ * read. An item whose title markup moved keeps its row under a humanized slug: losing the pretty name is a
+ * smaller failure than losing an album, and the identity — what the card navigates by — was never the title.
+ * A row whose **link** moved is not that case: the album is gone, so the row is reported, and the caller
+ * decides — S20's tolerance is per album, so one of these is a degradation to carry as data, never a reason
+ * to take the whole catalog offline (L90).
  */
 export function readAlbumGrid(html: string): AlbumGrid {
 	const albums: CatalogAlbum[] = [];
 	const seen = new Set<string>();
-	let unrecognized = 0;
+	const unreadable: string[] = [];
 
-	for (const item of html.match(GRID_ITEM) ?? []) {
+	for (const row of html.matchAll(GRID_ITEM)) {
+		const item = row[0];
 		const slug = ALBUM_LINK.exec(item)?.[1];
 		if (!slug) {
-			unrecognized += 1;
+			// The id is the row's own attribute, so the group is there by construction; the whole row is the
+			// fallback because a degradation named vaguely still beats one nobody can point at.
+			unreadable.push(row[1] ?? item);
 			continue;
 		}
-		// A repeated slug is the one benign skip: the same album twice is not markup we failed to read.
+		// A repeated slug is the one benign skip: the same album twice is not markup we failed to read, so it
+		// is not reported either — a degradation nobody can act on is a sentence the reader learns to ignore.
 		if (seen.has(slug)) continue;
 		seen.add(slug);
 		albums.push({ slug, title: displayTitle(ALBUM_TITLE.exec(item)?.[1], slug) });
 	}
 
-	return { albums, unrecognized };
+	return { albums, unreadable };
 }
 
 type RawTrack = Readonly<Record<string, unknown>>;

@@ -115,9 +115,16 @@ export interface CatalogCache {
  */
 export type CatalogFailure = "network" | "not-found" | "scrape";
 
-/** A catalog read as data, never as a rejection: the card has nowhere to catch an exception. */
+/**
+ * A catalog read as data, never as a rejection: the card has nowhere to catch an exception.
+ *
+ * `partial` is the ok answer that still has something to say (S20, L90): the index rows that could not be
+ * read, named by their own id. It exists only on a read that partly succeeded — a read that read everything
+ * omits the field, because "absent" and "empty" must not be two shapes of the same fact — and it is data,
+ * not a failure: the tolerance of S20 is per album, so a list with a hole is still a list.
+ */
 export type CatalogResult<T> =
-	| { readonly ok: true; readonly value: T }
+	| { readonly ok: true; readonly value: T; readonly partial?: readonly string[] }
 	| { readonly ok: false; readonly failure: CatalogFailure };
 
 /**
