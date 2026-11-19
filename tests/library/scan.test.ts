@@ -35,6 +35,16 @@ const controlNames = process.platform === "win32" ? "Windows forbids control cha
  */
 const chmod = process.platform === "win32" ? "chmod cannot make a directory unreadable on Windows" : false;
 
+/**
+ * Why the unreadable-directory test cannot run here, or `false` when it can. Both reasons are returned as the same
+ * shape on purpose: a bare `true` would skip with no reason (root can read a `000` directory), and mixing a boolean
+ * with a reason string is the subtlety this helper exists to remove (L103).
+ */
+function unreadableReason(): false | string {
+	if (process.getuid?.() === 0) return "root can read a directory whose mode is 000";
+	return chmod;
+}
+
 let root: string;
 let music: string;
 
@@ -209,9 +219,7 @@ describe("failure states (S5)", () => {
 		assert.deepEqual(rejection(await scanFolder(file, ctx())).failure, { kind: "missing", path: file });
 	});
 
-	it("returns an unreadable path as data instead of throwing", {
-		skip: process.getuid?.() === 0 || chmod,
-	}, async () => {
+	it("returns an unreadable path as data instead of throwing", { skip: unreadableReason() }, async () => {
 		const locked = join(root, "locked");
 		mkdirSync(locked);
 		files(locked, "01 - A.mp3");
