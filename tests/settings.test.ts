@@ -129,10 +129,11 @@ describe("defaults (S2, S14)", () => {
 	});
 
 	it("parses $HOME in user-dirs.dirs and rejects a disabled entry", () => {
-		// Pure, so it is stated in the POSIX flavour the file itself is written in, on every host.
+		// Pure, so it is stated in the POSIX flavour the file itself is written in, on every host — including the
+		// entry that has no `$HOME` to substitute, which would otherwise still carry the fixture's host flavour.
 		assert.equal(musicDirFromUserDirs('XDG_MUSIC_DIR="$HOME/Music"\n', "/home/kike"), "/home/kike/Music");
 		assert.equal(musicDirFromUserDirs('XDG_MUSIC_DIR="$HOME/"\n', "/home/kike"), undefined);
-		assert.equal(musicDirFromUserDirs("# nothing here\n", home), undefined);
+		assert.equal(musicDirFromUserDirs("# nothing here\n", "/home/kike"), undefined);
 	});
 });
 

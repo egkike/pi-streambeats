@@ -342,7 +342,7 @@ Requisitos, todos verificables:
 | T41 | S6, S19 | Los tres hallazgos que quedaron sólo en los PRs: `isBareName` aceptaba una ruta drive-relative de Windows (`C:mpv.exe`), que sí depende del cwd; la rama `error` de `confirm()` decía «respondió con error» también cuando el binario no llegó a arrancar; y un nombre pelado configurado sugería que se había encontrado un candidato | worker | **hecho** — el designador de unidad descalifica el nombre pelado, `started` es un discriminador requerido y las tres frases dicen sólo lo que se sabe (L98) | `L98` |
 | T42 | S6 | `R4-002` + `R3-002` de la review de T41: `started: false` se aplicaba a **todo** error de `spawnSync` salvo `ETIMEDOUT`, incluidos los que ocurren después de que el hijo arrancó (`ENOBUFS`), así que la frase decía «no llegó a arrancar» cuando sí arrancó; y la rama `catch` no tenía test | worker | **hecho** — el mapeo código→hecho es puro y probado, la cuarta frase dice la verdad, y `answered` es un campo requerido (L99) | `L99` |
 | T43 | S6 | Los dos `R4`/`R3` de la review de T42 sobre el mismo hecho: un `--version` **matado por una señal** tenía `status null` y ningún `result.error`, así que caía en la rama de «respondió» e imprimía «answered --version with an error (no exit code)». El tercer hallazgo —`answered` requerido rompería productores fuera de los cuatro archivos— **no lleva código**: `tsc -p .` compila todo el proyecto y no hay ninguno | worker | **hecho** — `exitProbe` es puro, `status null` es «corrió y la respuesta no llegó», y el cableado tiene una sola lectura (L100) | `L100` |
-| T44 | — | Las tres sugerencias **no bloqueantes** de la review de T12b (`review-41afbeca6560ecde`): el test de `$HOME` quedó medio convertido —dos expectativas en posix literal y una tercera que todavía pasa el `home` del fixture—, y el skip del `chmod` compone un booleano con un string-razón: `process.getuid?.() === 0 || chmod` | inline | pendiente — dispara cuando alguien toque `tests/settings.test.ts` o `tests/library/scan.test.ts`, o antes de T35 si se quiere la suite sin deuda de estilo (L102) | — |
+| T44 | — | Las tres sugerencias **no bloqueantes** de la review de T12b (`review-41afbeca6560ecde`): el test de `$HOME` quedó medio convertido —dos expectativas en posix literal y una tercera que todavía pasa el `home` del fixture—, y el skip del `chmod` compone un booleano con un string-razón: `process.getuid?.() === 0 || chmod` | inline | **hecho** — el test entero en posix literal y el skip sale de `unreadableReason(): false | string`, que además devuelve la razón cuando corre como root (L103) | #99 |
 | T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | **hecho** — de 19 rojos a 0 en la VM, y los 11 `skip` que quedan dicen una verdad; el fake escucha donde `ipcTarget` dice, sin tocar producción (L101) | #97 |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
@@ -2497,3 +2497,22 @@ string-razón. Ninguna cambia lo que la suite verifica hoy; las tres son deuda d
 impedir. El cierre lo dice con todas las letras —«tratarlos como trabajo posterior, nunca como razón para re-correr la
 review de este candidato»— y la política del repo ya tiene el lugar donde vive esa deuda: una fila con el disparador que
 la reabre.
+
+L103 (T44: los tres hallazgos no bloqueantes de la review de T12b). Pedido del dueño, verbatim: **"Listo el merge. Luego
+limpiemos los tres hallazgos del review primero"**.
+
+**Los tres eran dos cosas, y ninguna cambia lo que la suite verifica.** El test de `$HOME` quedó entero en el flavour
+posix —la tercera expectativa todavía pasaba el `home` del fixture, y como esa entrada no tiene `$HOME` que sustituir, el
+valor del host viajaba hasta una aserción que no lo necesitaba—: es exactamente la mezcla de flavours que T12b vino a
+sacar, sobreviviendo en el test que la estaba arreglando. Y el skip del `chmod` pasó a `unreadableReason(): false | string`,
+que devuelve **siempre la misma forma**: cuando corre como root devuelve la razón —`root can read a directory whose mode
+is 000`— en vez de un `true` pelado que salteaba sin decir por qué.
+
+**Un hallazgo del camino, del lado del arnés y no del código:** el primer intento de verificar en la VM midió mal. Sin
+`git fetch`, `git merge --ff-only origin/main` responde «Already up to date» porque el repo de la VM tiene su propio
+`origin/main`, y la suite corrió sobre `c950cc7` con dos archivos nuevos encima: 527 tests y dos rojos que ya estaban
+arreglados. El segundo intento borró el archivo de salida antes del `scp`. El diagnóstico fue el mismo en los dos casos
+—main viejo, archivo viejo— y ninguno de los dos era un defecto del producto.
+
+Evidencia, sobre `main` en `432aa4f` más estos dos archivos: **Windows 11, 563 tests, 559 pasan, 0 fallan, 4 skips**, y
+`pnpm check` verde en Linux con **577 tests / 120 suites**. El skip `chmod` sigue nombrando la limitación real del SO.
