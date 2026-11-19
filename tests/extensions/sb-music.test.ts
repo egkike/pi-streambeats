@@ -26,8 +26,19 @@ import type { Component, OverlayHandle, TUI } from "@earendil-works/pi-tui";
 import sbMusic, { createResolver } from "../../extensions/sb-music.ts";
 import { catalogCachePath } from "../../lib/catalog/cache.ts";
 import type { CatalogFetch, CatalogHttp } from "../../lib/catalog/http.ts";
+import type { MpvDiscoveryContext } from "../../lib/player/mpv.ts";
 import type { Platform } from "../../lib/settings.ts";
 import type { CatalogAlbumListing, Track } from "../../lib/types.ts";
+
+/**
+ * The discovery I/O every test that starts a session injects (S6, S9). The root now confirms mpv by running
+ * `<command> --version`, and a test must not execute a binary on the machine that happens to run it: it
+ * answers for the probe instead. Discovery itself is tested where it lives, in `tests/player/mpv.test.ts`.
+ */
+const FOUND_MPV: Pick<MpvDiscoveryContext, "exists" | "run"> = {
+	exists: () => true,
+	run: () => ({ ok: true }),
+};
 
 /**
  * The catalog's two pages, from the same fixtures the reader's own tests use: the entry point really runs
@@ -398,7 +409,7 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 		const f = fixture({ asciiGlyphs: true });
 		await as(f, async () => {
 			const h = host();
-			sbMusic(h.pi, { fetch: catalogFetch });
+			sbMusic(h.pi, { fetch: catalogFetch, probe: FOUND_MPV });
 			try {
 				await command(h, "");
 
@@ -426,6 +437,43 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 				const stayed = component?.render(COLUMNS) ?? [];
 				assert.ok(stayed.join("\n").includes("at home"), `the footer says why it did not move:\n${stayed.join("\n")}`);
 				assert.ok(stayed.join("\n").includes("Music/"), "and the listing did not move either");
+			} finally {
+				await shutdown(h);
+			}
+		});
+	});
+
+	it("reports an mpv it could not confirm instead of announcing playback is ready (S6)", async () => {
+		// The installer case of L15: a binary that exists and does not answer must not be announced as found.
+		const f = fixture({});
+		await as(f, async () => {
+			const h = host();
+			sbMusic(h.pi, {
+				fetch: catalogFetch,
+				probe: { exists: () => true, run: () => ({ ok: false, reason: "mpv printed no version" }) },
+			});
+			try {
+				await command(h, "");
+
+				assert.ok(
+					h.notices.some((notice) => notice.includes("mpv")),
+					`a binary that does not answer is a state to show, got: ${JSON.stringify(h.notices)}`,
+				);
+			} finally {
+				await shutdown(h);
+			}
+		});
+	});
+
+	it("says nothing about mpv when discovery confirmed one (S6)", async () => {
+		const f = fixture({});
+		await as(f, async () => {
+			const h = host();
+			sbMusic(h.pi, { fetch: catalogFetch, probe: FOUND_MPV });
+			try {
+				await command(h, "");
+
+				assert.deepEqual(h.notices, [], "a working mpv is not a warning");
 			} finally {
 				await shutdown(h);
 			}
@@ -538,6 +586,7 @@ describe("the catalog at the composition root (S20)", () => {
 					calls += 1;
 					return { status: 200, text: MUSIC_PAGE };
 				},
+				probe: FOUND_MPV,
 			});
 			try {
 				await command(h, "");
@@ -554,7 +603,7 @@ describe("the catalog at the composition root (S20)", () => {
 		const f = fixture({});
 		await as(f, async () => {
 			const h = host();
-			sbMusic(h.pi, { fetch: catalogFetch });
+			sbMusic(h.pi, { fetch: catalogFetch, probe: FOUND_MPV });
 			try {
 				await command(h, "");
 				// The read is asynchronous by contract; what it must not do is leave a blank card behind.

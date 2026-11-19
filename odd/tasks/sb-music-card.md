@@ -151,9 +151,11 @@ filtro y sale del modo. Si no hay resultados, la card lo dice mostrando el térm
 resuelve primero.
 
 S19 — Plataforma. El target IPC y los directorios dependen del SO: socket en `$XDG_RUNTIME_DIR` (Linux) o
-tmpdir (macOS), y `\\.\pipe\pi-streambeats-<uid>` en Windows; config en `$XDG_CONFIG_HOME` / `~/.config/pi-streambeats/`
-o `%APPDATA%\pi-streambeats\`. Las dos funciones que dependen de la plataforma son **puras y reciben `platform`
-como parámetro**, para poder testear los tres casos desde Linux. La conexión al socket/pipe se reintenta (~100 ms
+`~/Library/Caches/pi-streambeats/` con fallback `mkdtemp` privado (macOS, corregido en L95: decía «tmpdir» y el
+código ya usaba la carpeta de caché desde R1-001), y `\\.\pipe\pi-streambeats-<identidad>` en Windows; config en `$XDG_CONFIG_HOME` / `~/.config/pi-streambeats/`
+o `%APPDATA%\pi-streambeats\`. Las funciones que dependen de la plataforma —`ipcTarget`, `settingsPath`, `catalogCachePath`, `musicDir` y el
+techo de navegación— son **puras y reciben `platform` como parámetro**, para poder testear los tres casos desde
+Linux (corregido en L95: el documento decía «las dos»). La conexión al socket/pipe se reintenta (~100 ms
 hasta 5 s): mpv tarda en crearlo. Las diferencias se resuelven en `lib/player/` y `lib/settings.ts` — los módulos
 que ya son dueños de I/O — sin puerto ni módulo nuevo.
 
@@ -335,7 +337,8 @@ Requisitos, todos verificables:
 | T9 | S1, S4, S8, S12 | `lib/host/` + `extensions/`: overlay, unfocus, shortcuts, status line, comando | worker | hecho (PR #25) | `bf2ebf3` … `c259e87` |
 | T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | **hecho** — la mitad del host falso ya la pagó T9; el hueco real era otro: la raíz de composición no tenía ningún test (L70) | `872d5c2`, L70 |
 | T11 | S9 | Suite completa verde y reporte | inline | **hecho** — 320 tests / 79 suites, `pnpm check` verde y `gate` verde en `main` (L51) | — |
-| T12 | S19 | Soporte Windows: target IPC por pipe, `%APPDATA%`, descubrimiento de mpv fuera del PATH | worker | abierta | — |
+| T12 | S19, S6 | **Rebanada 1**: descubrimiento de mpv fuera del PATH (candidatos, clave `mpvPath`, confirmación por `--version`) e identidad del pipe en Windows (sufijo aleatorio en vez del `uid` que ahí no existe) | worker | **hecho** — 625 líneas autoradas, publicada como un solo PR con `size:exception` (L96) | `L96` |
+| T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | pendiente — va después de T12; alcance confirmado por el dueño en L95 | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
 | T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
@@ -2195,3 +2198,82 @@ su página y un 404 resuelve la ambigüedad que hoy obliga a conservarlo.
 T38 `L92`, T39 `L93`— con **535 tests / 117 suites** verdes, y la tabla de riesgos con esta única fila del catálogo, a
 propósito. Backlog vivo: **T12** (Windows: named pipe, `%APPDATA%`, mpv fuera del PATH) → **T35** (release `v0.1.0`,
 dispara cuando no quede ninguna fila abierta) → **hub de Gentle**. T12 es lo único que destraba el release.
+
+L95 (la VM de Windows 11 se verifica antes de arrancar T12, y la línea base cambia el alcance). Pedido del dueño, verbatim:
+**"Capo estoy de vuelta, antes de arrancar T12 (Windows) verifica la VM de Windows 11 que ya está arriba para ver si la vas
+a necesitar y si está en condiciones. Avisame antes de arrancar T12 (Windows)"**.
+
+**La VM está en condiciones.** VirtualBox `Windows11` corriendo, Windows 11 Pro `10.0.26300.9974`, Guest Additions nivel 3,
+bridged `192.168.100.189`, **SSH abierto** y usable por ssh-agent como `egkik` (la clave ya estaba cargada: no hubo que
+tocar `~/.ssh`, que el arnés bloquea con razón). Node `v22.23.2`, npm `10.9.8`, pnpm `12.21.0`, git `2.54.0.windows.1`.
+**mpv `0.42.0` ya instalado** en `C:\Program Files\MPV Player\mpv.exe` **fuera del PATH** — el escenario exacto que T12
+tiene que resolver, sin fabricarlo. El host de Pi `1.5.2` se instaló en esta sesión. 62.9 GB libres, 16 GB de RAM.
+
+**Windows ya había sido verificado, y el documento no lo reflejaba.** Dos commits ancestros de `main` lo prueban:
+`e4d16a5` («make the toolchain pass on Windows», de donde salieron las reglas de LF y de la glob con comillas simples) y
+`c2c22ac` («record the verified Windows transport and mpv discovery»), que probó el named pipe contra mpv 0.42.0 con un
+reintento de 100 ms y de ahí sacó S19. Conclusión: **T12 no es investigar, es implementar lo que S19 ya especifica.**
+
+**La auditoría del código encontró que la spec iba atrás de la realidad y un defecto escondido.** Ya estaban hechos y
+testeados: `ipcTarget` puro con la rama win32, el retry 100 ms/5 s sin ramas por plataforma, `%APPDATA%` en settings y
+`%LOCALAPPDATA%` en caché, y el probe eligiendo named pipe. Faltaba sólo el descubrimiento de mpv (cero código: producción
+spawnea `"mpv"` pelado). Y el defecto: `ipcTarget` usa `<uid>`, que **en Windows no existe**, así que el pipe real era
+`\\.\pipe\pi-streambeats-0` — global de la máquina, adivinable, colisionable entre sesiones y usuarios. El test no lo
+veía porque inyecta `uid: 1000`. Es la cuarta vez en el proyecto que un valor correcto en el caso que lo motivó se degrada
+un paso más allá.
+
+**La línea base roja, que es para lo que sirvió pedirla.** `pnpm check` sobre `main` en la VM: **489 tests, 473 pasan, 16
+fallan, 46 se saltean** (en Linux son 535). Ninguno de los 16 es un defecto del producto: son tests que no pueden probar lo
+que dicen en Windows — separadores mezclados (el test inyecta `platform: "linux"` y arma la expectativa con el `path` del
+host), modos POSIX `0750`/`0600`, `chmod` como simulacro de archivo ilegible (no-op en Windows), y fixtures con caracteres
+de control en el nombre, que **el SO no puede crear**. Los 46 skip son legítimos: los 10 suites del player dicen «unix
+sockets are not the Windows transport (T12)».
+
+**Decisiones del dueño.** (1) **Sin job de Windows en CI**: la VM es la verificación, coherente con la política de runners
+que ya había dejado a macOS sólo el `ipc probe` (T18). (2) **T12b = la suite verde en Windows**: portar lo portable y
+saltear con razón verdadera lo imposible, más un fake de mpv por named pipe para que los tests del player corran en win32
+en vez de saltearse. Eso convierte «Windows soportado» en algo que se puede afirmar, y el release (T35) espera a T12.
+
+**Correcciones al documento, en la misma unidad que abrió T12.** S19 decía que macOS usa «tmpdir» cuando el código usa
+`~/Library/Caches/pi-streambeats/` con fallback `mkdtemp` desde R1-001; y decía «las dos funciones que dependen de la
+plataforma» cuando ya son cinco. Y la línea 471 daba por pendientes el transporte y los directorios, que estaban hechos y
+testeados. Un documento que envejece mintiendo es el defecto que L77 ya había nombrado.
+
+T12 se partió en dos rebanadas siguiendo el precedente de T5b: **T12** (descubrimiento + identidad del pipe) y **T12b**
+(que la suite sea honesta en Windows).
+
+L96 (T12 rebanada 1: descubrimiento de mpv e identidad del pipe). Es la primera mitad de T12, y sale de la línea base de
+L95: de la spec, lo único que no existía era el descubrimiento.
+
+**Descubrimiento (S6).** `discoverMpv` es **puro**: recibe plataforma, entorno, el setting y las dos piezas de I/O
+inyectadas (existencia y ejecución), así que ningún test ejecuta un binario. El orden es el del usuario: `mpvPath` de
+settings, después PATH en el orden que le dieron, después las ubicaciones conocidas de la plataforma. **Cada candidato se
+confirma corriendo `--version`**: un binario que existe y no contesta es una falla para el usuario, nunca un paso silencioso
+al siguiente. Las ubicaciones conocidas son cortas y con fuente: `/usr/bin` y `/usr/local/bin` en Linux, los dos prefijos de
+Homebrew en macOS, y `C:\Program Files\MPV Player\mpv.exe` en Windows —la ruta que deja el paquete de winget sin tocar
+PATH, verificada en la VM en L15—. Nada de scoop ni choco inventados.
+
+**Identidad del pipe (S19).** `ipcTarget` armaba el nombre con un `uid`, que **en Windows no existe**, así que caía a `0`:
+el pipe real era `\\.\pipe\pi-streambeats-0`, global de la máquina y adivinable. Ahora el nombre de win32 lleva un sufijo
+aleatorio de una fuente inyectada. Nada necesita descubrirlo: mpv es hijo de la card.
+
+**Una corrección mía sobre la entrega del worker, y es la misma familia de siempre.** Su primera versión pasaba
+`mpvPath: undefined` cuando el descubrimiento fallaba, y `undefined` en el player significa «spawneá `mpv` pelado»: con un
+`mpvPath` mal configurado, la card terminaba reproduciendo **otro binario** por PATH, enmascarando justo el error que el
+resolver se niega a saltear. Corregido en el cableado: se pasa el valor configurado tal cual, así la falla nombra *ese*
+path; sin nada configurado, el nombre pelado es exactamente la búsqueda que el descubrimiento acaba de encontrar vacía. Es
+la cuarta vez que el patrón aparece —un valor correcto donde nació, degradado un paso más allá— y ahora está escrito en el
+comentario, no sólo en la cabeza de quien lo escribió.
+
+**Números y forma de entrega.** `pnpm check` verde: **558 tests / 119 suites** (venían 535/117). RED propios: el módulo no
+exportaba `discoverMpv`; el pipe daba `-0` contra el esperado; `mpvPath` no existía en settings; y la raíz no reportaba
+nada ante un binario que no contesta. Dos afirmaciones **no** tuvieron RED y el worker lo declaró: «misma fuente → mismo
+nombre» ya pasaba antes, y el test que fija `mpvKnownLocations` se agregó después. El diff son **625 líneas autoradas**,
+arriba del corte de ~400: se publica como **un solo PR con `size:exception`**, porque partir este diff dejaría commits que
+no compilan por separado, y la etiqueta existe exactamente como guarda de carga de review (advisory).
+
+**Riesgos declarados, no tapados.** La falla se avisa en `session_start` por el único canal que el host tiene hoy; una
+máquina sin mpv recibe un aviso por sesión. `diskProbe.run` usa `spawnSync` con 2 s de techo, así que un binario
+configurado que se cuelga puede demorar el arranque hasta 2 s. Y el nombre de la clave `mpvPath` no está documentado fuera
+del código y del archivo de defaults —`docs/` y `README.md` quedaban fuera de las superficies de esta rebanada—, lo que es
+deuda de la rebanada 2.

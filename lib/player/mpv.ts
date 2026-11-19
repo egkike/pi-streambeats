@@ -16,10 +16,17 @@
  * review made explicit: the socket lives in a private directory nobody can pre-create (R1-001), a
  * shutdown during startup terminates the child instead of orphaning it (R4-004), and a lost
  * connection gets exactly one retry before it becomes a state the host can act on (R4-005).
+ *
+ * Finding the binary is also this module's job (S6, T12): `discoverMpv` answers which command to
+ * spawn, in the order S6 gives — the setting, then PATH, then the places each platform's installers
+ * really use — and only a binary that answers `--version` is ever announced as found. A Windows
+ * installer leaves mpv outside PATH (L15), so a bare `"mpv"` is not an answer there.
  */
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, posix } from "node:path";
+import { join, posix, win32 } from "node:path";
 import type { Platform } from "../settings.ts";
 import type { ResolveResult, Track, TrackResolver } from "../types.ts";
 
@@ -39,12 +46,15 @@ const DIR_NAME = "pi-streambeats";
 /** A directory only its owner may enter (R1-001): the socket's name is not a secret, its path is. */
 const PRIVATE_MODE = 0o700;
 
+/** How long `<command> --version` gets before a wedged binary counts as an answer of "no" (S6). */
+const VERSION_TIMEOUT_MS = 2000;
+
 /* --- the IPC target and the argv: pure, platform in, string out (S6, S19) ---------------------- */
 
 export interface IpcTargetContext {
 	readonly platform: Platform;
 	readonly env: Readonly<Record<string, string | undefined>>;
-	/** The current user's id: the only identity a Windows pipe name can carry (S19). */
+	/** The current user's id: the identity a unix socket's directory already carries. */
 	readonly uid: number;
 	/**
 	 * The user's home directory, where macOS keeps its caches. Passed in, never read from the
@@ -58,18 +68,23 @@ export interface IpcTargetContext {
 	 * `privateTempDir`; a test passes a stub.
 	 */
 	readonly privateDir?: () => string;
+	/**
+	 * The source of the Windows pipe's random suffix (S19). Defaults to `randomUUID`; injected so the
+	 * name is a value a test can compare instead of a side effect it has to work around.
+	 */
+	readonly random?: () => string;
 }
 
 /**
  * Where mpv listens (S6, S19): `$XDG_RUNTIME_DIR/pi-streambeats/mpv.sock` on Linux,
- * `~/Library/Caches/pi-streambeats/mpv.sock` on macOS, and a named pipe with the uid on Windows.
- * Nothing lands in a shared temp directory under a name another local user can predict: when a
- * platform offers no private base, the path comes from an unpredictable `mkdtemp` directory
+ * `~/Library/Caches/pi-streambeats/mpv.sock` on macOS, and a named pipe with a random suffix on
+ * Windows. Nothing lands in a shared temp directory under a name another local user can predict:
+ * when a platform offers no private base, the path comes from an unpredictable `mkdtemp` directory
  * (R1-001). A fixed uid-derived fallback was the finding: it could be pre-created or symlinked by
  * anybody, and it collided between sessions.
  */
 export function ipcTarget(ctx: IpcTargetContext): string {
-	if (ctx.platform === "win32") return `${PIPE_PREFIX}${DIR_NAME}-${Math.trunc(ctx.uid)}`;
+	if (ctx.platform === "win32") return `${PIPE_PREFIX}${DIR_NAME}-${pipeSuffix(ctx.random ?? randomUUID)}`;
 
 	// Linux: the runtime directory already belongs to this login session and is 0700 by contract.
 	if (ctx.platform === "linux") {
@@ -97,6 +112,24 @@ export function privateTempDir(): string {
 	return mkdtempSync(join(tmpdir(), `${DIR_NAME}-`));
 }
 
+/**
+ * A Windows pipe's identity (S19): a random suffix per player, from an injected source.
+ *
+ * WHY random: a named pipe is machine-global and has no directory around it, so its **name** is the
+ * only thing that decides who may connect. `<uid>` cannot be that name — Windows has no uid, so the
+ * extension injected nothing, `ipcTarget` fell back to 0 and every session of every user shared
+ * `\\.\pipe\pi-streambeats-0`: guessable, and colliding between two Pi windows or two users. It is the
+ * same defect R1-001 closed for the Linux socket, where a predictable path in a shared directory let
+ * another local process sit on the name first. Nothing has to discover this name — mpv is the card's
+ * own child — so unpredictability costs nothing.
+ */
+function pipeSuffix(random: () => string): string {
+	// Only what a pipe name accepts, so an injected source cannot smuggle a path separator into it.
+	const suffix = random().replace(/[^A-Za-z0-9-]/g, "");
+	if (suffix === "") throw new Error("the random source produced no usable pipe name");
+	return suffix;
+}
+
 /** An absolute path, or nothing: a relative XDG base is ignored the way the XDG spec says (S10). */
 function absolute(value: string | undefined): string | undefined {
 	const trimmed = value?.trim();
@@ -107,6 +140,140 @@ function absolute(value: string | undefined): string | undefined {
 export function mpvArgs(target: string): readonly string[] {
 	return ["--idle", "--no-video", "--no-terminal", `--input-ipc-server=${target}`];
 }
+
+/* --- finding the binary: setting, then PATH, then the installers' own places (S6, T12) ---------- */
+
+/** What `<command> --version` answered: the only confirmation S6 accepts before playback is announced. */
+export type MpvProbe = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+
+export interface MpvDiscoveryContext {
+	readonly platform: Platform;
+	readonly env: Readonly<Record<string, string | undefined>>;
+	/** `settings.mpvPath` when the user set one. The user's own answer, never a hint (S6). */
+	readonly configured?: string;
+	/** Whether a candidate is a file we could run. Injected, so a test never reads the disk. */
+	readonly exists: (path: string) => boolean;
+	/** Runs `<command> --version`. Injected, so a test never executes a binary (S9). */
+	readonly run: (command: string) => MpvProbe;
+}
+
+/**
+ * Which command to spawn, as data: the card cannot catch an exception, so a missing mpv is a state
+ * with a message instead of a throw (S6). No `version` field: the caller would have nowhere to put it.
+ */
+export type MpvDiscovery =
+	| { readonly ok: true; readonly command: string }
+	| { readonly ok: false; readonly message: string };
+
+/** The executable's file name per platform: a Windows installer always ships `mpv.exe`. */
+/** The binary name per platform: `mpv` everywhere except Windows, which ships `.exe` (S19). */
+export const MPV_NAME: Readonly<Record<Platform, string>> = { linux: "mpv", darwin: "mpv", win32: "mpv.exe" };
+
+/**
+ * Where mpv lands when it is not on PATH, per platform. Deliberately short: every entry is a path this
+ * project claims to know, and a list that guesses is worse than a list with two lines.
+ *
+ * - Windows: the shinchiro `winget` package installs here and **does not touch PATH** (verified on
+ *   Windows 11, L15). That single path is the whole reason discovery exists on win32.
+ * - macOS: Homebrew's two prefixes — `/opt/homebrew` on arm64, `/usr/local` on Intel. Nothing ships
+ *   mpv in `/usr/bin` there, so claiming it would be the guess this list avoids.
+ * - Linux: `/usr/bin` is where every package manager named in S6 lands (`apt`, `dnf`, `pacman`,
+ *   `zypper`, `apk`), and `/usr/local/bin` is `make install`'s default prefix.
+ */
+export function mpvKnownLocations(platform: Platform): readonly string[] {
+	if (platform === "win32") return ["C:\\Program Files\\MPV Player\\mpv.exe"];
+	if (platform === "darwin") return ["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv"];
+	return ["/usr/bin/mpv", "/usr/local/bin/mpv"];
+}
+
+/**
+ * The command to spawn (S6): the setting, then PATH, then the known locations. The first candidate
+ * that exists is asked to answer `--version`, and its answer is final — a binary that exists and does
+ * not answer is a failure **state**, never a reason to try the next one, because falling through would
+ * announce a working mpv the user never asked for (S6, L15).
+ */
+export function discoverMpv(ctx: MpvDiscoveryContext): MpvDiscovery {
+	const configured = ctx.configured?.trim();
+	if (configured) {
+		// A typo in `mpvPath` is the user's to see. Quietly falling back to PATH would hide it forever.
+		if (!ctx.exists(configured)) {
+			return {
+				ok: false,
+				message: `mpvPath in settings.json points at ${configured}, which does not exist: fix it or install mpv`,
+			};
+		}
+		return confirm(ctx, configured, "mpvPath in settings.json");
+	}
+
+	// PATH next: it is the user's own answer to "where do my commands live", in the order they chose.
+	for (const candidate of pathCandidates(ctx)) {
+		if (ctx.exists(candidate)) return confirm(ctx, candidate, "PATH");
+	}
+
+	const known = mpvKnownLocations(ctx.platform);
+	for (const candidate of known) {
+		if (ctx.exists(candidate)) return confirm(ctx, candidate, "a known location");
+	}
+
+	return {
+		ok: false,
+		message: `mpv was not found: no ${MPV_NAME[ctx.platform]} on PATH and none of ${known.join(", ")} exists — install mpv or set mpvPath in settings.json`,
+	};
+}
+
+/** Every PATH entry joined with the platform's own executable name, in the order the user put them. */
+function pathCandidates(ctx: MpvDiscoveryContext): readonly string[] {
+	const path = ctx.platform === "win32" ? win32 : posix;
+	const entries = (ctx.env.PATH ?? "")
+		.split(path.delimiter)
+		// A quoted entry is how some Windows installers write a path with spaces; the quotes are not part of it.
+		.map((entry) => entry.trim().replace(/^"(.*)"$/, "$1"))
+		.filter((entry) => entry !== "");
+	return entries.map((entry) => path.join(entry, MPV_NAME[ctx.platform]));
+}
+
+/** Put one candidate to the only test S6 accepts, and report the answer as the answer. */
+function confirm(ctx: MpvDiscoveryContext, command: string, where: string): MpvDiscovery {
+	const probe = ctx.run(command);
+	if (probe.ok) return { ok: true, command };
+	return { ok: false, message: `${command} (found via ${where}) does not answer --version: ${probe.reason}` };
+}
+
+/**
+ * The production discovery I/O: a real `stat` and a real `--version` run (S6). It lives here, in the
+ * module that already owns the process, and nowhere else — the resolver above stays pure, so its tests
+ * never execute a binary (S9).
+ */
+export const diskProbe: Pick<MpvDiscoveryContext, "exists" | "run"> = {
+	exists: (path) => {
+		try {
+			return statSync(path).isFile();
+		} catch {
+			// ENOENT, or a directory we may not look into: either way, not a binary we can run.
+			return false;
+		}
+	},
+	run: (command) => {
+		try {
+			const result = spawnSync(command, ["--version"], {
+				stdio: ["ignore", "pipe", "pipe"],
+				shell: false,
+				// A binary that hangs must not hang the session that asked whether it works (S6).
+				timeout: VERSION_TIMEOUT_MS,
+				encoding: "utf8",
+			});
+			if (result.error) return { ok: false, reason: result.error.message };
+			if (result.status !== 0) {
+				const detail = (result.stderr ?? "").trim();
+				const code = result.status === null ? "no exit code" : `exit ${String(result.status)}`;
+				return { ok: false, reason: detail ? `${code}: ${detail}` : code };
+			}
+			return { ok: true };
+		} catch (error) {
+			return { ok: false, reason: reasonOf(error) };
+		}
+	},
+};
 
 /* --- the injected world ---------------------------------------------------------------------- */
 
@@ -182,7 +349,12 @@ export interface PlayerDeps {
 	 * Defaults to `privateTempDir`; injected so the fallback is testable without real I/O (R1-001).
 	 */
 	readonly privateDir?: () => string;
-	/** Defaults to `"mpv"`: on Windows the installer often leaves it off `PATH` (T12 looks it up). */
+	/** Defaults to `randomUUID`: the source of the Windows pipe's random suffix (S19). */
+	readonly random?: () => string;
+	/**
+	 * The command to spawn. Resolved once by the composition root through `discoverMpv` (S6, T12), so the
+	 * player only has to use it; `undefined` keeps the historical bare `"mpv"` meaning.
+	 */
 	readonly mpvPath?: string;
 	/** The level the session starts at, if the caller wants one applied on connect (S11: core owns 70). */
 	readonly volume?: number;
@@ -253,6 +425,7 @@ class MpvPlayer implements Player {
 			uid: deps.uid ?? process.getuid?.() ?? 0,
 			home: deps.home ?? homedir(),
 			privateDir: deps.privateDir ?? privateTempDir,
+			random: deps.random ?? randomUUID,
 		});
 	}
 
