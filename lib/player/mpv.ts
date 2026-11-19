@@ -216,14 +216,16 @@ export function mpvKnownLocations(platform: Platform): readonly string[] {
 export function discoverMpv(ctx: MpvDiscoveryContext): MpvDiscovery {
 	const configured = ctx.configured?.trim();
 	if (configured) {
-		// R3-002: a relative value is resolved by the OS against whatever directory Pi was started in, so the
-		// same settings file would confirm a different binary in another window. It is not something to
-		// complete for the user either: PATH is theirs to choose with this setting, never to override it.
+		// R3-002: `mpvPath` names a binary, and there are three honest shapes. An absolute path is used as written;
+		// a **bare command name** is what PATH is for, so it resolves through PATH and cannot depend on where Pi was
+		// started; anything else — `bin/mpv`, `./mpv` — is refused, because the OS would resolve it against the launch
+		// directory and the same settings file would confirm a different binary in another window.
+		if (isBareName(configured)) return confirm(ctx, configured, "mpvPath in settings.json");
 		if (!isAbsoluteFor(ctx.platform, configured)) {
 			return {
 				ok: false,
 				definitive: true,
-				message: `mpvPath in settings.json is "${configured}", which is not an absolute path: it would resolve against whatever directory Pi was started in — set the full path of the binary, or clear it to search PATH`,
+				message: `mpvPath in settings.json is "${configured}", which is a relative path: it would resolve against whatever directory Pi was started in — set the full path of the binary, a bare command name PATH can find, or clear it to search PATH`,
 			};
 		}
 		// A typo in `mpvPath` is the user's to see. Quietly falling back to PATH would hide it forever.
@@ -257,6 +259,11 @@ export function discoverMpv(ctx: MpvDiscoveryContext): MpvDiscovery {
 /** Absolute in the platform's own flavour (R3-002): `C:\...` is absolute on win32 and nowhere else. */
 function isAbsoluteFor(platform: Platform, value: string): boolean {
 	return (platform === "win32" ? win32 : posix).isAbsolute(value);
+}
+
+/** A command name with no path in it: PATH resolves it, so it cannot depend on where Pi was started (R3-002). */
+function isBareName(value: string): boolean {
+	return !value.includes("/") && !value.includes("\\");
 }
 
 /** Every PATH entry joined with the platform's own executable name, in the order the user put them. */

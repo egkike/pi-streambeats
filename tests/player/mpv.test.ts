@@ -430,6 +430,21 @@ describe("finding mpv (S6)", () => {
 		assert.deepEqual(runs, [], "a relative setting is not a reason to ask PATH behind the user's back");
 	});
 
+	it("resolves a configured bare command name through PATH instead of refusing it (R4-001)", () => {
+		// A bare name is not a relative path: PATH is exactly the answer to "where do my commands live", and it
+		// cannot resolve against Pi's launch directory. Refusing it would stop playback for a setting that says
+		// what it means.
+		const { ctx, runs } = world({
+			configured: "mpv-beta",
+			path: "/usr/local/bin",
+			exists: ["/usr/local/bin/mpv-beta"],
+			answers: ["mpv-beta"],
+		});
+
+		assert.deepEqual(discoverMpv(ctx), { ok: true, command: "mpv-beta" });
+		assert.deepEqual(runs, ["mpv-beta"], "confirmed by name, so PATH is what resolved it");
+	});
+
 	it("validates absoluteness in the platform's own path flavour (R3-002)", () => {
 		// `C:\...` is absolute to Windows and relative to POSIX, so one shared flavour would be wrong in one
 		// of the two places, and this project has to run on both.

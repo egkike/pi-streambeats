@@ -482,7 +482,7 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 				const mentions = h.notices.filter((notice) => notice.includes("mpvPath"));
 				assert.equal(mentions.length, 1, `the setting is named once per session, got: ${JSON.stringify(h.notices)}`);
 				assert.match(mentions[0] ?? "", /bin\/mpv/);
-				assert.match(mentions[0] ?? "", /not an absolute path/);
+				assert.match(mentions[0] ?? "", /relative path/);
 				assert.deepEqual(h.notices, mentions, "nothing else was announced: no PATH candidate took its place");
 			} finally {
 				await shutdown(h);
