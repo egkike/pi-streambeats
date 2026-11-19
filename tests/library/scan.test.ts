@@ -22,6 +22,19 @@ import { scanFolder } from "../../lib/library/scan.ts";
 /** Symlinks need extra privileges on Windows; the rules they cover are the same on every POSIX host. */
 const symlinks = process.platform === "win32" ? "symlink creation needs extra privileges on Windows" : false;
 
+/**
+ * Windows forbids control characters (`0x00`-`0x1F`) in a file name, so the fixture cannot exist there. The rule
+ * those two tests cover — a name is neutralized on its way to the frame and kept raw on its way to the disk — is
+ * stated purely in `tests/core/names.test.ts`, where it runs on every host (L101).
+ */
+const controlNames = process.platform === "win32" ? "Windows forbids control characters in file names" : false;
+
+/**
+ * `chmod` is a POSIX call: on Windows it quietly does nothing, so a directory cannot be made unreadable to its own
+ * owner and the failure state this test fabricates cannot be built (L101).
+ */
+const chmod = process.platform === "win32" ? "chmod cannot make a directory unreadable on Windows" : false;
+
 let root: string;
 let music: string;
 
@@ -196,7 +209,9 @@ describe("failure states (S5)", () => {
 		assert.deepEqual(rejection(await scanFolder(file, ctx())).failure, { kind: "missing", path: file });
 	});
 
-	it("returns an unreadable path as data instead of throwing", { skip: process.getuid?.() === 0 }, async () => {
+	it("returns an unreadable path as data instead of throwing", {
+		skip: process.getuid?.() === 0 || chmod,
+	}, async () => {
 		const locked = join(root, "locked");
 		mkdirSync(locked);
 		files(locked, "01 - A.mp3");
@@ -246,7 +261,7 @@ describe("symlinks (S5, S14)", { skip: symlinks }, () => {
 	});
 });
 
-describe("untrusted names (S5)", () => {
+describe("untrusted names (S5)", { skip: controlNames }, () => {
 	it("neutralizes control characters in names that leave the module", async () => {
 		folders(music, "\u001b]52;c;QQ==\u0007folder");
 		files(music, "\u001b[31mred\u001b[0m.mp3");

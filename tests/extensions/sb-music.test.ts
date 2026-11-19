@@ -124,8 +124,10 @@ function fixture(options: FixtureOptions = {}): Fixture {
 /**
  * Run with the fixture's directories as the ones the entry point resolves (S10, S19). The entry point
  * reads `process.env` and the home directory when the factory runs, and closes over the values it read,
- * so the swap only has to be in place around that call. Both config variables are set so the fixture
- * holds on every platform the suite runs on.
+ * so the swap only has to be in place around that call. The config variables of both platforms and the
+ * home variable each one actually reads are set, so the fixture holds wherever the suite runs: on win32
+ * `os.homedir()` reads `USERPROFILE` and ignores `HOME`, and without it the fixture's library would sit
+ * outside the real profile — the navigation ceiling then becomes the library itself (L101).
  */
 async function as(target: Fixture, run: () => void | Promise<void>): Promise<void> {
 	const saved = {
@@ -134,6 +136,7 @@ async function as(target: Fixture, run: () => void | Promise<void>): Promise<voi
 		APPDATA: process.env.APPDATA,
 		LOCALAPPDATA: process.env.LOCALAPPDATA,
 		HOME: process.env.HOME,
+		USERPROFILE: process.env.USERPROFILE,
 	};
 	process.env.XDG_CONFIG_HOME = target.configHome;
 	// The catalog's cache is one of the extension's own files (S20): it belongs in the fixture, never in
@@ -142,6 +145,7 @@ async function as(target: Fixture, run: () => void | Promise<void>): Promise<voi
 	process.env.APPDATA = target.configHome;
 	process.env.LOCALAPPDATA = target.configHome;
 	process.env.HOME = target.home;
+	process.env.USERPROFILE = target.home;
 	try {
 		await run();
 	} finally {

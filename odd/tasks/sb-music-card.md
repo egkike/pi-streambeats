@@ -342,7 +342,8 @@ Requisitos, todos verificables:
 | T41 | S6, S19 | Los tres hallazgos que quedaron sólo en los PRs: `isBareName` aceptaba una ruta drive-relative de Windows (`C:mpv.exe`), que sí depende del cwd; la rama `error` de `confirm()` decía «respondió con error» también cuando el binario no llegó a arrancar; y un nombre pelado configurado sugería que se había encontrado un candidato | worker | **hecho** — el designador de unidad descalifica el nombre pelado, `started` es un discriminador requerido y las tres frases dicen sólo lo que se sabe (L98) | `L98` |
 | T42 | S6 | `R4-002` + `R3-002` de la review de T41: `started: false` se aplicaba a **todo** error de `spawnSync` salvo `ETIMEDOUT`, incluidos los que ocurren después de que el hijo arrancó (`ENOBUFS`), así que la frase decía «no llegó a arrancar» cuando sí arrancó; y la rama `catch` no tenía test | worker | **hecho** — el mapeo código→hecho es puro y probado, la cuarta frase dice la verdad, y `answered` es un campo requerido (L99) | `L99` |
 | T43 | S6 | Los dos `R4`/`R3` de la review de T42 sobre el mismo hecho: un `--version` **matado por una señal** tenía `status null` y ningún `result.error`, así que caía en la rama de «respondió» e imprimía «answered --version with an error (no exit code)». El tercer hallazgo —`answered` requerido rompería productores fuera de los cuatro archivos— **no lleva código**: `tsc -p .` compila todo el proyecto y no hay ninguno | worker | **hecho** — `exitProbe` es puro, `status null` es «corrió y la respuesta no llegó», y el cableado tiene una sola lectura (L100) | `L100` |
-| T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | pendiente — va después de T12; alcance confirmado por el dueño en L95 | — |
+| T44 | — | Las tres sugerencias **no bloqueantes** de la review de T12b (`review-41afbeca6560ecde`): el test de `$HOME` quedó medio convertido —dos expectativas en posix literal y una tercera que todavía pasa el `home` del fixture—, y el skip del `chmod` compone un booleano con un string-razón: `process.getuid?.() === 0 || chmod` | inline | pendiente — dispara cuando alguien toque `tests/settings.test.ts` o `tests/library/scan.test.ts`, o antes de T35 si se quiere la suite sin deuda de estilo (L102) | — |
+| T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | **hecho** — de 19 rojos a 0 en la VM, y los 11 `skip` que quedan dicen una verdad; el fake escucha donde `ipcTarget` dice, sin tocar producción (L101) | #97 |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
 | T25 | S22 | Registrar las tres shortcuts de transporte: pausa, siguiente y anterior desde el editor | worker | **hecho** — verificado por el dueño en el host (L57) | `1c5fa54` (PR #58) |
@@ -2429,3 +2430,70 @@ que no tiene test directo porque matar un proceso no se puede desde un test.
 **Y acá se cierra `lib/player/mpv.ts`**, como quedó acordado: nueve unidades hoy sobre el mismo archivo. Lo que venga de la
 review de esta unidad, si es no bloqueante, va a fila con disparador. El próximo trabajo es **T12b**, que es lo único que
 convierte «Windows soportado» en algo afirmable y destraba T35 y el hub.
+
+L101 (T12b: la suite deja de mentir en Windows, y la familia de `mpvPath` era el test). Pedido del dueño, verbatim:
+**"Arrancá por lo que quedó sin determinar: en Windows, los tres tests de mpvPath dan expected '/opt/mpv/bin/mpv' vs
+actual ''. Determiná si es el test (flavour del host) o un bug real de mergeSettings en win32 — si lo segundo, un usuario
+Windows no puede configurar mpv y T12b cambia de tamaño. No toques un test antes de saberlo."** Después, verbatim:
+**"2a portables (separadores con el flavour inyectado, modos afirmados sólo donde existen) + 2b imposibles salteados con
+razón verdadera (chmod, caracteres de control en nombres), y aparte 2c el fake de mpv por named pipe"**.
+
+**La familia de `mpvPath` era el test, y la cadena se puede recorrer entera.** `mergeSettings` sólo llama `text()`
+(`lib/settings.ts:156`): no mira la plataforma, no llama `isAbsolute`, no descarta un string no vacío. Lo que descartaba
+era un paso antes: el fixture inyectaba `platform: "linux"` pero armaba `home` y `configHome` con el `node:path` del
+**host**, así que en win32 `XDG_CONFIG_HOME` llegaba como `C:\...\config`, `posix.isAbsolute` lo rechazaba en
+`lib/settings.ts:86` y el código caía a `home/.config` — un archivo que el test nunca escribió. El `''` del reporte es el
+default, no un valor descartado. Un usuario Windows no pasa por esa línea (toma la rama `%APPDATA%`), así que **T12b no
+creció**: es una sola cosa, la suite.
+
+**El fixture, entonces, se declara en el flavour que dice ser.** Los tests con disco corren en la plataforma del host con
+la variable que esa plataforma lee —`%APPDATA%` en win32, XDG en POSIX—, de modo que el mundo del test y el código
+hablan el mismo idioma; los tests de caminos, que no crean nada, escriben el mundo linux/darwin en posix literal. Y una
+regla que se hace más chica, no más grande: **el modo es una promesa donde el SO tiene bits que guardar**. Windows reporta
+ACLs y devuelve `0o666` para un archivo que su dueño creó, así que ahí no se afirma (L101 no agrega una aserción, saca
+una mentira). Lo que el SO hace imposible se saltea con la razón del SO: `chmod` no puede volver ilegible un directorio en
+Windows, y los nombres con caracteres de control (`0x00`-`0x1F`) no se pueden crear — la regla que esos dos tests
+cubrían sigue afirmada, pura, en `tests/core/names.test.ts`.
+
+**2c salió sin una línea de producción, y por una razón de diseño, no de suerte.** `ipcTarget` ya era la única autoridad
+sobre dónde escucha mpv (S19), así que el fake del suite del player dejó de escribir a mano
+`join(root, "pi-streambeats", "mpv.sock")` y pasó a llamar **esa misma función** con las mismas deps: un socket unix en
+Linux y macOS, un named pipe en Windows. El sufijo del pipe lo fija el test (`pid-n`) para que las dos llamadas —la del
+fake y la del player— devuelvan el mismo string; sin eso, `random` las separaría. `lib/player/mpv.ts` no se tocó: el
+archivo quedó cerrado en L100 y esta rebanada no lo necesitó.
+
+**Un skip que mentía y el hecho que lo reemplaza.** El test del `ipc-probe` decía «unix sockets only», pero el probe
+elige el transporte por plataforma desde S19 y el fake escucha donde se le pide: lo que Windows **no** puede es ejecutar
+`fake-mpv-events.mjs` *como comando mpv*, porque `spawn` sin shell devuelve `EFTYPE` (no hay shebang). El skip sigue, con
+esa frase —el argumento del probe es **un** comando y un mpv real es un `.exe`—, y el día que el probe acepte un argv la
+razón deja de ser cierta sola.
+
+Evidencia, medida en la VM `Windows11` sobre el árbol parcheado y restaurado después: **563 tests, 559 pasan, 0 fallan,
+4 skips** (venía de 19 rojos en 9 suites), y en Linux `pnpm check` verde con **577 tests / 120 suites**. Los 11 `skip`
+que quedan en Windows son: `chmod`, `symlinks` (privilegios), `untrusted names` (control chars), el directorio del socket
+y el atajo de R1-001 (un pipe no tiene directorio), tres suites de modos POSIX del socket, el modo de config
+(ACLs), `user-dirs.dirs` (XDG) y el probe (`EFTYPE`).
+
+**Límites declarados.** El único cambio de comportamiento en el producto es ninguno: el diff son tests y este documento.
+Los subtests que Windows saltea no se pierden — siguen corriendo en Linux, que es el runner del `check` (T18)—, y la
+verificación de esta rebanada es la suite entera en la VM, no el gate: el gate verde de Linux no dice nada sobre win32.
+
+L102 (la review nativa de T12b: aprobada, y tres sugerencias que van a fila). El dueño pidió correrla igual aunque el
+assess dijera `reviewDue: false` por `under_budget` (`risk: medium`, 243 líneas, 8 archivos): **"Correr la review nativa
+igual antes del push"**. Dos lentes —`reliability` y `readability`— sobre el candidato ya commiteado, `base-ref`
+`c950cc7`, `committed-only`.
+
+**Veredicto: `approved`**, linaje `review-41afbeca6560ecde`, dos revisores (`glm-5.3-flash` vía relay del host) y tres
+hallazgos **no bloqueantes**, todos `SUGGESTION`: ninguno abrió corrección, ninguno reabre la review y no se ofrece
+transición de corrección para este candidato. Se reconocieron y quemaron con el token exacto del cierre; el candidato que
+se empuja es el que se revisó, sin un byte de diferencia.
+
+**Los tres van a la fila T44, con disparador**, en vez de a un commit suelto: dos son la misma cosa —el test de `$HOME`
+quedó medio convertido, con dos expectativas en posix literal y una tercera que todavía pasa el `home` del fixture— y la
+otra es el skip del `chmod` componiendo `process.getuid?.() === 0 || chmod`, que funciona pero mezcla un booleano con un
+string-razón. Ninguna cambia lo que la suite verifica hoy; las tres son deuda de forma en archivos que este slice tocó.
+
+**Por qué no se arreglan acá:** cambiar el candidato después del `approved` es exactamente lo que el recibo existe para
+impedir. El cierre lo dice con todas las letras —«tratarlos como trabajo posterior, nunca como razón para re-correr la
+review de este candidato»— y la política del repo ya tiene el lugar donde vive esa deuda: una fila con el disparador que
+la reabre.

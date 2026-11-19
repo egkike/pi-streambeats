@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, win32 } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	DEFAULT_SETTINGS,
@@ -14,10 +14,22 @@ import {
 	loadSettings,
 	mergeSettings,
 	musicDirFromUserDirs,
+	type Platform,
 	type Settings,
 	saveSettings,
 	settingsPath,
 } from "../lib/settings.ts";
+
+/**
+ * The platform this suite runs its real files on, and the flavour of path that platform speaks (S19). The
+ * fixture below is a real directory on the host, so it has to be described the way the host describes it: a
+ * `linux` world spelled with `C:\...` strings is a world `posix.isAbsolute` rejects, and the module is right
+ * to reject it. Mixing the two flavours is what made this suite pass only on the machine that wrote it (L101).
+ * The three platforms' own path rules are pinned by the pure tests below, which create nothing.
+ */
+const hostPlatform: Platform =
+	process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
+const hostPath = hostPlatform === "win32" ? win32 : posix;
 
 let root: string;
 let home: string;
@@ -25,8 +37,8 @@ let configHome: string;
 
 beforeEach(() => {
 	root = mkdtempSync(join(tmpdir(), "sb-settings-"));
-	home = join(root, "home");
-	configHome = join(root, "config");
+	home = hostPath.join(root, "home");
+	configHome = hostPath.join(root, "config");
 	mkdirSync(home, { recursive: true });
 });
 
@@ -35,7 +47,11 @@ afterEach(() => {
 });
 
 function ctx(overrides: Record<string, unknown> = {}) {
-	return { platform: "linux" as const, env: { XDG_CONFIG_HOME: configHome }, home, ...overrides };
+	// The variable that decides the config directory is the host platform's own (S19): on win32 the loader
+	// reads `%APPDATA%` and never looks at the XDG one, so a fixture that only set XDG would send the write
+	// to the real AppData of whoever ran the suite.
+	const env = hostPlatform === "win32" ? { APPDATA: configHome } : { XDG_CONFIG_HOME: configHome };
+	return { platform: hostPlatform, env, home, ...overrides };
 }
 
 function filePath(): string {
@@ -49,15 +65,21 @@ function writeSettings(raw: string): void {
 
 describe("settings paths (S10, S19)", () => {
 	it("puts the file under XDG_CONFIG_HOME on Linux and macOS", () => {
-		assert.equal(settingsPath(ctx()), filePath());
-		assert.equal(settingsPath(ctx({ platform: "darwin" })), filePath());
+		// A pure linux world written in its own flavour: no directory is created, and the host's separators
+		// never enter the assertion (S19).
+		const linux = { platform: "linux" as const, env: { XDG_CONFIG_HOME: "/run/user/1000/config" }, home: "/home/kike" };
+
+		assert.equal(settingsPath(linux), "/run/user/1000/config/pi-streambeats/settings.json");
+		assert.equal(settingsPath({ ...linux, platform: "darwin" }), "/run/user/1000/config/pi-streambeats/settings.json");
 	});
 
 	it("falls back to ~/.config when XDG_CONFIG_HOME is relative or missing", () => {
-		const expected = join(home, ".config", "pi-streambeats", "settings.json");
-		assert.equal(settingsPath(ctx({ env: {} })), expected);
-		assert.equal(settingsPath(ctx({ env: { XDG_CONFIG_HOME: "" } })), expected);
-		assert.equal(settingsPath(ctx({ env: { XDG_CONFIG_HOME: "relative/dir" } })), expected);
+		const expected = "/home/kike/.config/pi-streambeats/settings.json";
+		const linux = { platform: "linux" as const, home: "/home/kike" };
+
+		assert.equal(settingsPath({ ...linux, env: {} }), expected);
+		assert.equal(settingsPath({ ...linux, env: { XDG_CONFIG_HOME: "" } }), expected);
+		assert.equal(settingsPath({ ...linux, env: { XDG_CONFIG_HOME: "relative/dir" } }), expected);
 	});
 
 	it("puts the file under %APPDATA% on Windows", () => {
@@ -76,7 +98,13 @@ describe("defaults (S2, S14)", () => {
 		assert.deepEqual(JSON.parse(readFileSync(filePath(), "utf8")), result.settings);
 	});
 
-	it("creates the config directory 0750 and the file 0600", () => {
+	// Windows has no POSIX permission bits: it reports ACLs, so `mode` there is 0o666 for anything its owner
+	// created. The mode is a promise only where the OS has one to keep, and claiming it where it does not
+	// would be a green test that proves nothing (L101). That the directory and the file are created is
+	// asserted by the neighbouring tests, on every platform.
+	it("creates the config directory 0750 and the file 0600", {
+		skip: process.platform === "win32" ? "Windows reports ACLs, not POSIX permission bits" : false,
+	}, () => {
 		loadSettings(ctx());
 
 		assert.equal(statSync(join(configHome, "pi-streambeats")).mode & 0o777, 0o750);
@@ -89,7 +117,11 @@ describe("defaults (S2, S14)", () => {
 		assert.deepEqual(readdirSync(join(configHome, "pi-streambeats")), ["settings.json"]);
 	});
 
-	it("reads the music directory from user-dirs.dirs", () => {
+	// `user-dirs.dirs` is an XDG convention. Windows has no such file and the loader never reads one there, so
+	// there is nothing to assert about it on win32.
+	it("reads the music directory from user-dirs.dirs", {
+		skip: process.platform === "win32" ? "user-dirs.dirs is an XDG convention, absent on Windows" : false,
+	}, () => {
 		mkdirSync(configHome, { recursive: true });
 		writeFileSync(join(configHome, "user-dirs.dirs"), 'XDG_MUSIC_DIR="$HOME/Audio"\n');
 
@@ -97,8 +129,9 @@ describe("defaults (S2, S14)", () => {
 	});
 
 	it("parses $HOME in user-dirs.dirs and rejects a disabled entry", () => {
-		assert.equal(musicDirFromUserDirs('XDG_MUSIC_DIR="$HOME/Music"\n', home), join(home, "Music"));
-		assert.equal(musicDirFromUserDirs('XDG_MUSIC_DIR="$HOME/"\n', home), undefined);
+		// Pure, so it is stated in the POSIX flavour the file itself is written in, on every host.
+		assert.equal(musicDirFromUserDirs('XDG_MUSIC_DIR="$HOME/Music"\n', "/home/kike"), "/home/kike/Music");
+		assert.equal(musicDirFromUserDirs('XDG_MUSIC_DIR="$HOME/"\n', "/home/kike"), undefined);
 		assert.equal(musicDirFromUserDirs("# nothing here\n", home), undefined);
 	});
 });
@@ -223,7 +256,9 @@ describe("shortcut edits (S22)", () => {
 
 		assert.deepEqual(saveSettings(ctx(), next), { ok: true });
 		assert.deepEqual(JSON.parse(readFileSync(filePath(), "utf8")), next);
-		assert.equal(statSync(filePath()).mode & 0o777, 0o600);
+		// The mode is a promise only where the OS has POSIX permission bits to keep: win32 reports ACLs and
+		// shows 0o666 for a file its owner created (L101).
+		if (process.platform !== "win32") assert.equal(statSync(filePath()).mode & 0o777, 0o600);
 		assert.deepEqual(readdirSync(join(configHome, "pi-streambeats")), ["settings.json"]);
 
 		// A config directory that cannot be created: the caller gets data, never an exception.
