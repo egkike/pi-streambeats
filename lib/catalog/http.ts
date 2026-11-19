@@ -15,7 +15,7 @@
  */
 
 import type { CatalogAlbum, CatalogResult, CatalogTrack } from "../types.ts";
-import { isAlbumSlug, parseAlbumIndex, parseAlbumPage, parseTrackUrl } from "./parse.ts";
+import { isAlbumSlug, parseAlbumPage, parseTrackUrl, readAlbumGrid } from "./parse.ts";
 
 /** The catalog's origin. One constant, so a fixture-driven test and the real read agree on the URL. */
 export const CATALOG_ORIGIN = "https://streambeats.bandcamp.com";
@@ -105,11 +105,13 @@ export function createCatalogHttp(options: CatalogHttpOptions): CatalogHttp {
 			const page = await readPage(`${CATALOG_ORIGIN}/music`);
 			if (!page.ok) return { ok: false, failure: page.failure };
 
-			const albums = parseAlbumIndex(page.text);
+			const grid = readAlbumGrid(page.text);
 			// The explicit failure S20 asks for: an empty grid is markup we no longer read, never a catalog
-			// with nothing in it. A list that silently renders zero rows is the failure this replaces.
-			if (albums.length === 0) return { ok: false, failure: "scrape" };
-			return { ok: true, value: albums };
+			// with nothing in it. A list that silently renders zero rows is the failure this replaces — and a
+			// grid we could only partly read is that same failure one row earlier: the albums we did not
+			// recognize would be cached for 24 h as if the site had shrunk.
+			if (grid.albums.length === 0 || grid.unrecognized > 0) return { ok: false, failure: "scrape" };
+			return { ok: true, value: grid.albums };
 		},
 
 		async readAlbum(slug: string): Promise<CatalogResult<readonly CatalogTrack[]>> {

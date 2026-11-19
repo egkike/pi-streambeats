@@ -74,6 +74,15 @@ describe("createCatalogHttp (S20)", () => {
 		assert.deepEqual(await http.readIndex(), { failure: "scrape", ok: false });
 	});
 
+	it("says the scrape failed when the grid was only partly recognized", async () => {
+		// Same rule as an empty grid, one row earlier: a catalog that quietly lost a row would be cached for
+		// 24 h as if the site had shrunk, and nothing downstream could tell the difference.
+		const partial = MUSIC.replace('<a href="/album/groovy"', '<a href="/album/groovy?from=grid"');
+		const http = createCatalogHttp({ fetch: fakeFetch([ok(partial)]).fetch });
+
+		assert.deepEqual(await http.readIndex(), { failure: "scrape", ok: false });
+	});
+
 	it("reads one album page into tracks", async () => {
 		const http = createCatalogHttp({ fetch: fakeFetch([ok(ALBUM)]).fetch });
 

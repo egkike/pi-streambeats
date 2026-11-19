@@ -352,6 +352,7 @@ Requisitos, todos verificables:
 | T31 | S22 | `R2-002`: el tope de diez líneas de `modeLines()` vive sólo en los tests; quien lea `host.ts` no ve que `--help` está justo en el borde | inline | **hecho** — se quitó la falta de holgura en vez de etiquetarla: 8 de 10, dos de margen (L73) | — |
 | T32 | S8 | `R3-002`: `settle()` polléa ~1 s y, si el disco tarda más, el test falla con un mensaje que culpa al listado en vez de reportar el timeout | inline | **hecho** — falla como timeout que nombra presupuesto, fila y frame; 5 s (L73) | — |
 | T34 | S20 | `R3-temp-empty-refetch` de la review de T14.2: una carpeta local **vacía** se vuelve a escanear en cada viaje de ida y vuelta, porque `switch-source` sólo pide lectura cuando `entries.length === 0` y no recuerda si ya se pidió | inline | **hecho** — el listado recuerda si fue leído (`SourceView.loaded`), así que una carpeta vacía ya leída no se re-escanea y un fallo sigue reintentando (L88) | `L88` |
+| T36 | S20 | `R4-002` + `R3-003`: un índice que sólo se reconoce en parte se cachea 24 h como un catálogo más chico, y a una pista sin número se le inventa uno que puede colisionar o saltar el orden | inline | **hecho** — la guarda de forma cuenta las filas ilegibles y las levanta como `scrape`, y el orden deja de inventar números (L90) | `L90` |
 | T35 | — | **Release `v0.1.0`**: `version` a `0.1.0`, `RELEASING.md` (semver, comandos, rollback), sección `Install` en el README con el `git:` pinneable y plataformas honestas, y la guarda de CI que falla si el tag no coincide con `package.json`. El acto —`git tag -a v0.1.0`, `gh release create --generate-notes`— lo mueve el dueño o lo muevo yo con su permiso | inline | abierta — **dispara cuando no quede ninguna otra fila abierta**, y va **antes** de publicar en el hub (L89) | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
@@ -376,12 +377,12 @@ de tareas escrita a mano es exactamente lo que envejeció en el archivo de regla
 | **`sync` / descargas** | Fuera de S20: el catálogo se navega y se reproduce, no se descarga. La caché es de metadatos, nunca de audio | El dueño lo pida, o la reproducción en streaming deje de alcanzar | L2, S20 |
 | **Temas propios** | Los colores salen del tema del host, sin paletas propias | El dueño lo pida | AGENTS.md, TUI Rules |
 | **Pantalla de settings dentro de la card** | Las teclas se cambian con `/sb-music --keys` y el archivo, no con una UI | El dueño lo pida, o `--keys` deje de alcanzar | S22 |
-| **Un índice parcialmente irreconocible** (`R4-002`) | `parseAlbumIndex` saltea los ítems del grid que no matchean el patrón de slug. Sólo un índice **vacío** es `scrape`, así que un cambio parcial de markup devuelve un catálogo recortado que después se cachea 24 h | El catálogo muestre menos álbumes que el sitio, o el grid cambie de forma | L80, review de T14.1 |
-| **Orden de pistas sin número** (`R3-003`) | El fallback `track_num = rows.length` puede colisionar con números explícitos, y entonces el orden queda apoyado en la estabilidad del sort en vez de en el payload. Cosmético: los slugs siguen siendo únicos | Una página mezcle pistas numeradas y sin numerar | L80, review de T14.1 |
 
 **Cerradas por dejar de ser ciertas** — se retiran en vez de quedar acá mintiendo: el **catálogo Bandcamp en
 streaming** ya no es exclusión, es `S20` / `T14`; el **mouse** ya no es exclusión, `S17` está entregada (`T13`,
-`T24`) y verificada en el host.
+`T24`) y verificada en el host; y los dos hallazgos del parser que quedaban como riesgo aceptado —el **índice
+parcialmente irreconocible** (`R4-002`) y el **orden de pistas sin número** (`R3-003`)— se arreglaron en `T36`: ahora
+un grid leído a medias es `scrape` y una pista sin número ya no recibe uno inventado (L90).
 
 ## Log
 
@@ -2022,3 +2023,35 @@ política semver (`0.x`: minor = cambio que el usuario nota, patch = arreglo), l
 
 **Qué reabriría el 3 (npm):** que se publique en el hub y la instalación corta importe, que alguien pida
 `pi install npm:…`, o que moleste tener que avisar «bajate `main` otra vez».
+
+L90 (T36: los dos hallazgos del catálogo que quedaban como riesgo aceptado). Pedido del dueño, verbatim:
+**"Podríamos limpiar el R4-002 y R4-003, qué te parece?"**. Nombres corregidos primero, porque importa: **`R4-003` no es
+un pendiente** —se arregló en T14.2 (L80: `429/5xx` como `network`, con reintento)— así que las dos filas vivas eran
+**`R4-002`** y **`R3-003`**.
+
+Decisión del dueño: **`R3-003` ahora; `R4-002` según el fixture**, las dos en una sola unidad y un solo PR antes de T35.
+
+**La precondición no se salteó.** La guarda de forma de `R4-002` sólo es segura si `GRID_ITEM` matchea los álbumes 1:1.
+Contado sobre los bytes capturados (`tests/fixtures/catalog/music-grid.html`): **3 filas de grid, 3 links
+`/album/<slug>`, cero slugs duplicados** → 1:1, así que la guarda entró. Con 1:N, `R4-002` se quedaba como riesgo: la
+alternativa —una lista blanca de ítems ignorables— es adivinar el markup del sitio, que es peor que el riesgo
+documentado.
+
+**`R3-003` era más grave que la fila que lo describía.** La fila decía «cosmético» porque el orden se apoyaba en la
+estabilidad del sort; el código decía otra cosa: `rows.length` era el largo de las filas **ya filtradas**, arrancando en
+`0` mientras los números reales arrancan en `1`, así que una pista sin número podía ordenarse **antes** de la pista 1 y
+correr el álbum entero. Test en rojo primero: payload `[Intro(sin nº), One(1), Outro(sin nº), Two(2)]` daba
+`['Intro','One','Outro','Two']`. Se arregla **borrando el número inventado**, no reubicándolo: sin número la pista vale
+`Infinity` y desempata por su posición en el payload, así que el orden del payload pasa a ser la regla a propósito y
+documentada, en vez del accidente de un sort estable.
+
+**`R4-002`: guarda de forma, no de recuperación.** Un solo export nuevo, `readAlbumGrid(html) → { albums, unrecognized }`,
+y el envoltorio `parseAlbumIndex` **se borró en vez de quedar**: era una segunda puerta que sólo usaban los tests, o sea
+la indirección muerta que las invariantes castigan. `readIndex` trata `unrecognized > 0` como `scrape`, la misma falla
+explícita que ya cubría el índice vacío. Un slug repetido **no** cuenta como ilegible: ese salto es legítimo y tiene su
+propio test.
+
+Evidencia: `pnpm check` verde (`515` tests / `116` suites; `tests/catalog/` pasa de 38 a `43`), dos RED propios vistos
+antes del arreglo —el export faltante y el orden— y los seis comportamientos que ya existían con su test intacto: orden
+por número, dedupe por slug, fallback de título desde el slug, página sin grid, índice vacío → `scrape`, y duración
+ausente cuando el payload no la trae (issue #78, PR de esta rama).

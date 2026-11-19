@@ -26,7 +26,7 @@ import {
 	readCatalogCache,
 	writeCatalogCache,
 } from "../../lib/catalog/cache.ts";
-import { parseAlbumIndex, parseAlbumPage } from "../../lib/catalog/parse.ts";
+import { parseAlbumPage, readAlbumGrid } from "../../lib/catalog/parse.ts";
 import type { CatalogCache } from "../../lib/types.ts";
 
 function scratch(): string {
@@ -232,7 +232,7 @@ describe("isCatalogFresh (S20, L75)", () => {
 describe("the index and the cache agree on the album shape (S20)", () => {
 	it("an album read from the index can carry the tracks read from its page", () => {
 		const index = readFileSync(new URL("../fixtures/catalog/music-grid.html", import.meta.url), "utf8");
-		const [album] = parseAlbumIndex(index);
+		const [album] = readAlbumGrid(index).albums;
 		assert.ok(album, "the fixture index must announce at least one album");
 		const page = readFileSync(new URL("../fixtures/catalog/album-tralbum.html", import.meta.url), "utf8");
 		const tracks = parseAlbumPage(page) ?? [];
