@@ -15,10 +15,56 @@
 Your music, inside the editor: a card for [Pi](https://pi.dev) and Gentle Shell that browses a local
 music library and plays it with [mpv](https://mpv.io), without taking the keyboard away from you.
 
-> **Status: early development.** Nothing is published yet — `pi install` would fail, and this
-> repository holds the toolchain, the CI and the specification, not the product. The specification is
-> [`odd/tasks/sb-music-card.md`](odd/tasks/sb-music-card.md): 19 numbered specs quoted from the owner's
-> own words, plus the log of every decision behind them.
+> **Status: early development.** `v0.1.0` is the first release, and the card installs from git — see
+> [Install](#install). Nothing is on npm: a git tag is the pin. The card is usable, not finished, and the
+> specification is [`odd/tasks/sb-music-card.md`](odd/tasks/sb-music-card.md): 19 numbered specs quoted from
+> the owner's own words, plus the log of every decision behind them.
+
+## Install
+
+```sh
+pi install git:github.com/egkike/pi-streambeats          # the tip of main
+pi install git:github.com/egkike/pi-streambeats@v0.1.0   # a release, pinned
+```
+
+The tag is the pin, and it is exact: `@v0.1.0` installs the commit whose `package.json` says `0.1.0`, and
+no other. The `Release tag` workflow fails when a pushed tag does not match that version, so a pin cannot
+quietly point at different code. Without a tag you get the tip of `main` — the next release while it is
+being built.
+
+**What it needs.**
+
+| Requirement | Why |
+| --- | --- |
+| Pi or Gentle Shell | The card is an extension of the host's TUI; it has no UI of its own |
+| Node 22.19 or newer | The host's floor, declared in `engines` |
+| [mpv](https://mpv.io) | Playback. `mpv` on `PATH` is the normal case; without it the card still browses and says so |
+
+**Where it runs.** This is what was verified, not a support promise:
+
+| Platform | What was verified |
+| --- | --- |
+| Linux | The suite runs here: `pnpm check` on Ubuntu 26.04 with Node 22.19, 24 and 26 |
+| macOS | The real mpv transport: the `ipc` job runs the probe on a macOS runner against Homebrew mpv. The suite itself runs on Ubuntu, and the darwin code path is covered there because the platform-dependent functions take `platform` as a parameter |
+| Windows | Windows 11 with mpv 0.42.0, on a VM: the whole suite runs there — 563 tests, 0 failures. The tests Windows cannot run skip with the reason the OS gives: POSIX permission bits and `chmod`, control characters in file names, and a socket directory a named pipe does not have. There is no Windows job in CI |
+
+**If mpv is not on `PATH`.** The Windows installer (`winget install shinchiro.mpv`) leaves mpv in
+`C:\Program Files\MPV Player` and does not touch `PATH`. The card looks for mpv in one order: `mpvPath` in
+`settings.json`, then `PATH`, then the few locations each platform's installer really uses
+(`C:\Program Files\MPV Player\mpv.exe` on Windows, the two Homebrew prefixes on macOS, `/usr/bin` and
+`/usr/local/bin` on Linux). The first candidate has to answer `--version`, so a configured binary that does
+not run is reported instead of silently skipped.
+
+Setting the path is one key in `%APPDATA%\pi-streambeats\settings.json` on Windows
+(`~/.config/pi-streambeats/settings.json` elsewhere):
+
+```json
+{ "mpvPath": "C:\\Program Files\\MPV Player\\mpv.exe" }
+```
+
+The value has to be absolute, or a bare command name that `PATH` resolves: a relative path like `bin/mpv`
+is refused, because the same settings file would otherwise point at a different binary depending on where
+Pi was started.
 
 ## What it is
 
@@ -154,7 +200,7 @@ run, so asking for two starved whichever lost the race and turned `gate` red on 
 on code. macOS runs the real IPC probe, against Homebrew mpv, when a change touches the transport; the
 darwin code path itself stays covered on Ubuntu because the platform-dependent functions are pure and take
 `platform` as a parameter. A darwin-only path owes a test that runs from Linux, or its own job. Windows is
-validated on a Windows 11 VM (toolchain, gate and named-pipe transport) and joins CI with task T12.
+validated on a Windows 11 VM — the whole suite, and the named-pipe transport — and has no CI job of its own.
 
 ## Design
 

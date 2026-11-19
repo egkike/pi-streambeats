@@ -1,6 +1,6 @@
 {
 	"name": "@egkike/pi-streambeats",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"description": "Play your local music library from Pi and Gentle Shell — a browse-and-play card powered by mpv.",
 	"type": "module",
 	"license": "MIT",

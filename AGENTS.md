@@ -180,6 +180,8 @@ que verificar), para que sumar un runner no trabe `main`.
 - **Descubrimiento de vulnerabilidades** por el canal privado del repo (advisory), nunca en una issue pública.
 - **Etiquetas**: `status:approved`, exactamente un `type:feature|bug|docs|refactor|chore` por PR, y
   `size:exception` cuando un PR pasa la heurística de ~400 líneas autoradas (guarda de carga de review, advisory).
+- **El tag está guardado**: `.github/workflows/release-tag.yml` corre en cada push de un tag `v*` y falla si el tag
+  no es exactamente `v` + `package.json#version`, así que un pin no puede mentir.
 - **Ingreso sólo por issues**: todavía no está adoptado. Cuando se adopte, el `CONTRIBUTING.md` y el workflow que
   lo hace cumplir se mueven juntos en la misma unidad de trabajo.
 

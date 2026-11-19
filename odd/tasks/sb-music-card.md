@@ -364,7 +364,7 @@ Requisitos, todos verificables:
 | T37 | S20 | `R3-001` + `R4-001` + `R4-002` de la review de T36: la guarda `unrecognized > 0 → scrape` contradice S20 («falla sólo si no se scrapeó cero álbumes», L243/L696) y en arranque en frío manda la card a la biblioteca por una sola fila ilegible; además el conteo se descarta y la deriva no deja traza | worker | **hecho** — el índice parcial se sirve con las filas ilegibles como dato, no se cachea, deja traza y el pie lo dice (L91) | `L91` |
 | T38 | S20 | `R2-001` + `R4-001` de la review de #81: un `?? item` muerto que ensuciaba la forma del dato, y una entrada degradada que no se cacheaba nunca —cada apertura en frío re-bajaba el índice y todas las páginas de álbum— sin revalidación barata ni promoción | worker | **hecho** — TTL corto con marca, revalidación de sólo el índice, reuso de las pistas cacheadas y promoción al curarse (L92) | `L92` |
 | T39 | S20 | `R4-002` + `R3-001` + `R3-002` de la review de #83: una pasada parcial escribía su lista **encima** de la caché entera y el recorte sobrevivía la sesión; el contador de reusados podía saltar 0 → n; y el harness compartía la caché escrita por defecto | worker | **hecho** — sólo un índice entero borra un álbum; el reuso quedó estructuralmente fuera de todo pase que cuente; y el harness comparte sólo si el test lo pide (L93) | `L93` |
-| T35 | — | **Release `v0.1.0`**: `version` a `0.1.0`, `RELEASING.md` (semver, comandos, rollback), sección `Install` en el README con el `git:` pinneable y plataformas honestas, y la guarda de CI que falla si el tag no coincide con `package.json`. El acto —`git tag -a v0.1.0`, `gh release create --generate-notes`— lo mueve el dueño o lo muevo yo con su permiso | inline | abierta — **dispara cuando no quede ninguna otra fila abierta**, y va **antes** de publicar en el hub (L89) | — |
+| T35 | — | **Release `v0.1.0`**: `version` a `0.1.0`, `RELEASING.md` (semver, comandos, rollback), sección `Install` en el README con el `git:` pinneable y plataformas honestas, y la guarda de CI que falla si el tag no coincide con `package.json`. El acto —`git tag -a v0.1.0`, `gh release create --generate-notes`— lo mueve el dueño o lo muevo yo con su permiso | inline | **preparada** — la preparación está en #101 (L104); falta sólo el acto, que mueve el dueño o yo con su permiso | #101 |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
@@ -2516,3 +2516,34 @@ arreglados. El segundo intento borró el archivo de salida antes del `scp`. El d
 
 Evidencia, sobre `main` en `432aa4f` más estos dos archivos: **Windows 11, 563 tests, 559 pasan, 0 fallan, 4 skips**, y
 `pnpm check` verde en Linux con **577 tests / 120 suites**. El skip `chmod` sigue nombrando la limitación real del SO.
+
+L104 (T35: el release queda preparado, y el acto espera permiso). Pedido del dueño, verbatim: **"Listo el merge. Luego
+arranca el T35"**.
+
+**Cuatro piezas, ninguna de comportamiento.** `package.json#version` pasa a `0.1.0` y es el único lugar donde el número
+vive. `RELEASING.md` define la superficie pública de verdad —el comando y sus flags, las cuatro teclas y sus nombres, las
+claves de `settings.json`, la línea de now-playing, los paths publicados y el piso de `engines`— y de ahí sale la política
+semver para algo que se instala desde git, la secuencia exacta de corte y el rollback: se borra el release y el tag, el
+número queda **quemado**, y unas notas equivocadas se arreglan con `gh release edit` sin tocar el tag. El README gana
+`Install` con la forma pinneable y una tabla de «esto es lo que se verificó, no una promesa de soporte». Y la guarda:
+`scripts/release-tag.mjs` compara `v` + versión contra el tag **exacto** (acepta `refs/tags/`, rechaza `v0.1`, `v0.1.0.1`
+y `v0.1.0-rc.1`), con test y con un workflow que corre sólo en `push` de tags `v*`.
+
+**Dos correcciones mías sobre la entrega, y una verificación contra la fuente.** La sintaxis `git:github.com/user/repo@v1`
+no la tomé del worker: está en el README de Pi y en `docs/packages.md`, que además dice que un tag queda pinneado y que un
+`pi update` no mueve el ref configurado — sin eso, la sección `Install` habría prometido un pin que el host no honra. El
+workflow venía con `pnpm/action-setup` y `pnpm install --frozen-lockfile` copiados de `ci.yml`, y la guarda no tiene nada
+que instalar: cada dependencia ahí es una forma más de que un tag falle por el motivo equivocado. Y el README decía «Four
+tests skip» enumerando dos: ahora nombra lo que Windows no puede correr —bits POSIX y `chmod`, caracteres de control, el
+directorio del socket— sin afirmar un número que el runner cuenta distinto de como lo cuenta el ojo.
+
+Evidencia. Gate: **581 tests / 121 suites** verdes (venían 577/120; +4 y +1 son la guarda y su test). CLI de la guarda, con
+los códigos de salida medidos sin pipe de por medio: `v0.1.0` → 0, `refs/tags/v0.1.0` → 0, `v0.2.0` → 1 con
+`tag v0.2.0 does not match package.json version 0.1.0 (expected v0.1.0)`, sin argumento → 2. Y la suite entera en la VM
+sobre `main` en `3962c78`: **567 tests, 563 pasan, 0 fallan, 4 skips**.
+
+**Límites declarados, no tapados.** El workflow **no se puede probar antes de que exista un tag**, así que su primera
+corrida real es el día del release; lo que sí está probado es la función pura y los cuatro códigos de salida que el
+workflow consume. La afirmación de Windows en el README sale de L95, L101 y L103, y está escrita como lo que se verificó
+en la VM, no como promesa de soporte. Y la tabla `Requirements` del README sigue repitiendo el piso de Node y mpv que
+ahora también dice `Install`: los valores son los mismos y son ciertos, pero es duplicación, y queda anotada.
