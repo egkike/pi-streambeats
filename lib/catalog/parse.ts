@@ -67,22 +67,41 @@ function displayTitle(raw: string | undefined, slug: string): string {
 }
 
 /**
- * The albums the index page announces, in page order, one per slug (S20). An item whose title markup
- * moved keeps its row under a humanized slug: losing the pretty name is a smaller failure than losing
- * an album, and the identity — what the card navigates by — was never the title.
+ * One index page as the parser saw it (S20): the albums it announced, and how many rows it could not
+ * read as an album at all.
  */
-export function parseAlbumIndex(html: string): CatalogAlbum[] {
+export interface AlbumGrid {
+	readonly albums: CatalogAlbum[];
+	/** Grid rows that were an album item but carried no `/album/<slug>` link. */
+	readonly unrecognized: number;
+}
+
+/**
+ * The albums the index page announces, in page order, one per slug (S20), plus the count of rows that
+ * could not be read. An item whose title markup moved keeps its row under a humanized slug: losing the
+ * pretty name is a smaller failure than losing an album, and the identity — what the card navigates by —
+ * was never the title. A row whose **link** moved is not that case: the album is gone, so the caller is
+ * told, and a partly read grid can be raised as the same explicit failure as an empty one instead of
+ * shrinking into a list that gets cached.
+ */
+export function readAlbumGrid(html: string): AlbumGrid {
 	const albums: CatalogAlbum[] = [];
 	const seen = new Set<string>();
+	let unrecognized = 0;
 
 	for (const item of html.match(GRID_ITEM) ?? []) {
 		const slug = ALBUM_LINK.exec(item)?.[1];
-		if (!slug || seen.has(slug)) continue;
+		if (!slug) {
+			unrecognized += 1;
+			continue;
+		}
+		// A repeated slug is the one benign skip: the same album twice is not markup we failed to read.
+		if (seen.has(slug)) continue;
 		seen.add(slug);
 		albums.push({ slug, title: displayTitle(ALBUM_TITLE.exec(item)?.[1], slug) });
 	}
 
-	return albums;
+	return { albums, unrecognized };
 }
 
 type RawTrack = Readonly<Record<string, unknown>>;
@@ -131,9 +150,13 @@ export function parseAlbumPage(html: string): CatalogTrack[] | undefined {
 	const trackinfo = trackinfoOf(html);
 	if (!trackinfo) return undefined;
 
-	const rows: { readonly number: number; readonly track: CatalogTrack }[] = [];
+	// A track without a number has no ordering fact of its own, so it carries the payload's position and
+	// sorts after every numbered track. Inventing a number instead — the length of the rows accepted so far —
+	// both collided with a real number and jumped the queue, because it started at 0 while real numbers
+	// start at 1. Payload order as an explicit rule, not as the stable sort's accident.
+	const rows: { readonly number: number; readonly position: number; readonly track: CatalogTrack }[] = [];
 
-	for (const entry of trackinfo) {
+	for (const [position, entry] of trackinfo.entries()) {
 		const slug = trackSlug(entry);
 		if (!slug || !audioUrl(entry)) continue;
 		const title = displayTitle(typeof entry.title === "string" ? entry.title : undefined, slug);
@@ -142,14 +165,16 @@ export function parseAlbumPage(html: string): CatalogTrack[] | undefined {
 		const seconds = entry.duration;
 		const durationMs =
 			typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 1000) : undefined;
-		const number = typeof entry.track_num === "number" ? entry.track_num : rows.length;
+		const number = typeof entry.track_num === "number" ? entry.track_num : Number.POSITIVE_INFINITY;
 
 		// The duration key is omitted when unknown: a `durationMs: undefined` would print as absent anyway,
 		// and the cache is a file where "absent" and "undefined" must not be two different shapes.
-		rows.push({ number, track: durationMs === undefined ? { slug, title } : { slug, title, durationMs } });
+		rows.push({ number, position, track: durationMs === undefined ? { slug, title } : { slug, title, durationMs } });
 	}
 
-	rows.sort((left, right) => left.number - right.number);
+	rows.sort((left, right) =>
+		left.number === right.number ? left.position - right.position : left.number - right.number,
+	);
 	return rows.map((row) => row.track);
 }
 

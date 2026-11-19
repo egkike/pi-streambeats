@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { parseAlbumIndex, parseAlbumPage, parseTrackUrl } from "../../lib/catalog/parse.ts";
+import { parseAlbumPage, parseTrackUrl, readAlbumGrid } from "../../lib/catalog/parse.ts";
 
 const FIXTURES = join(fileURLToPath(new URL("..", import.meta.url)), "fixtures", "catalog");
 
@@ -18,9 +18,9 @@ function fixture(name: string): string {
 	return readFileSync(join(FIXTURES, name), "utf8");
 }
 
-describe("parseAlbumIndex (S20)", () => {
+describe("readAlbumGrid (S20)", () => {
 	it("reads the albums of the index page in page order, with the entity escapes decoded", () => {
-		const albums = parseAlbumIndex(fixture("music-grid.html"));
+		const albums = readAlbumGrid(fixture("music-grid.html")).albums;
 
 		assert.deepEqual(albums, [
 			{ slug: "better-when-im-high-remix", title: "Better When I'm High (Remix)" },
@@ -37,7 +37,7 @@ describe("parseAlbumIndex (S20)", () => {
 			'<li data-item-id="album-3"><a href="/album/nocturnal"><p class="title">Nocturnal <br></p></li>',
 		].join("\n");
 
-		assert.deepEqual(parseAlbumIndex(html), [
+		assert.deepEqual(readAlbumGrid(html).albums, [
 			{ slug: "nocturnal", title: "Nocturnal" },
 			{ slug: "pulse", title: "Pulse" },
 		]);
@@ -48,7 +48,7 @@ describe("parseAlbumIndex (S20)", () => {
 		// name stops being pretty, instead of the album disappearing.
 		const html = '<li data-item-id="album-1"><a href="/album/better-when-im-high-remix"></li>';
 
-		assert.deepEqual(parseAlbumIndex(html), [
+		assert.deepEqual(readAlbumGrid(html).albums, [
 			{ slug: "better-when-im-high-remix", title: "Better When Im High Remix" },
 		]);
 	});
@@ -58,11 +58,40 @@ describe("parseAlbumIndex (S20)", () => {
 		const html =
 			'<li data-item-id="album-1"><a href="/album/electric"><p class="title">\u001b]52;c;ZWNobw==\u0007Elep\u202ehant<br></p></li>';
 
-		assert.deepEqual(parseAlbumIndex(html), [{ slug: "electric", title: "]52;c;ZWNobw==Elephant" }]);
+		assert.deepEqual(readAlbumGrid(html).albums, [{ slug: "electric", title: "]52;c;ZWNobw==Elephant" }]);
 	});
 
 	it("finds nothing in a page without a grid, instead of inventing an album", () => {
-		assert.deepEqual(parseAlbumIndex(fixture("album-404.html")), []);
+		assert.deepEqual(readAlbumGrid(fixture("album-404.html")).albums, []);
+	});
+
+	it("counts a grid row whose album link it could not read, instead of shrinking the catalog quietly", () => {
+		// The tolerance is per item, and it is about a title: an album that loses its name keeps its row. A
+		// row whose link moved is different — the album is gone — and a list that quietly got shorter would be
+		// cached for 24 h as if the site had shrunk.
+		const html = [
+			'<li data-item-id="album-1"><a href="/album/electric"><p class="title">Electric<br></p></li>',
+			'<li data-item-id="album-2"><a href="/album/groovy?from=grid"><p class="title">Groovy<br></p></li>',
+		].join("\n");
+
+		assert.deepEqual(readAlbumGrid(html), {
+			albums: [{ slug: "electric", title: "Electric" }],
+			unrecognized: 1,
+		});
+	});
+
+	it("counts nothing as unrecognized when the skip was a duplicate slug", () => {
+		// The one benign skip: the same album shown twice is not markup we failed to read.
+		const html = [
+			'<li data-item-id="album-1"><a href="/album/nocturnal"><p class="title">Nocturnal<br></p></li>',
+			'<li data-item-id="album-2"><a href="/album/nocturnal"><p class="title">Nocturnal<br></p></li>',
+		].join("\n");
+
+		assert.equal(readAlbumGrid(html).unrecognized, 0);
+	});
+
+	it("reads the whole captured grid without an unrecognized row", () => {
+		assert.equal(readAlbumGrid(fixture("music-grid.html")).unrecognized, 0);
 	});
 });
 
@@ -125,6 +154,26 @@ describe("parseAlbumPage (S20)", () => {
 		assert.deepEqual(
 			parseAlbumPage(html)?.map((track) => track.title),
 			["First", "Second"],
+		);
+	});
+
+	it("leaves a track without a number after every numbered one, in the payload's order", () => {
+		// Inventing a number either collides with a real one or jumps the queue — and the invented value was
+		// the length of the already-filtered rows, starting at 0 while real numbers start at 1, so an unnumbered
+		// track could sort *before* track 1. The payload's order is the only ordering fact such a track carries.
+		const tralbum = {
+			trackinfo: [
+				{ title: "Intro", duration: 5, title_link: "/track/intro", file: { "mp3-128": "https://x/i" } },
+				{ title: "One", track_num: 1, duration: 10, title_link: "/track/one", file: { "mp3-128": "https://x/a" } },
+				{ title: "Outro", duration: 6, title_link: "/track/outro", file: { "mp3-128": "https://x/o" } },
+				{ title: "Two", track_num: 2, duration: 20, title_link: "/track/two", file: { "mp3-128": "https://x/b" } },
+			],
+		};
+		const html = `<div data-tralbum="${escapeAttribute(JSON.stringify(tralbum))}">`;
+
+		assert.deepEqual(
+			parseAlbumPage(html)?.map((track) => track.title),
+			["One", "Two", "Intro", "Outro"],
 		);
 	});
 
