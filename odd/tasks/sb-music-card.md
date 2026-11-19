@@ -355,6 +355,7 @@ Requisitos, todos verificables:
 | T36 | S20 | `R4-002` + `R3-003`: un índice que sólo se reconoce en parte se cachea 24 h como un catálogo más chico, y a una pista sin número se le inventa uno que puede colisionar o saltar el orden | inline | **hecho** — la guarda de forma cuenta las filas ilegibles y las levanta como `scrape`, y el orden deja de inventar números (L90) | `L90` |
 | T37 | S20 | `R3-001` + `R4-001` + `R4-002` de la review de T36: la guarda `unrecognized > 0 → scrape` contradice S20 («falla sólo si no se scrapeó cero álbumes», L243/L696) y en arranque en frío manda la card a la biblioteca por una sola fila ilegible; además el conteo se descarta y la deriva no deja traza | worker | **hecho** — el índice parcial se sirve con las filas ilegibles como dato, no se cachea, deja traza y el pie lo dice (L91) | `L91` |
 | T38 | S20 | `R2-001` + `R4-001` de la review de #81: un `?? item` muerto que ensuciaba la forma del dato, y una entrada degradada que no se cacheaba nunca —cada apertura en frío re-bajaba el índice y todas las páginas de álbum— sin revalidación barata ni promoción | worker | **hecho** — TTL corto con marca, revalidación de sólo el índice, reuso de las pistas cacheadas y promoción al curarse (L92) | `L92` |
+| T39 | S20 | `R4-002` + `R3-001` + `R3-002` de la review de #83: una pasada parcial escribía su lista **encima** de la caché entera y el recorte sobrevivía la sesión; el contador de reusados podía saltar 0 → n; y el harness compartía la caché escrita por defecto | worker | **hecho** — sólo un índice entero borra un álbum; el reuso quedó estructuralmente fuera de todo pase que cuente; y el harness comparte sólo si el test lo pide (L93) | `L93` |
 | T35 | — | **Release `v0.1.0`**: `version` a `0.1.0`, `RELEASING.md` (semver, comandos, rollback), sección `Install` en el README con el `git:` pinneable y plataformas honestas, y la guarda de CI que falla si el tag no coincide con `package.json`. El acto —`git tag -a v0.1.0`, `gh release create --generate-notes`— lo mueve el dueño o lo muevo yo con su permiso | inline | abierta — **dispara cuando no quede ninguna otra fila abierta**, y va **antes** de publicar en el hub (L89) | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
@@ -2144,3 +2145,39 @@ lecturas de índice, la lista de fetch `['chillhop','lofi']` contra `['lofi']`, 
 `['chillhop','lofi']` al curarse), una triangulación que borra `tracks: known.tracks` y hace fallar el reuso con «0
 tracks», y `pnpm check` verde: **530 tests / 117 suites** (venía de 521/116), `boundary` 13/13, `lib/core` sin tocar.
 Diff: 8 archivos, ~300 líneas autoradas (issue #82, PR de esta rama).
+
+L93 (T39: los tres hallazgos de la review de T38). Pedido del dueño, verbatim: **"Listo el merge. Luego arregla los 3
+hallazgos del review"**. Una unidad: los tres viven en la misma pasada y son la misma pregunta otra vez —qué es verdad
+cuando el índice no pudo leer todas las filas—.
+
+**`R4-002`: sólo un índice entero puede borrar un álbum.** Una pasada parcial escribía su lista **encima** de la caché
+entera, así que un álbum cuya fila se volvió ilegible desaparecía y el recorte sobrevivía la sesión; el baseline
+conservaba la entrada buena. La regla que lo resuelve no es «no escribir» —eso volvería al costo que T38 vino a
+arreglar— sino que un índice parcial dice «estas son las filas que pude leer», **nunca** «estos son los álbumes que
+existen». Entonces la pasada degradada mergea: los álbumes anunciados en orden del índice, y después los ya conocidos
+cuyo slug el índice **no** anunció, que son exactamente las filas de las que no pudo responder (un id de grid no es un
+slug, así que nada más puede apuntarles). La misma lista alimenta los **dos** `catalog-albums` —el que pinta después del
+índice y el que asienta el pie— y la escritura de la caché: la card ya no puede mostrar una lista y guardar otra. Un
+índice entero no conserva nada, así que un retiro real desaparece apenas el índice es confiable; **la triangulación lo
+pinnea**, porque sin eso el merge se satisfaría con «nunca encogerse», que es el bug.
+
+**`R3-001`: el invariante pasó de razonado a inrepresentable.** El reuso contaba y despachaba progreso, pero el mapa del
+que lee lo llena `serveCache`, así que sólo podía ocurrir en una revalidación. En vez de dejar esa alcanzabilidad
+apoyada en el razonamiento, los dos booleanos (`revalidating`, `reuseCached`) se colapsaron en
+`CatalogPass = "cold" | "refresh" | "partial-refresh"`: reusar en un pase que cuenta no se puede ni escribir. El
+dispatch por reuso y su `resolved += 1` se borraron con eso. **Sin RED:** el dispatch ya estaba detrás de
+`!revalidating`, o sea inalcanzable —esa era la queja de la review— y el worker lo probó por mutación: reponerlo sin
+guarda produce un frame que cuenta un reuso (`2 !== 0`). Un test verde antes y después, con mutación como evidencia, es
+más honesto que inventar un rojo.
+
+**`R3-002`: el harness comparte sólo si el test lo pide.** La caché escrita alimentaba la lectura por defecto, que es
+comportamiento real y lo que hace observable la promoción, pero como default ambiental cualquier test futuro que
+escribiera dos veces leería su propia escritura. Ahora hay `shareWrittenCache`, apagado por defecto. **Un solo test tuvo
+que prenderlo**: el de la promoción, y eso confirma el hallazgo — ese test dependía en silencio del feedback ambiental
+para pasar.
+
+Evidencia: RED propios donde los había (el álbum que el índice no pudo anunciar seguía en la card: `expected /Lo-fi/`
+contra un frame con sólo `▸ Chillhop/`; y el harness alimentando la lectura sin pedirlo: `1 !== 2`), más dos guardas
+declaradas verdes antes y después (retiro con índice entero, y no arrastrar un álbum anunciado cuya página falló).
+`pnpm check` verde: **535 tests / 117 suites** (venía de 530/117), `boundary` intacto, diff de 186 líneas autoradas en
+dos archivos (issue #84, PR de esta rama).

@@ -155,7 +155,13 @@ interface Harness {
 	/** Every frame the host painted, in order: the progress label is a sequence, not a final state (L75). */
 	readonly frames: string[];
 	/** Knobs a test sets before `register` runs, for the paths that only start from a broken file. */
-	readonly options: { warning?: string; catalog?: CatalogScript; cache?: CatalogCache };
+	readonly options: {
+		warning?: string;
+		catalog?: CatalogScript;
+		cache?: CatalogCache;
+		/** Whether a written cache is what the next open reads (R3-002): a promotion is the only test that needs it. */
+		shareWrittenCache?: boolean;
+	};
 	readonly report: (report: PlayerReport) => void;
 	readonly tick: () => void;
 	readonly closed: () => number;
@@ -246,7 +252,12 @@ function harness(editor: Component | null = EDITOR): Harness {
 	const frames: string[] = [];
 	const created = { players: 0 };
 	const now = { value: 1_000 };
-	const options: { warning?: string; catalog?: CatalogScript; cache?: CatalogCache } = {};
+	const options: {
+		warning?: string;
+		catalog?: CatalogScript;
+		cache?: CatalogCache;
+		shareWrittenCache?: boolean;
+	} = {};
 	const reportHandler: (report: PlayerReport) => void = () => {};
 	let tickFn: (() => void) | undefined;
 	let closedCount = 0;
@@ -408,9 +419,10 @@ function register(
 						read: () => h.options.cache,
 						write: (path, cache) => {
 							h.catalogWrites.push({ path, cache });
-							// The fake file behaves like the real one: what a pass wrote is what the next open reads. Without
-							// that feedback a promotion could not be observed, because it is a second read of the same file.
-							h.options.cache = cache;
+							// The fake file returns the write it just took — which is what the real one does, and the only way a
+							// promotion is observable — but only when a test asks: as an ambient default every test that writes
+							// twice reads its own write and can assert something it never proved (R3-002).
+							if (h.options.shareWrittenCache === true) h.options.cache = cache;
 							return true;
 						},
 						// The real TTL rule (L75, R4-001), so "fresh" means what the cache module means by it.
@@ -1860,6 +1872,9 @@ describe("the catalog opens, loads and revalidates (S20, L75)", () => {
 				),
 			readAlbum: albumsOf(),
 		};
+		// The promotion is a second read of the same file: the entry the degraded session wrote has to be the one the
+		// healed session opens, which is the one test that asks the fake file to behave like the real one (R3-002).
+		h.options.shareWrittenCache = true;
 		register(h);
 		await start(h);
 		await open(h);
@@ -1881,6 +1896,136 @@ describe("the catalog opens, loads and revalidates (S20, L75)", () => {
 		);
 		assert.equal(h.catalogWrites.at(-1)?.cache.partial, undefined, "the entry was promoted, so nothing claims a hole");
 		assert.doesNotMatch(frameOf(h), /catalog partly read/, "and a healed list does not keep apologising");
+	});
+
+	it("keeps an album a partial index could not speak for, in the frame and in the file (R4-002)", async () => {
+		// A partial index says "these are the rows I could read", never "these are the albums that exist": the
+		// album whose row went unreadable is exactly the one the index cannot speak for, so a pass that wrote
+		// only what it announced would make that cut survive the session.
+		const h = harness();
+		h.options.catalog = { readIndex: partlyReadOf(), readAlbum: albumsOf() };
+		h.options.cache = cacheOf([listingOf(CHILLHOP), listingOf(LOFI)], h.now.value - 25 * 60 * 60 * 1000);
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.match(frameOf(h), /Lo-fi/, "the album the index could not announce is still on the card");
+		assert.deepEqual(
+			h.catalogWrites.at(-1)?.cache.albums.map((album) => album.slug),
+			[CHILLHOP.slug, LOFI.slug],
+			"and the file keeps it too, after the albums the index did announce",
+		);
+		assert.deepEqual(
+			h.catalogWrites.at(-1)?.cache.albums[1]?.tracks,
+			TRACKS,
+			"with the tracks the entry already held: a kept album is not an empty row",
+		);
+		assert.equal(h.catalogWrites.at(-1)?.cache.partial, true, "still stamped degraded, so the short TTL applies");
+	});
+
+	it("drops an album a whole index no longer announces (R4-002)", async () => {
+		// The other half of the rule, and the reason the merge cannot be satisfied by never shrinking: a removal
+		// the site really made has to disappear as soon as the index is trustworthy, or the card lies about the
+		// catalog by remembering an album nobody can buy.
+		const h = harness();
+		h.options.catalog = { readIndex: indexOf([CHILLHOP]), readAlbum: albumsOf() };
+		h.options.cache = cacheOf([listingOf(CHILLHOP), listingOf(LOFI)], h.now.value - 25 * 60 * 60 * 1000);
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.doesNotMatch(frameOf(h), /Lo-fi/, "a whole index replaces the list outright");
+		assert.deepEqual(
+			h.catalogWrites.at(-1)?.cache.albums.map((album) => album.slug),
+			[CHILLHOP.slug],
+			"and the file it wrote forgets the album the site removed",
+		);
+	});
+
+	it("does not carry an album the index announced but whose page failed (R4-002)", async () => {
+		// The album-level tolerance of L33 is another fact: the index NAMED this album and its page is what
+		// failed, so it stays out of the file exactly as it did before the merge. The merge is about rows the
+		// index could not speak for, never about pages that went missing.
+		const h = harness();
+		h.options.catalog = {
+			readIndex: () => Promise.resolve({ ok: true, value: [CHILLHOP, LOFI], partial: ["album-3"] }),
+			readAlbum: (slug) =>
+				Promise.resolve(slug === CHILLHOP.slug ? { ok: true, value: TRACKS } : { ok: false, failure: "not-found" }),
+		};
+		h.options.cache = cacheOf([listingOf(CHILLHOP), listingOf(LOFI)], h.now.value - 25 * 60 * 60 * 1000);
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.deepEqual(
+			h.catalogCalls.albums,
+			[CHILLHOP.slug, LOFI.slug],
+			"a whole entry is revalidated page by page, so the announced album was asked for",
+		);
+		assert.deepEqual(
+			h.catalogWrites.at(-1)?.cache.albums.map((album) => album.slug),
+			[CHILLHOP.slug],
+			"and the album whose page failed is not carried, even though the entry already had it",
+		);
+	});
+
+	it("counts nothing in a pass that reuses a degraded entry's pages (R3-001)", async () => {
+		// The counter belongs to the cold pass. Reuse reads `catalogListings`, which only a served cache fills, so
+		// a pass that reuses is always the refresh of a served entry — and a refresh says nothing in the footer.
+		const h = harness();
+		h.options.catalog = { readIndex: indexOf([CHILLHOP, LOFI]), readAlbum: albumsOf() };
+		h.options.cache = { ...cacheOf([listingOf(CHILLHOP)], h.now.value - 60_000), partial: true };
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.deepEqual(h.catalogCalls.albums, [LOFI.slug], "the entry's album cost no page");
+		assert.equal(
+			h.frames.filter((frame) => frame.includes("reading catalog")).length,
+			0,
+			"and no frame claims a reused album was counted",
+		);
+		assert.doesNotMatch(frameOf(h), /reading /, "the refresh stays silent while it works (L75)");
+	});
+
+	it("feeds a written cache back to the next read only when a test asks (R3-002)", async () => {
+		// The fake file returning the write it just took is real behaviour, and it is what makes a promotion
+		// observable — but as an ambient default every test that writes twice reads its own write and can assert
+		// something it never proved. So it is a per-test choice.
+		const silent = harness();
+		silent.options.catalog = { readIndex: indexOf([CHILLHOP]), readAlbum: albumsOf() };
+		register(silent);
+		await start(silent);
+		await open(silent);
+		await flush();
+		assert.equal(silent.catalogWrites.length, 1, "the cold pass remembered what it read");
+
+		await silent.handlers.get("session_shutdown")?.(undefined, silent.ctx);
+		await start(silent);
+		await open(silent);
+		await flush();
+
+		assert.equal(silent.catalogCalls.index, 2, "the next session reads the index again: nothing was fed back");
+		assert.match(frameOf(silent), /Chillhop/, "and the cold pass still paints the catalog");
+
+		const fed = harness();
+		fed.options.catalog = { readIndex: indexOf([CHILLHOP]), readAlbum: albumsOf() };
+		fed.options.shareWrittenCache = true;
+		register(fed);
+		await start(fed);
+		await open(fed);
+		await flush();
+		await fed.handlers.get("session_shutdown")?.(undefined, fed.ctx);
+		await start(fed);
+		await open(fed);
+		await flush();
+
+		assert.equal(fed.catalogCalls.index, 1, "opted in, the entry the first session wrote is the second one's opening");
+		assert.deepEqual(fed.catalogCalls.albums, [CHILLHOP.slug], "which costs neither the index nor a page again");
 	});
 
 	it("paints a stale cache first and revalidates it behind the reader's back", async () => {
