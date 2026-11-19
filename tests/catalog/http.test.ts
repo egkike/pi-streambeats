@@ -74,13 +74,38 @@ describe("createCatalogHttp (S20)", () => {
 		assert.deepEqual(await http.readIndex(), { failure: "scrape", ok: false });
 	});
 
-	it("says the scrape failed when the grid was only partly recognized", async () => {
-		// Same rule as an empty grid, one row earlier: a catalog that quietly lost a row would be cached for
-		// 24 h as if the site had shrunk, and nothing downstream could tell the difference.
+	it("serves the albums it did read and carries the unreadable row as data (S20)", async () => {
+		// S20's tolerance is per album: a read fails only when it scraped ZERO albums, so one row the parser
+		// could not read cannot take the whole catalog offline. It does not vanish either — the row's id
+		// travels with the list, because a caller that froze this read into a 24 h cache would be storing a
+		// catalog that looks as if the site had shrunk.
 		const partial = MUSIC.replace('<a href="/album/groovy"', '<a href="/album/groovy?from=grid"');
 		const http = createCatalogHttp({ fetch: fakeFetch([ok(partial)]).fetch });
 
-		assert.deepEqual(await http.readIndex(), { failure: "scrape", ok: false });
+		const result = await http.readIndex();
+
+		assert.equal(result.ok, true, "a partly read grid is still a catalog");
+		assert.deepEqual(
+			result.ok ? result.value.map((album) => album.slug) : [],
+			["better-when-im-high-remix", "electric"],
+			"the albums it did read are served",
+		);
+		assert.deepEqual(result.ok ? result.partial : undefined, ["album-3715402729"], "and the bad row is named");
+	});
+
+	it("carries no partial field at all when the whole grid was read", async () => {
+		// Absent and empty must not be two shapes of the same fact: a fully read index is `partial`-less, so
+		// "is this a degradation?" is one check and not two.
+		const http = createCatalogHttp({ fetch: fakeFetch([ok(MUSIC)]).fetch });
+
+		assert.deepEqual(await http.readIndex(), {
+			ok: true,
+			value: [
+				{ slug: "better-when-im-high-remix", title: "Better When I'm High (Remix)" },
+				{ slug: "electric", title: "Electric" },
+				{ slug: "groovy", title: "Groovy" },
+			],
+		});
 	});
 
 	it("reads one album page into tracks", async () => {

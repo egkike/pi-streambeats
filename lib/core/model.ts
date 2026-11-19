@@ -289,6 +289,11 @@ export type CardEvent =
 	| { readonly kind: "catalog-reading"; readonly label: string }
 	/** The catalog could not be read (S20). The reason picks the message; the card keeps working on local. */
 	| { readonly kind: "catalog-failed"; readonly reason: CatalogFailure }
+	/**
+	 * The catalog was read, but only partly (S20, L90): some index rows could not be parsed. The list is served
+	 * and usable, so this is a degradation and not a failure — the footer says so and names the same retry.
+	 */
+	| { readonly kind: "catalog-partial" }
 	| { readonly kind: "track-ended"; readonly trackId: string }
 	| { readonly kind: "track-failed"; readonly trackId: string }
 	/** The session is shutting down (S6): the shell sends `quit` to mpv. */
@@ -424,6 +429,10 @@ export function reduce(state: CardState, event: CardEvent, deps: ModelDeps = {})
 			// The reason is data and the sentence lives with the other notices, so a failure never becomes an
 			// untranslated provider error on the card (S20).
 			return { state: { ...state, notice: catalogUnavailable(event.reason), reading: undefined }, effects: [] };
+		case "catalog-partial":
+			// The list stays: a partly read index is a catalog with a hole, not a catalog that is gone, so this is
+			// the same shape of sentence as a failure without any of its consequences (S20, L90).
+			return { state: { ...state, notice: CATALOG_PARTIAL, reading: undefined }, effects: [] };
 		case "track-ended":
 			if (state.playing?.id !== event.trackId) return unchanged(state);
 			return advance(state);
@@ -464,6 +473,13 @@ function cannotOpen(title: string): string {
 function catalogUnavailable(reason: CatalogFailure): string {
 	return reason === "not-found" ? "album missing · reopen to retry" : "catalog unavailable · reopen to retry";
 }
+
+/**
+ * A catalog that arrived with a hole in it (S20, L90). The sentence says what happened and names the gesture
+ * that retries it, for the same reason the failures do: the card has one retry, and leaving-and-returning is
+ * the only key it has for it.
+ */
+const CATALOG_PARTIAL = "catalog partly read · reopen to retry";
 
 function unchanged(state: CardState): Reduction {
 	return { state, effects: [] };

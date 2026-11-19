@@ -495,6 +495,18 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			catalogFailed("scrape", revalidating);
 			return;
 		}
+		if (index.partial !== undefined) {
+			// A partly read index is served, never frozen: the albums we could not name are a hole the site may
+			// still have, and a 24 h cache would make it look as if the catalog had shrunk (S20, L90). The pass
+			// still ends normally — the list is up and usable — so the notice comes after the final dispatch that
+			// settles the footer, or it would be cleared by it. The trace names the rows: a degradation the card
+			// reports in one sentence needs a place where the ids survive.
+			debug("catalog partial", index.partial.join(","));
+			// Same scope as a failure: the sentence belongs to the catalog the read was started for, so a reader
+			// who moved to the library meanwhile does not get a catalog sentence in the library's footer.
+			if (state.source === "catalog") dispatch({ kind: "catalog-partial" });
+			return;
+		}
 		writeCatalog(listings);
 	}
 
