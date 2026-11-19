@@ -17,8 +17,10 @@ import {
 	createMpvPlayer,
 	discoverMpv,
 	diskProbe,
+	exitProbe,
 	type MpvDiscovery,
 	type MpvDiscoveryContext,
+	type MpvProbe,
 	type MpvValue,
 	mpvKnownLocations,
 	neverStarted,
@@ -302,6 +304,26 @@ function world(options: {
 function unconfirmed(found: MpvDiscovery): Extract<MpvDiscovery, { ok: false; definitive: false }> {
 	if (found.ok || found.definitive) assert.fail("expected a candidate that exists and did not confirm");
 	return found;
+}
+
+/** The arm of a probe that says the child ran. Asserted, not cast, so a shape regression fails here. */
+function ran(probe: MpvProbe): Extract<MpvProbe, { started: true }> {
+	if (probe.ok || probe.timedOut === true || probe.started === false) assert.fail("expected a run that started");
+	return probe;
+}
+
+/**
+ * A resolver context that hands back one probe, so the sentence the card prints for a fact is reachable here
+ * without executing a binary (S9): the run is the value, not a spawn.
+ */
+function probeContext(probe: MpvProbe): MpvDiscoveryContext {
+	return {
+		platform: "linux",
+		env: {},
+		configured: "/opt/mpv/bin/mpv",
+		exists: () => true,
+		run: () => probe,
+	};
 }
 
 describe("finding mpv (S6)", () => {
@@ -653,6 +675,87 @@ describe("finding mpv (S6)", () => {
 				`${JSON.stringify(error)} is not a start failure`,
 			);
 		}
+	});
+
+	it("maps a `--version` run's exit through one pure function, so the sentence cannot drift from the fact (S6, T43)", () => {
+		// Extraction, same facts as before: status, signal and the child's own words in; the probe out. Pure, so
+		// every case below is reachable from a platform that executes nothing (S9), and `diskProbe` has no second
+		// reading of the same result to drift away from this one.
+		assert.deepEqual(exitProbe(0, null), { ok: true }, "exit 0 is the answer that confirms the binary");
+		assert.deepEqual(
+			exitProbe(2, null),
+			{ ok: false, started: true, answered: true, reason: "exit 2" },
+			"a clean non-zero exit did answer: it answered with an error",
+		);
+		// Pinned on purpose. Marking every exit unanswered would satisfy the defect below and be false here.
+		assert.deepEqual(
+			exitProbe(2, null, "  bad option: --frobnicate\n"),
+			{ ok: false, started: true, answered: true, reason: "exit 2: bad option: --frobnicate" },
+			"the child's own words still travel with a non-zero exit, exactly as they did",
+		);
+
+		const answeredBadly = unconfirmed(discoverMpv(probeContext(exitProbe(2, null))));
+		assert.match(
+			answeredBadly.message,
+			/answered --version with an error \(exit 2\)/,
+			"and the sentence printed for a non-zero exit is the one it printed before the fix",
+		);
+	});
+
+	it("never reports an answer for a `--version` run a signal killed (S6, R4-002, T43)", () => {
+		// A child killed by a signal exits with `status === null` AND no `result.error`, so the error mapping is
+		// never consulted. The run fell into the answered branch and printed "answered --version with an error (no
+		// exit code)" about a process that was killed mid-sentence — the same false claim ENOBUFS made, and the
+		// reason it has to be a fact and not a guess: nothing answered, so nothing may be reported as answered.
+		const found = unconfirmed(discoverMpv(probeContext(exitProbe(null, "SIGKILL"))));
+
+		assert.doesNotMatch(found.message, /answered --version with an error/, "nothing answered: it was killed");
+		assert.match(found.message, /ran --version/, "the child did run, so the sentence may say so");
+		assert.match(found.message, /killed by SIGKILL/, "the reason names the signal that ended it");
+		assert.equal(found.cause, "error", "the consequence is the same inconclusive one: it will still be tried");
+		assert.equal(found.command, "/opt/mpv/bin/mpv", "and the player still gets the candidate to try");
+
+		const probe = ran(exitProbe(null, "SIGKILL"));
+		assert.equal(probe.answered, false, "a run with no exit status produced no answer fact");
+	});
+
+	it("says plainly when a run ended with neither an exit code nor a signal name (S6, T43)", () => {
+		// The honest version of the same branch: `status: null` with no signal name proves only that no exit
+		// status arrived. A sentence that invented a cause here would be the same defect with better manners.
+		const found = unconfirmed(discoverMpv(probeContext(exitProbe(null, null))));
+
+		assert.doesNotMatch(found.message, /answered --version with an error/, "no answer reached us, so none is reported");
+		assert.match(found.message, /no exit code and no signal/, "the reason says what is known and stops there");
+		assert.doesNotMatch(found.message, /SIG[A-Z]+/, "no signal is named, because none was reported");
+
+		const probe = ran(exitProbe(null, null));
+		assert.equal(probe.answered, false, "no signal name does not turn a missing answer into one");
+	});
+
+	it("keeps the four facts as four sentences, with the timeout and the never-started arms untouched (S6, T43)", () => {
+		// Triangulation for the fix above: a killed run is neither the budget running out nor the OS refusing to
+		// execute it, so the fix cannot be satisfied by collapsing every failure into one arm, and it may not add
+		// a fifth sentence for a fact the resolver already knew how to print.
+		const answered = unconfirmed(discoverMpv(probeContext(exitProbe(2, null))));
+		const killed = unconfirmed(discoverMpv(probeContext(exitProbe(null, "SIGTERM"))));
+		const silent = unconfirmed(discoverMpv(probeContext({ ok: false, timedOut: true })));
+		const unstarted = unconfirmed(discoverMpv(probeContext({ ok: false, started: false, reason: "spawn mpv ENOENT" })));
+
+		assert.equal(
+			new Set([answered.message, killed.message, silent.message, unstarted.message]).size,
+			4,
+			"four facts, four sentences",
+		);
+		assert.equal(silent.cause, "timeout", "ETIMEDOUT is still its own fact");
+		assert.match(silent.message, /within 2 s/, "and keeps its own sentence");
+		assert.match(unstarted.message, /could not be started/, "and the OS refusing to execute keeps its own");
+		assert.doesNotMatch(killed.message, /within 2 s/, "a kill is not the budget running out");
+		assert.doesNotMatch(killed.message, /could not be started/, "and the child did run");
+		assert.notEqual(
+			ran(exitProbe(null, "SIGTERM")).reason,
+			ran(exitProbe(null, null)).reason,
+			"signal or no signal is a fact, so it is not one reason",
+		);
 	});
 
 	it("covers the arm where `spawnSync` itself throws: no child was created, so nothing started (R3-002)", () => {
