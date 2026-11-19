@@ -9,8 +9,14 @@ const ROOT = resolve(HERE, "../..");
 const PROBE = join(ROOT, "scripts/ipc-probe.mjs");
 const FAKE_MPV = join(HERE, "fake-mpv-events.mjs");
 
-/** The probe speaks unix sockets on this side of the fence; a named pipe is T12's job. */
-const unix = process.platform !== "win32";
+/**
+ * The probe itself is portable: it takes the transport from the platform it runs on (S19) — a unix socket on Linux
+ * and macOS, a named pipe on Windows — and the fake mpv listens on whatever target it is handed. What Windows cannot
+ * do is execute `fake-mpv-events.mjs` as *the mpv command*: the probe's argument is one command, and `spawn` without
+ * a shell returns `EFTYPE` for a script, because there is no shebang support there. A real mpv is an `.exe` (L101).
+ */
+const scriptAsCommand =
+	process.platform === "win32" ? "Windows cannot execute a .mjs script as the mpv command" : false;
 
 interface ProbeRun {
 	readonly code: number | null;
@@ -46,7 +52,7 @@ function runProbe(): Promise<ProbeRun> {
 	});
 }
 
-describe("the transport probe (S6)", { skip: unix ? false : "unix sockets only" }, () => {
+describe("the transport probe (S6)", { skip: scriptAsCommand }, () => {
 	it("ignores an event that arrives before the reply, and still completes the round-trip", async () => {
 		// mpv sends events down the same stream as replies. Treating `{"event":"idle"}` as an answer turned
 		// a healthy transport into a red `gate` on macOS (#40): the probe must match the reply by

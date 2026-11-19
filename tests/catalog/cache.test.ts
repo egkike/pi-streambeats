@@ -86,8 +86,12 @@ describe("writeCatalogCache and readCatalogCache (S20)", () => {
 
 			assert.equal(writeCatalogCache(path, cache), true);
 			assert.deepEqual(readCatalogCache(path), cache);
-			assert.equal(statSync(path).mode & 0o777, 0o600, "the cache must not be world readable");
-			assert.equal(statSync(join(dir, "pi-streambeats")).mode & 0o777, 0o750);
+			// Windows reports ACLs instead of POSIX permission bits (it shows 0o666 for a file its owner created),
+			// so the privacy of the cache is a promise to keep only where the OS has a bit to set (L101).
+			if (process.platform !== "win32") {
+				assert.equal(statSync(path).mode & 0o777, 0o600, "the cache must not be world readable");
+				assert.equal(statSync(join(dir, "pi-streambeats")).mode & 0o777, 0o750);
+			}
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
