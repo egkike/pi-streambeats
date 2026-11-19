@@ -7,7 +7,8 @@
  * to be able to open, so nothing here throws at its caller.
  *
  * The TTL lives here as one constant and one predicate because L75 decided it once: a warm cache does
- * not touch the network, and 24 h is when it stops being warm.
+ * not touch the network, and 24 h is when it stops being warm. A degraded entry is the one exception and it
+ * is still this module's rule: it gets a short window and is not trusted while it is young (R4-001).
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -17,6 +18,13 @@ import type { CatalogAlbumListing, CatalogCache, CatalogTrack } from "../types.t
 
 /** L75: revalidated in the background after a day. The catalog changes when StreamBeats publishes. */
 export const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * R4-001: a degraded entry lives 45 minutes, not a day. Long enough to save the repeat download across the
+ * opens of a working session, short enough that a shrunken list cannot survive a working day if the network
+ * never comes back. A whole entry that replaced it is back on the rule above the moment it is written.
+ */
+export const CATALOG_PARTIAL_TTL_MS = 45 * 60 * 1000;
 
 function pathFor(platform: SettingsContext["platform"]) {
 	return platform === "win32" ? win32 : posix;
@@ -83,10 +91,14 @@ function albumOf(value: unknown): CatalogAlbumListing | undefined {
  */
 function cacheOf(value: unknown): CatalogCache | undefined {
 	if (!isRecord(value)) return undefined;
-	const { version, fetchedAt, albums } = value;
+	const { version, fetchedAt, albums, partial } = value;
 	if (version !== 1) return undefined;
 	if (typeof fetchedAt !== "number" || !Number.isFinite(fetchedAt)) return undefined;
 	if (!Array.isArray(albums)) return undefined;
+	// A degradation is the only thing this field may say, and it says it by being `true`: anything else — a
+	// `false` claiming a whole read, a `1`, a string — is a file edited to a shape the writer never produced,
+	// and an entry whose TTL depends on the answer is not one to half trust.
+	if (partial !== undefined && partial !== true) return undefined;
 
 	const parsed: CatalogAlbumListing[] = [];
 	for (const album of albums) {
@@ -95,7 +107,10 @@ function cacheOf(value: unknown): CatalogCache | undefined {
 		parsed.push(listing);
 	}
 
-	return { version: 1, fetchedAt, albums: parsed };
+	// The key is omitted rather than set to `false`, so what a whole pass wrote reads back as what it wrote.
+	return partial === true
+		? { version: 1, fetchedAt, albums: parsed, partial: true }
+		: { version: 1, fetchedAt, albums: parsed };
 }
 
 /** The cached catalog, or `undefined` when it is absent, unreadable, malformed or from another version. */
@@ -149,10 +164,15 @@ export function writeCatalogCache(path: string, cache: CatalogCache): boolean {
 }
 
 /**
- * Whether the cache is still worth trusting (L75). A stamp in the future is stale: a clock that went
+ * Whether the cache is still worth trusting (L75, R4-001). A stamp in the future is stale: a clock that went
  * backwards is not evidence that the catalog is fresh.
+ *
+ * The TTL is chosen here and nowhere else, because it is a policy about the file and not about a caller: a
+ * degraded entry gets the short window, a whole one the full day. An explicit TTL still wins, so the window
+ * stays one rule the tests can move instead of a constant they would have to wait for.
  */
-export function isCatalogFresh(cache: CatalogCache, now: number, ttlMs: number = CATALOG_TTL_MS): boolean {
+export function isCatalogFresh(cache: CatalogCache, now: number, ttlMs?: number): boolean {
+	const ttl = ttlMs ?? (cache.partial === true ? CATALOG_PARTIAL_TTL_MS : CATALOG_TTL_MS);
 	const age = now - cache.fetchedAt;
-	return age >= 0 && age < ttlMs;
+	return age >= 0 && age < ttl;
 }

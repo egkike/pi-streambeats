@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import {
+	CATALOG_PARTIAL_TTL_MS,
 	CATALOG_TTL_MS,
 	catalogCachePath,
 	isCatalogFresh,
@@ -226,6 +227,75 @@ describe("isCatalogFresh (S20, L75)", () => {
 
 	it("treats a cache stamped in the future as stale, because a clock that went back is not evidence", () => {
 		assert.equal(isCatalogFresh(sampleCache(fetched + 60_000), fetched), false);
+	});
+});
+
+describe("a degraded entry gets a short life (R4-001)", () => {
+	const fetched = 1_000_000_000_000;
+
+	it("is fresh for 45 minutes when the entry is partial, and for a day when it is whole", () => {
+		// 45 minutes: long enough to save the repeat download across the opens of a working session, short enough
+		// that a shrunken list cannot survive a working day if the network never comes back.
+		assert.equal(CATALOG_PARTIAL_TTL_MS, 45 * 60 * 1000);
+		const partial: CatalogCache = { ...sampleCache(fetched), partial: true };
+
+		assert.equal(isCatalogFresh(partial, fetched + CATALOG_PARTIAL_TTL_MS - 1), true);
+		assert.equal(isCatalogFresh(partial, fetched + CATALOG_PARTIAL_TTL_MS), false);
+		// The same stamp on a whole entry is still young: the short clock belongs to the degradation, not to age.
+		assert.equal(isCatalogFresh(sampleCache(fetched), fetched + CATALOG_PARTIAL_TTL_MS), true);
+		assert.equal(isCatalogFresh(sampleCache(fetched), fetched + CATALOG_TTL_MS - 1), true);
+	});
+
+	it("lets an explicit TTL win over the one the entry would have chosen", () => {
+		// The parameter exists so a caller that knows better can say so, and the tests use it to age a cache
+		// without waiting: a rule that ignored it would silently move every measured window.
+		const partial: CatalogCache = { ...sampleCache(fetched), partial: true };
+
+		assert.equal(isCatalogFresh(partial, fetched + 60_000, 30_000), false);
+		assert.equal(isCatalogFresh(partial, fetched + 60_000, CATALOG_TTL_MS), true);
+		assert.equal(isCatalogFresh(sampleCache(fetched), fetched + 60_000, 30_000), false);
+	});
+
+	it("round-trips the stamp in both directions, and a whole entry says nothing rather than false", () => {
+		const dir = scratch();
+		try {
+			const partialPath = join(dir, "partial.json");
+			const partial: CatalogCache = { ...sampleCache(5), partial: true };
+			assert.equal(writeCatalogCache(partialPath, partial), true);
+			assert.deepEqual(readCatalogCache(partialPath), partial);
+
+			const wholePath = join(dir, "whole.json");
+			assert.equal(writeCatalogCache(wholePath, sampleCache(5)), true);
+			const whole = readCatalogCache(wholePath);
+			assert.deepEqual(whole, sampleCache(5));
+			assert.equal(
+				whole !== undefined && "partial" in whole,
+				false,
+				"absent and false cannot be two shapes of one fact",
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("treats a partial written as anything but true as a missing cache, like a wrong version", () => {
+		// The field is a fact about the read that filled the file, not a boolean to be edited: `false`, `1`,
+		// `"true"` and `null` are all someone else's idea of it, and the file is then simply not a cache.
+		const dir = scratch();
+		try {
+			for (const partial of [false, 1, 0, "true", null]) {
+				const path = join(dir, `partial-${String(partial)}.json`);
+				writeFileSync(path, JSON.stringify({ ...sampleCache(5), partial }));
+
+				assert.equal(
+					readCatalogCache(path),
+					undefined,
+					`partial ${JSON.stringify(partial)} is not a fact about a read`,
+				);
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

@@ -387,6 +387,8 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	 *
 	 * - **A warm cache is the whole opening**: the list is painted from `catalog.json` and no socket is opened,
 	 *   not even in the background.
+	 * - **A degraded entry is painted and revalidated anyway**, even inside its short TTL (R4-001): a shrunken
+	 *   list has to heal on its own, and the only way to find the row that could not be read is the index.
 	 * - **A stale cache is still a listing**: it is painted first and revalidated behind the reader's back.
 	 * - **Cold with a network**: the frame paints and the read starts — the index first, then every album — so
 	 *   the list grows instead of leaving twenty seconds of blank.
@@ -401,7 +403,9 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		const store = deps.catalogCache;
 		const cache = path === undefined ? undefined : store?.read(path);
 
-		if (cache !== undefined && store?.isFresh(cache, clock())) {
+		// Only a **whole** entry inside its TTL is the opening that costs nothing: a degraded one is served too,
+		// but the index is read again because the album a row was pointing at cannot be asked for by name.
+		if (cache !== undefined && cache.partial !== true && store?.isFresh(cache, clock())) {
 			catalogLoaded = true;
 			serveCache(cache);
 			return;
@@ -414,13 +418,13 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			// asked, and nothing is said while it works (L75).
 			catalogLoaded = true;
 			serveCache(cache);
-			void readCatalog(token, true);
+			void readCatalog(token, true, cache.partial === true);
 			return;
 		}
 		// The message has two forms because the total does not exist until the index is parsed (L75): the
 		// footer starts without it and only then can it say `3 of 12`.
 		dispatch({ kind: "catalog-reading", label: "catalog…" });
-		void readCatalog(token, false);
+		void readCatalog(token, false, false);
 	}
 
 	/** Paint from the cache, and remember its albums for the moments they are entered (S20). */
@@ -430,13 +434,15 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	}
 
 	/**
-	 * One pass over the catalog: the index and then every album, in index order. `revalidating` is the
-	 * background refresh of a served cache, which says nothing in the footer while it works (L75).
+	 * One pass over the catalog: the index and then the albums it announces, in index order. `revalidating` is
+	 * the background refresh of a served cache, which says nothing in the footer while it works (L75).
+	 * `reuseCached` is on only when the entry being refreshed was degraded — the one read allowed to skip an
+	 * album page instead of downloading it again (R4-001).
 	 *
 	 * Every answer is checked against the pass token before it touches the state, and a pass that lost its
 	 * race writes nothing — the same discipline T21 established for folder reads, applied to the network.
 	 */
-	async function readCatalog(token: number, revalidating: boolean): Promise<void> {
+	async function readCatalog(token: number, revalidating: boolean, reuseCached: boolean): Promise<void> {
 		const reader = deps.catalog;
 		if (!reader) return;
 
@@ -464,6 +470,22 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		const listings: CatalogAlbumListing[] = [];
 		let resolved = 0;
 		for (const album of index.value) {
+			const known = catalogListings.get(album.slug);
+			// Reuse is a **degraded-entry** rule, never a general one. A degraded read may skip a page because that
+			// is its whole reason to exist: the row it lost cannot be asked for by name, so the index is all it has.
+			// A whole stale entry must download them again — a track added to an album that already existed is only
+			// discoverable on its page, and reusing would freeze that album's track list for good (R4-001).
+			if (known && reuseCached) {
+				// The title comes from the index: it is free and fresher than the copy the cache froze.
+				const reused: CatalogAlbumListing = { slug: album.slug, title: album.title, tracks: known.tracks };
+				catalogListings.set(album.slug, reused);
+				listings.push(reused);
+				// Counted at once, so the counter says what is true: this album is resolved, nobody waits on it.
+				resolved += 1;
+				if (!revalidating) dispatch({ kind: "catalog-reading", label: catalogProgress(resolved, total) });
+				continue;
+			}
+
 			let page: CatalogResult<readonly CatalogTrack[]>;
 			try {
 				page = await reader.readAlbum(album.slug);
@@ -495,19 +517,21 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			catalogFailed("scrape", revalidating);
 			return;
 		}
-		if (index.partial !== undefined) {
-			// A partly read index is served, never frozen: the albums we could not name are a hole the site may
-			// still have, and a 24 h cache would make it look as if the catalog had shrunk (S20, L90). The pass
-			// still ends normally — the list is up and usable — so the notice comes after the final dispatch that
-			// settles the footer, or it would be cleared by it. The trace names the rows: a degradation the card
-			// reports in one sentence needs a place where the ids survive.
-			debug("catalog partial", index.partial.join(","));
+		const unreadable = index.partial;
+		if (unreadable !== undefined) {
+			// A partly read index is served and remembered under the short TTL (R4-001). The pass ends normally —
+			// the list is up and usable — so the notice comes after the final dispatch that settles the footer,
+			// or it would be cleared by it. The trace names the rows: a degradation the card reports in one
+			// sentence needs a place where the ids survive.
+			debug("catalog partial", unreadable.join(","));
 			// Same scope as a failure: the sentence belongs to the catalog the read was started for, so a reader
 			// who moved to the library meanwhile does not get a catalog sentence in the library's footer.
 			if (state.source === "catalog") dispatch({ kind: "catalog-partial" });
-			return;
 		}
-		writeCatalog(listings);
+		// Every pass that finished is written (R4-001): a degradation is a hole in the index, not a reason to make
+		// the next open pay for the whole catalog again. A whole index promotes the entry — no stamp — so the day
+		// is back the moment the site heals, and the apology goes with the stamp.
+		writeCatalog(listings, unreadable !== undefined);
 	}
 
 	/**
@@ -539,12 +563,19 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		dispatch({ kind: "catalog-failed", reason });
 	}
 
-	/** The metadata cache, written once per finished pass (S20). A write that fails is not news: it is a cold start. */
-	function writeCatalog(listings: readonly CatalogAlbumListing[]): void {
+	/**
+	 * The metadata cache, written for every pass that finished (S20, R4-001). A write that fails is not news: it
+	 * is a cold start. `partial` stamps a degraded pass and nothing else — the field is written only when it is
+	 * true, because a whole pass that said `false` would be a second shape for the same fact.
+	 */
+	function writeCatalog(listings: readonly CatalogAlbumListing[], partial: boolean): void {
 		const store = deps.catalogCache;
 		const path = deps.catalogCachePath;
 		if (store === undefined || path === undefined) return;
-		store.write(path, { version: 1, fetchedAt: clock(), albums: listings });
+		const cache: CatalogCache = partial
+			? { version: 1, fetchedAt: clock(), albums: listings, partial: true }
+			: { version: 1, fetchedAt: clock(), albums: listings };
+		store.write(path, cache);
 	}
 
 	/**
