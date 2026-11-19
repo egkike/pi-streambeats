@@ -341,6 +341,7 @@ Requisitos, todos verificables:
 | T40 | S6, S19 | `R4-002` + `R4-003` + `R3-002` de la review de T12.1: el aviso de falla se anunciaba y no se hacía cumplir, el techo de 2 s producía falsos negativos que contradecían ese aviso, y un `mpvPath` relativo resolvía contra el cwd | worker | **hecho** — definitivo se rechaza y se cumple, inconcluso se avisa y se intenta, y el `mpvPath` debe ser absoluto en el flavour de su plataforma (L97) | `L97` |
 | T41 | S6, S19 | Los tres hallazgos que quedaron sólo en los PRs: `isBareName` aceptaba una ruta drive-relative de Windows (`C:mpv.exe`), que sí depende del cwd; la rama `error` de `confirm()` decía «respondió con error» también cuando el binario no llegó a arrancar; y un nombre pelado configurado sugería que se había encontrado un candidato | worker | **hecho** — el designador de unidad descalifica el nombre pelado, `started` es un discriminador requerido y las tres frases dicen sólo lo que se sabe (L98) | `L98` |
 | T42 | S6 | `R4-002` + `R3-002` de la review de T41: `started: false` se aplicaba a **todo** error de `spawnSync` salvo `ETIMEDOUT`, incluidos los que ocurren después de que el hijo arrancó (`ENOBUFS`), así que la frase decía «no llegó a arrancar» cuando sí arrancó; y la rama `catch` no tenía test | worker | **hecho** — el mapeo código→hecho es puro y probado, la cuarta frase dice la verdad, y `answered` es un campo requerido (L99) | `L99` |
+| T43 | S6 | Los dos `R4`/`R3` de la review de T42 sobre el mismo hecho: un `--version` **matado por una señal** tenía `status null` y ningún `result.error`, así que caía en la rama de «respondió» e imprimía «answered --version with an error (no exit code)». El tercer hallazgo —`answered` requerido rompería productores fuera de los cuatro archivos— **no lleva código**: `tsc -p .` compila todo el proyecto y no hay ninguno | worker | **hecho** — `exitProbe` es puro, `status null` es «corrió y la respuesta no llegó», y el cableado tiene una sola lectura (L100) | `L100` |
 | T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | pendiente — va después de T12; alcance confirmado por el dueño en L95 | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
@@ -2399,3 +2400,32 @@ misma frase, con otro hecho detrás, y merece su propio test.
 
 Queda **T12b** como lo único pendiente de Windows, con el inventario exacto: 9 suites, 19 subtests, cinco familias y 51
 subtests que hoy no corren.
+
+L100 (T43: el último brazo de la misma familia). Pedido del dueño, verbatim: **"Listo el merge. Luego haz el arreglo de los
+tres hallazgos"**. Los tres ids eran **dos hechos**: el caso de la señal —reportado por las dos lentes— y la advertencia de
+que `answered` requerido rompería productores fuera de los cuatro archivos.
+
+**El caso de la señal, arreglado.** Un `--version` matado por una señal sale con `status === null` y **ningún**
+`result.error`, así que caía en la rama de «respondió» e imprimía `answered --version with an error (no exit code)`: la
+misma afirmación falsa que T42 arregló para `ENOBUFS`, con otro disparador. Ahora el mapeo **salida→hecho** es una función
+pura (`exitProbe`), al lado del mapeo de error, y `diskProbe` tiene **una sola lectura** de su resultado: `result.error` va a
+`spawnErrorProbe`, todo lo demás a `exitProbe`. `status null` es «corrió y la respuesta no llegó», con la señal nombrada en
+el paréntesis; salida 0 sigue `ok`; salida distinta de cero sigue siendo «respondió con error».
+
+**El tercer hallazgo no lleva código, y la razón es verificable.** Decía que hacer `answered` requerido rompería
+productores de `MpvProbe` fuera de los cuatro archivos tocados. `tsc -p .` typechequea **todo el proyecto** dentro del gate
+y pasa: no hay ninguno. Disposición escrita, no tarea.
+
+Evidencia: `pnpm check` verde con **577 tests / 120 suites** (venían 573/120). El RED #2 capturó la frase falsa **literal**,
+carácter por carácter, antes del arreglo; y la triangulación que evita el atajo opuesto es que una salida distinta de cero
+**sigue** dando «respondió con error» con la misma frase, pinneada.
+
+**Límites declarados.** El cableado en sí no tiene test —probarlo exigiría ejecutar un binario— y se cubre con la lectura de
+las dos líneas más el test existente que alcanza el brazo vecino. El caso matado **reutiliza la cuarta frase** («corrió pero
+su respuesta no llegó») y sólo el paréntesis distingue la causa: es verdadera, pero una quinta frase leería mejor; quedó
+fuera de alcance por pedido explícito de cuatro. Y `status null` con stderr no vacío compone `killed by SIGTERM: <stderr>`,
+que no tiene test directo porque matar un proceso no se puede desde un test.
+
+**Y acá se cierra `lib/player/mpv.ts`**, como quedó acordado: nueve unidades hoy sobre el mismo archivo. Lo que venga de la
+review de esta unidad, si es no bloqueante, va a fila con disparador. El próximo trabajo es **T12b**, que es lo único que
+convierte «Windows soportado» en algo afirmable y destraba T35 y el hub.

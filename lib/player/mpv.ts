@@ -224,6 +224,31 @@ export function spawnErrorProbe(error: SpawnError): Exclude<MpvProbe, { readonly
 	return { ok: false, started: true, answered: false, reason: error.message };
 }
 
+/**
+ * What the exit of a `--version` run proves, as the probe the resolver reads (S6, T43). Pure and exported for the
+ * reason the error mapping is: a run that ended without an exit status is the case the wiring got wrong, so it has
+ * to be reachable from a platform that executes nothing.
+ *
+ * `status: number | null` and `signal: string | null` are the two fields `spawnSync` reports about how the child
+ * ended, and they are the only reading of that result: `diskProbe` decides nothing on its own.
+ *
+ * `status: null` means the run produced **no exit status**, which is a fact about how it ended and none about an
+ * answer. A signal is the usual cause — a killed child never exits — but the kill is not what decides the shape:
+ * the missing status is. So this arm is the same "it ran and nothing came back" family the lost `--version` output
+ * belongs to, and `reason` carries the signal when one was reported. With no signal name either, the sentence says
+ * only that, because a cause invented here would be the same false diagnostic in better clothes.
+ */
+export function exitProbe(status: number | null, signal: string | null, stderr = ""): MpvProbe {
+	const detail = stderr.trim();
+	const tail = detail ? `: ${detail}` : "";
+	if (status === null) {
+		const how = signal === null ? "ended with no exit code and no signal name" : `killed by ${signal}`;
+		return { ok: false, started: true, answered: false, reason: `${how}${tail}` };
+	}
+	if (status === 0) return { ok: true };
+	return { ok: false, started: true, answered: true, reason: `exit ${String(status)}${tail}` };
+}
+
 export interface MpvDiscoveryContext {
 	readonly platform: Platform;
 	readonly env: Readonly<Record<string, string | undefined>>;
@@ -450,12 +475,8 @@ export const diskProbe: Pick<MpvDiscoveryContext, "exists" | "run"> = {
 				encoding: "utf8",
 			});
 			if (result.error) return spawnErrorProbe(result.error);
-			if (result.status !== 0) {
-				const detail = (result.stderr ?? "").trim();
-				const code = result.status === null ? "no exit code" : `exit ${String(result.status)}`;
-				return { ok: false, started: true, answered: true, reason: detail ? `${code}: ${detail}` : code };
-			}
-			return { ok: true };
+			// No second reading of the result here: how the child ended is `exitProbe`'s fact (T43).
+			return exitProbe(result.status, result.signal, result.stderr ?? "");
 		} catch (error) {
 			// `spawnSync` throwing means it never got as far as creating a child — it refuses its arguments before it
 			// forks — so it did not answer either: this is a start failure by construction (R3-002, T42).
