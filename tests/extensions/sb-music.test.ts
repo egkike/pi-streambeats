@@ -453,7 +453,10 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 			const h = host();
 			sbMusic(h.pi, {
 				fetch: catalogFetch,
-				probe: { exists: () => true, run: () => ({ ok: false, started: true, reason: "mpv printed no version" }) },
+				probe: {
+					exists: () => true,
+					run: () => ({ ok: false, started: true, answered: true, reason: "mpv printed no version" }),
+				},
 			});
 			try {
 				await command(h, "");

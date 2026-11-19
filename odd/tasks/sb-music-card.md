@@ -340,6 +340,7 @@ Requisitos, todos verificables:
 | T12 | S19, S6 | **Rebanada 1**: descubrimiento de mpv fuera del PATH (candidatos, clave `mpvPath`, confirmación por `--version`) e identidad del pipe en Windows (sufijo aleatorio en vez del `uid` que ahí no existe) | worker | **hecho** — 625 líneas autoradas, publicada como un solo PR con `size:exception` (L96) | `L96` |
 | T40 | S6, S19 | `R4-002` + `R4-003` + `R3-002` de la review de T12.1: el aviso de falla se anunciaba y no se hacía cumplir, el techo de 2 s producía falsos negativos que contradecían ese aviso, y un `mpvPath` relativo resolvía contra el cwd | worker | **hecho** — definitivo se rechaza y se cumple, inconcluso se avisa y se intenta, y el `mpvPath` debe ser absoluto en el flavour de su plataforma (L97) | `L97` |
 | T41 | S6, S19 | Los tres hallazgos que quedaron sólo en los PRs: `isBareName` aceptaba una ruta drive-relative de Windows (`C:mpv.exe`), que sí depende del cwd; la rama `error` de `confirm()` decía «respondió con error» también cuando el binario no llegó a arrancar; y un nombre pelado configurado sugería que se había encontrado un candidato | worker | **hecho** — el designador de unidad descalifica el nombre pelado, `started` es un discriminador requerido y las tres frases dicen sólo lo que se sabe (L98) | `L98` |
+| T42 | S6 | `R4-002` + `R3-002` de la review de T41: `started: false` se aplicaba a **todo** error de `spawnSync` salvo `ETIMEDOUT`, incluidos los que ocurren después de que el hijo arrancó (`ENOBUFS`), así que la frase decía «no llegó a arrancar» cuando sí arrancó; y la rama `catch` no tenía test | worker | **hecho** — el mapeo código→hecho es puro y probado, la cuarta frase dice la verdad, y `answered` es un campo requerido (L99) | `L99` |
 | T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | pendiente — va después de T12; alcance confirmado por el dueño en L95 | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
@@ -2364,3 +2365,37 @@ cadena está cubierta en el resolver.
 Pendiente de T12b, en dos rebanadas: (2a) portar los 16 fallos de la línea base y saltear con razón verdadera lo que el SO
 hace imposible; (2b) un fake de mpv por named pipe para que los diez suites del player corran en win32 en vez de saltearse.
 La verificación de las dos es la suite entera corriendo en la VM.
+
+L99 (T42: el brazo del sondeo que nadie podía observar). Pedido del dueño, verbatim: **"Listo el merge. Luego arregla primero
+los R4-002 y R3-002 como micro-unidad. Te parece bien?"**. Sí, y la razón es que era una **frase falsa** dentro de la unidad
+que se llamó justamente «ninguna frase puede afirmar lo que no pasó».
+
+**El defecto.** `diskProbe.run` mandaba **todo** error de `spawnSync` a `started: false`, salvo `ETIMEDOUT`. Pero Node
+también reporta errores que ocurren **después** del arranque: `ENOBUFS`, cuando la salida excede `maxBuffer`. Ahí la card
+decía «no llegó a arrancar y nunca respondió» sobre un binario que sí corrió. El arreglo no es adivinar mejor: sólo los
+códigos que significan que el SO **no lo ejecutó** (`ENOENT`, `EACCES`, `EISDIR`, `ENOTDIR`, `ELOOP`, `ENOEXEC`) son
+`started: false`; cualquier otro es «corrió y no obtuvimos respuesta», con frase propia.
+
+**La forma, no la prosa.** El mapeo quedó en dos funciones **puras** (`neverStarted`, `spawnErrorProbe`) que se prueban
+desde Linux sin ejecutar nada, y `diskProbe` las usa como **única** interpretación de `result.error`. Eso cierra también
+`R3-002`: la rama `catch` deja de ser el único brazo sin cubrir, porque un `throw` significa que no hubo fork.
+
+**Un invariante que hice total, y es mío.** El worker dejó `answered: false` como **forma aparte** en vez de campo
+requerido, porque forzarlo tocaba un archivo fuera de sus superficies. Lo cerré yo: `answered` es ahora un **booleano
+requerido** de la forma `started: true`, así que el compilador obliga a todo productor a decir si llegó una respuesta. La
+diferencia importa: con la marca, un productor olvidadizo podía imprimir la frase de «respondió con error» para una salida
+que nunca llegó — el mismo diagnóstico falso que este brazo existe para impedir. Costó una línea en un stub de test.
+
+Evidencia: `pnpm check` verde con **573 tests / 120 suites** (venían 569/120). RED propios: el export faltante, la prosa
+(`ENOBUFS` imprimía «answered --version with an error»), y dos **por mutación** declaradas como tales —el cableado de
+`spawnErrorProbe` y la rama `catch`, que no tenían rojo natural porque su comportamiento ya era correcto y sólo estaban sin
+probar—. Cuatro frases ahora, una por hecho: no contestó a tiempo · contestó con error · corrió pero la respuesta no llegó ·
+no llegó a arrancar.
+
+**Un caso de la misma familia queda sin arreglar, y se dice:** un `--version` **matado por una señal** tiene `status null` y
+**ningún** `result.error`, así que cae en la rama de «respondió» e imprime «answered --version with an error (no exit code)»
+— la misma afirmación falsa con otro disparador. El worker lo marcó en vez de ensanchar el diff, y hago lo mismo: es la
+misma frase, con otro hecho detrás, y merece su propio test.
+
+Queda **T12b** como lo único pendiente de Windows, con el inventario exacto: 9 suites, 19 subtests, cinco familias y 51
+subtests que hoy no corren.

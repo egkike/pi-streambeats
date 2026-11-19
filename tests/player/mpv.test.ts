@@ -16,15 +16,19 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	createMpvPlayer,
 	discoverMpv,
+	diskProbe,
 	type MpvDiscovery,
 	type MpvDiscoveryContext,
 	type MpvValue,
 	mpvKnownLocations,
+	neverStarted,
 	type Player,
 	type PlayerDeps,
 	type PlayerReport,
+	type SpawnError,
 	type SpawnedProcess,
 	type SpawnOptions,
+	spawnErrorProbe,
 } from "../../lib/player/mpv.ts";
 import type { Track } from "../../lib/types.ts";
 
@@ -260,6 +264,8 @@ function world(options: {
 	readonly silent?: readonly string[];
 	/** Candidates the OS never executed — `ENOENT`, a directory, no execute bit — so nothing answered (T41). */
 	readonly unstartable?: readonly string[];
+	/** Candidates that ran and whose answer was lost — `ENOBUFS` past `maxBuffer` — so nothing came back (T42). */
+	readonly lostAnswer?: readonly string[];
 	readonly configured?: string;
 	readonly platform?: "linux" | "darwin" | "win32";
 	readonly path?: string;
@@ -280,7 +286,10 @@ function world(options: {
 				if ((options.unstartable ?? []).includes(command)) {
 					return { ok: false, started: false, reason: `spawn ${command} ENOENT` };
 				}
-				return { ok: false, started: true, reason: `${command} printed no version` };
+				if ((options.lostAnswer ?? []).includes(command)) {
+					return { ok: false, started: true, answered: false, reason: `spawnSync ENOBUFS: ${command} ran` };
+				}
+				return { ok: false, started: true, answered: true, reason: `${command} printed no version` };
 			},
 		},
 	};
@@ -560,6 +569,115 @@ describe("finding mpv (S6)", () => {
 		// third state nobody can act on differently.
 		assert.equal(neverRan.cause, "error");
 		assert.equal(neverRan.command, "/opt/mpv/bin/mpv", "and the player still gets the candidate to try");
+	});
+
+	it("does not report a start failure for an error only a running child can produce (R4-002, T42)", () => {
+		// `ENOBUFS` is what `spawnSync` reports when the child's output passed `maxBuffer`, and passing it requires
+		// the child to exist: the binary ran and its answer was lost. That is neither "never started" nor
+		// "answered with an error", and collapsing it into either puts words in the mouth of a process we could
+		// not hear — the same false claim R4-002 closed for the timeout, in the opposite direction.
+		const lost = unconfirmed(
+			discoverMpv(
+				world({
+					configured: "/opt/mpv/bin/mpv",
+					exists: ["/opt/mpv/bin/mpv"],
+					lostAnswer: ["/opt/mpv/bin/mpv"],
+				}).ctx,
+			),
+		);
+
+		assert.doesNotMatch(lost.message, /could not be started/, "it did start, so the OS did not refuse it");
+		assert.doesNotMatch(lost.message, /never answered/, "saying it never answered is the same false claim");
+		assert.doesNotMatch(lost.message, /answered --version with an error/, "no answer reached us, so none is reported");
+		assert.match(lost.message, /ran --version/, "the sentence names the run that did happen");
+		assert.match(lost.message, /ENOBUFS/, "the reason travels with it, so the loss is not invented");
+		assert.match(lost.message, /could not be confirmed/, "the consequence is still only that it did not confirm");
+
+		// Triangulation: a lost answer is not the budget running out and not the OS refusing to execute, so the
+		// fix cannot be satisfied by collapsing every error into one branch or by reusing the timeout's words.
+		const silent = unconfirmed(
+			discoverMpv(
+				world({ configured: "/opt/mpv/bin/mpv", exists: ["/opt/mpv/bin/mpv"], silent: ["/opt/mpv/bin/mpv"] }).ctx,
+			),
+		);
+		const unstarted = unconfirmed(
+			discoverMpv(
+				world({ configured: "/opt/mpv/bin/mpv", exists: ["/opt/mpv/bin/mpv"], unstartable: ["/opt/mpv/bin/mpv"] }).ctx,
+			),
+		);
+		assert.equal(silent.cause, "timeout", "ETIMEDOUT is still its own fact");
+		assert.match(silent.message, /within 2 s/, "and keeps its own sentence");
+		assert.equal(new Set([lost.message, silent.message, unstarted.message]).size, 3, "three facts, three sentences");
+	});
+
+	it("treats only the codes that prove the OS never executed the command as a start failure (R4-002, T42)", () => {
+		// Every one of these is refused before a child exists: no such file, no execute bit, a directory, a path
+		// through a non-directory, a symlink loop, and a file the kernel will not load. The OS executed nothing,
+		// so nothing answered, and the sentence may say exactly that.
+		for (const code of ["ENOENT", "EACCES", "EISDIR", "ENOTDIR", "ELOOP", "ENOEXEC"]) {
+			assert.equal(neverStarted(code), true, `${code} means the OS never executed the command`);
+		}
+		// The honest side: an error a running child can produce, one this project has never classified, and a
+		// missing code are all not proof that nothing started, so none of them may become a start failure.
+		for (const code of ["ENOBUFS", "ETIMEDOUT", "ERR_INVALID_ARG_VALUE", "", undefined]) {
+			assert.equal(neverStarted(code), false, `${String(code)} is not proof the command never ran`);
+		}
+	});
+
+	it("reads every `spawnSync` error through that mapping, so the list and the fact cannot drift (R4-002, T42)", () => {
+		// The defect was the wiring, not the list: every error but `ETIMEDOUT` was turned into `started: false`.
+		// These assertions run the production interpretation, so no binary and no disk are involved (S9).
+		assert.deepEqual(spawnErrorProbe({ code: "ENOENT", message: "no such file" }), {
+			ok: false,
+			started: false,
+			reason: "no such file",
+		});
+		assert.deepEqual(spawnErrorProbe({ code: "ENOBUFS", message: "output was too large" }), {
+			ok: false,
+			started: true,
+			answered: false,
+			reason: "output was too large",
+		});
+		// `ETIMEDOUT` keeps exactly the shape it had: the budget is not a refusal and not a lost answer.
+		assert.deepEqual(spawnErrorProbe({ code: "ETIMEDOUT", message: "timed out" }), { ok: false, timedOut: true });
+		// An error nobody classified, and one with no code at all, land on the same honest side: it may have run.
+		const unknowns: readonly SpawnError[] = [
+			{ message: "unknown" },
+			{ code: "", message: "empty code" },
+			{ code: "EWHATEVER", message: "unknown" },
+		];
+		for (const error of unknowns) {
+			assert.deepEqual(
+				spawnErrorProbe(error),
+				{ ok: false, started: true, answered: false, reason: error.message },
+				`${JSON.stringify(error)} is not a start failure`,
+			);
+		}
+	});
+
+	it("covers the arm where `spawnSync` itself throws: no child was created, so nothing started (R3-002)", () => {
+		// `spawnSync` throws before it forks — an argument it refuses, an options object it cannot read — so that
+		// arm is a start failure by construction: there is no child that could have answered. It is reached here
+		// with a command Node refuses to spawn, which covers the real production arm with no binary and no disk
+		// (S9) instead of believing a description of it.
+		const probe = diskProbe.run(`mpv${"\u0000"}--version`);
+		if (probe.ok || probe.timedOut === true) assert.fail("a refused argument is a failure, not a timeout");
+		assert.equal(probe.started, false, "nothing was executed, so nothing started");
+		assert.match(probe.reason, /null bytes/i, "the refusal is the OS-level reason nothing ran");
+
+		// And the sentence that fact produces never claims an answer: the same probe the composition root
+		// would have received goes through the resolver.
+		const found = unconfirmed(
+			discoverMpv({
+				platform: "linux",
+				env: {},
+				configured: "/opt/mpv/bin/mpv",
+				exists: () => true,
+				run: () => probe,
+			}),
+		);
+		assert.match(found.message, /could not be started/);
+		assert.doesNotMatch(found.message, /answered --version with an error/, "nothing answered anything");
 	});
 
 	it("says where a bare configured name came from without claiming it was found (T41)", () => {
