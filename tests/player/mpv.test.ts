@@ -258,6 +258,8 @@ function world(options: {
 	readonly answers?: readonly string[];
 	/** Candidates that exist and never answer: still running when their budget ran out (R4-002). */
 	readonly silent?: readonly string[];
+	/** Candidates the OS never executed — `ENOENT`, a directory, no execute bit — so nothing answered (T41). */
+	readonly unstartable?: readonly string[];
 	readonly configured?: string;
 	readonly platform?: "linux" | "darwin" | "win32";
 	readonly path?: string;
@@ -275,7 +277,10 @@ function world(options: {
 				const answers = options.answers ?? [];
 				if (answers.includes(command)) return { ok: true };
 				if ((options.silent ?? []).includes(command)) return { ok: false, timedOut: true };
-				return { ok: false, reason: `${command} printed no version` };
+				if ((options.unstartable ?? []).includes(command)) {
+					return { ok: false, started: false, reason: `spawn ${command} ENOENT` };
+				}
+				return { ok: false, started: true, reason: `${command} printed no version` };
 			},
 		},
 	};
@@ -414,20 +419,22 @@ describe("finding mpv (S6)", () => {
 	it("refuses a configured value that is not absolute instead of resolving it against the launch directory (R3-002)", () => {
 		// The same settings file confirmed a different binary depending on where Pi was started, so a
 		// relative value is not something to complete for the user: it is a setting they have to fix.
-		const { ctx, runs } = world({
-			configured: "bin/mpv",
-			path: "/usr/local/bin",
-			exists: ["bin/mpv", "/usr/local/bin/mpv"],
-			answers: ["bin/mpv", "/usr/local/bin/mpv"],
-		});
+		for (const configured of ["bin/mpv", "./mpv"]) {
+			const { ctx, runs } = world({
+				configured,
+				path: "/usr/local/bin",
+				exists: [configured, "/usr/local/bin/mpv"],
+				answers: [configured, "/usr/local/bin/mpv"],
+			});
 
-		const found = discoverMpv(ctx);
+			const found = discoverMpv(ctx);
 
-		assert.equal(found.ok, false);
-		assert.equal(found.ok ? undefined : found.definitive, true, "nothing can be spawned, so it is definitive");
-		assert.match(found.ok ? "" : found.message, /mpvPath/, "the message names the setting");
-		assert.match(found.ok ? "" : found.message, /bin\/mpv/, "and the value it holds");
-		assert.deepEqual(runs, [], "a relative setting is not a reason to ask PATH behind the user's back");
+			assert.equal(found.ok, false, `${configured} is not a bare name`);
+			assert.equal(found.ok ? undefined : found.definitive, true, "nothing can be spawned, so it is definitive");
+			assert.match(found.ok ? "" : found.message, /mpvPath/, "the message names the setting");
+			assert.ok((found.ok ? "" : found.message).includes(configured), "and the value it holds");
+			assert.deepEqual(runs, [], "a relative setting is not a reason to ask PATH behind the user's back");
+		}
 	});
 
 	it("resolves a configured bare command name through PATH instead of refusing it (R4-001)", () => {
@@ -443,6 +450,38 @@ describe("finding mpv (S6)", () => {
 
 		assert.deepEqual(discoverMpv(ctx), { ok: true, command: "mpv-beta" });
 		assert.deepEqual(runs, ["mpv-beta"], "confirmed by name, so PATH is what resolved it");
+	});
+
+	it("refuses a drive-relative configured value on both flavours, because it is not a bare name (R3-002, T41)", () => {
+		// `C:mpv.exe` carries no separator, so a bare-name test let it through and confirmed it through PATH:
+		// Windows resolves it against the current directory **of drive C:**, which is the cwd dependence R3-002
+		// forbids. It is not absolute in either flavour, so neither platform may hand it to a child.
+		const onWindows = world({
+			platform: "win32",
+			configured: "C:mpv.exe",
+			path: "C:\\Tools",
+			exists: ["C:mpv.exe", "C:\\Tools\\mpv.exe"],
+			answers: ["C:mpv.exe", "C:\\Tools\\mpv.exe"],
+		});
+		const onLinux = world({
+			platform: "linux",
+			configured: "C:mpv.exe",
+			path: "/usr/local/bin",
+			exists: ["C:mpv.exe", "/usr/local/bin/mpv"],
+			answers: ["C:mpv.exe", "/usr/local/bin/mpv"],
+		});
+
+		const cases = [
+			{ flavour: "win32", found: discoverMpv(onWindows.ctx), runs: onWindows.runs },
+			{ flavour: "linux", found: discoverMpv(onLinux.ctx), runs: onLinux.runs },
+		];
+		for (const { flavour, found, runs } of cases) {
+			assert.equal(found.ok, false, `${flavour} must refuse a drive-relative value`);
+			assert.equal(found.ok ? undefined : found.definitive, true, "nothing can be spawned, so it is definitive");
+			assert.match(found.ok ? "" : found.message, /mpvPath/, "the message names the setting");
+			assert.ok((found.ok ? "" : found.message).includes("C:mpv.exe"), "and the value it holds");
+			assert.deepEqual(runs, [], "a drive-relative setting is not a command name PATH may answer for");
+		}
 	});
 
 	it("validates absoluteness in the platform's own path flavour (R3-002)", () => {
@@ -495,6 +534,46 @@ describe("finding mpv (S6)", () => {
 		// Inconclusive, not definitive: the candidate exists, so the player still tries it (R4-002).
 		assert.equal(timedOut.command, "/opt/mpv/bin/mpv", "the command to try is part of the answer");
 		assert.equal(answeredBadly.command, "/opt/mpv/bin/mpv");
+	});
+
+	it("never says a binary answered when the OS never executed it (R4-002, T41)", () => {
+		// `ENOENT` for a bare name installed nowhere and a file without the execute bit are one fact for the OS:
+		// it never started the process. Something that never started answered nothing, so the sentence may not
+		// report an answer — even though the consequence is the same one an error has.
+		const unstarted = world({
+			configured: "/opt/mpv/bin/mpv",
+			exists: ["/opt/mpv/bin/mpv"],
+			unstartable: ["/opt/mpv/bin/mpv"],
+		});
+		const answered = world({ configured: "/opt/mpv/bin/mpv", exists: ["/opt/mpv/bin/mpv"] });
+
+		const neverRan = unconfirmed(discoverMpv(unstarted.ctx));
+		const answeredBadly = unconfirmed(discoverMpv(answered.ctx));
+
+		assert.notEqual(neverRan.message, answeredBadly.message, "two different facts never share one sentence");
+		assert.doesNotMatch(neverRan.message, /answered --version with an error/, "nothing answered anything");
+		assert.match(neverRan.message, /could not be started/, "and the sentence says what did happen");
+		assert.match(neverRan.message, /never answered/, "the only answer it may report is that there was none");
+		assert.match(answeredBadly.message, /answered --version with an error/);
+		assert.match(answeredBadly.message, /printed no version/, "the answer's own words travel with the failure");
+		// The consequence is the unconfirmed one for both, so the cause stays what it was: this is prose, not a
+		// third state nobody can act on differently.
+		assert.equal(neverRan.cause, "error");
+		assert.equal(neverRan.command, "/opt/mpv/bin/mpv", "and the player still gets the candidate to try");
+	});
+
+	it("says where a bare configured name came from without claiming it was found (T41)", () => {
+		// A bare name reaches the run without any `exists()` check — PATH is what resolves it, so nothing was
+		// searched for a file. Only the setting supplied this value, and a message claiming a found candidate
+		// would announce one that was never looked for.
+		const { ctx } = world({ configured: "mpv-beta", path: "/usr/local/bin" });
+
+		const found = unconfirmed(discoverMpv(ctx));
+
+		assert.equal(found.command, "mpv-beta", "the name comes from the setting, so it is what the player tries");
+		assert.match(found.message, /mpvPath in settings\.json/, "the sentence names the setting it came from");
+		assert.match(found.message, /bare command name/, "and how that value is meant to be resolved");
+		assert.doesNotMatch(found.message, /found/, "nothing was found: no candidate was ever looked for");
 	});
 
 	it("claims only the locations this project can defend, and no package manager's guess", () => {

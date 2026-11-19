@@ -339,6 +339,7 @@ Requisitos, todos verificables:
 | T11 | S9 | Suite completa verde y reporte | inline | **hecho** — 320 tests / 79 suites, `pnpm check` verde y `gate` verde en `main` (L51) | — |
 | T12 | S19, S6 | **Rebanada 1**: descubrimiento de mpv fuera del PATH (candidatos, clave `mpvPath`, confirmación por `--version`) e identidad del pipe en Windows (sufijo aleatorio en vez del `uid` que ahí no existe) | worker | **hecho** — 625 líneas autoradas, publicada como un solo PR con `size:exception` (L96) | `L96` |
 | T40 | S6, S19 | `R4-002` + `R4-003` + `R3-002` de la review de T12.1: el aviso de falla se anunciaba y no se hacía cumplir, el techo de 2 s producía falsos negativos que contradecían ese aviso, y un `mpvPath` relativo resolvía contra el cwd | worker | **hecho** — definitivo se rechaza y se cumple, inconcluso se avisa y se intenta, y el `mpvPath` debe ser absoluto en el flavour de su plataforma (L97) | `L97` |
+| T41 | S6, S19 | Los tres hallazgos que quedaron sólo en los PRs: `isBareName` aceptaba una ruta drive-relative de Windows (`C:mpv.exe`), que sí depende del cwd; la rama `error` de `confirm()` decía «respondió con error» también cuando el binario no llegó a arrancar; y un nombre pelado configurado sugería que se había encontrado un candidato | worker | **hecho** — el designador de unidad descalifica el nombre pelado, `started` es un discriminador requerido y las tres frases dicen sólo lo que se sabe (L98) | `L98` |
 | T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | pendiente — va después de T12; alcance confirmado por el dueño en L95 | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
@@ -2325,3 +2326,41 @@ entrega; lo cierro acá en vez de arrastrarlo.
 
 **Declarado, no tapado:** en la raíz el observable es el aviso, así que el cumplimiento del rechazo se prueba en el player
 —donde el fake de spawn no se llama nunca— y no en el test de la raíz, que necesitaría un socket real.
+
+L98 (T41: los tres hallazgos que vivían sólo en los PRs). Pedido del dueño, verbatim: **"Arreglemos los 3 hallasgos no
+documentados y lo que quede pendiente de T12b... Se puede?"**. Se puede, y en tres unidades: esto es la primera, porque
+mezclar el arreglo de producción con la portabilidad de los tests habría empeorado justo lo que la review cuida.
+
+**El bug real: `C:mpv.exe` no es un nombre pelado.** `isBareName` aceptaba cualquier valor sin `/` ni `\`, así que una ruta
+**drive-relative** de Windows pasaba como nombre de comando y se confirmaba por PATH. Pero `C:mpv.exe` no lo resuelve PATH:
+Windows lo resuelve contra el directorio actual **de la unidad C:**, que es exactamente la dependencia del cwd que `R3-002`
+prohíbe. O sea que mi regla tenía el agujero en la plataforma que no podía probar, y lo encontró el validador del linaje
+anterior. Ahora `DRIVE_DESIGNATOR` la descalifica, y la frase del rechazo es verdadera en cada flavour: en Windows nombra
+el mecanismo real; en POSIX dice lo que puede decir —que esta plataforma no resuelve letras de unidad— en vez de fingir
+una mecánica que no tiene.
+
+**Las dos frases que mentían sobre la causa.** `MpvProbe` ganó un discriminador **requerido** `started: true | false`: un
+binario que respondió mal y uno que **el SO nunca ejecutó** (ENOENT, un archivo sin permiso, un directorio) son dos hechos
+distintos, y sólo el primero permite decir que algo respondió. `cause` quedó en `timeout | error` porque la consecuencia es
+la misma; lo que cambió es la prosa, y ahora son tres frases: no contestó a tiempo · contestó con error · no llegó a
+arrancar. Y el nombre pelado configurado ya no dice «encontrado»: dice de dónde salió —el setting, como nombre de comando—
+porque para él no corrió ningún `exists()`.
+
+**El mismo truco que en T40, a propósito:** la invariante quedó en el **tipo**, no en un comentario. Un `started` requerido
+hace imposible afirmar una respuesta sin saber si el binario arrancó, igual que la unión de tres formas hizo imposible que
+una falla fuera `ok`.
+
+Evidencia: RED contra una reversión fiel de los tres comportamientos —`C:mpv.exe` confirmado como `ok`, «respondió con
+error» para un binario que nunca corrió, y «encontrado» para un nombre inexistente—; `pnpm check` verde con **569 tests /
+120 suites** (venían 566/120). Triangulación: `mpv-beta` sigue devolviendo `ok` y sigue pasando por `run`, así que el
+arreglo no se puede satisfacer rechazando todo.
+
+**Límites declarados, no tapados.** En POSIX `C:mpv.exe` *podría* ser un nombre de archivo legal resoluble por PATH;
+rechazarlo es la regla (un valor drive-relative no se confirma nunca por PATH) y la frase lo dice sin inventar mecánica.
+El `started: false` de la rama `catch` se infiere de la semántica de `spawnSync` —no hay test que lo alcance sin un binario
+real—. Y el aviso del nombre inexistente no tiene test en la raíz: la raíz reenvía `mpv.message` tal cual, así que la
+cadena está cubierta en el resolver.
+
+Pendiente de T12b, en dos rebanadas: (2a) portar los 16 fallos de la línea base y saltear con razón verdadera lo que el SO
+hace imposible; (2b) un fake de mpv por named pipe para que los diez suites del player corran en win32 en vez de saltearse.
+La verificación de las dos es la suite entera corriendo en la VM.

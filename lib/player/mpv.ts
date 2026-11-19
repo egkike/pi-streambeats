@@ -146,13 +146,21 @@ export function mpvArgs(target: string): readonly string[] {
 
 /* --- finding the binary: setting, then PATH, then the installers' own places (S6, T12) ---------- */
 
-/** What `<command> --version` answered, or whether it answered at all (S6). */
+/**
+ * What `<command> --version` answered, or whether it answered at all (S6). The three failures are three
+ * facts, and `started` is the one that decides whether anything may be said about an answer (R4-002, T41).
+ */
 export type MpvProbe =
 	| { readonly ok: true }
 	/** It was still running when its budget ran out: slow or wedged, which is not the same as wrong (R4-002). */
 	| { readonly ok: false; readonly timedOut: true }
-	/** It answered, and the answer was an error. */
-	| { readonly ok: false; readonly timedOut?: false; readonly reason: string };
+	/** It ran: `reason` is what it said, or how it ended without saying anything better. */
+	| { readonly ok: false; readonly timedOut?: false; readonly started: true; readonly reason: string }
+	/**
+	 * The OS never executed it — a bare name nothing on PATH answers to, a directory, a file without the
+	 * execute bit — so **nothing answered**, and `reason` is the OS's own message (T41).
+	 */
+	| { readonly ok: false; readonly timedOut?: false; readonly started: false; readonly reason: string };
 
 export interface MpvDiscoveryContext {
 	readonly platform: Platform;
@@ -218,15 +226,16 @@ export function discoverMpv(ctx: MpvDiscoveryContext): MpvDiscovery {
 	if (configured) {
 		// R3-002: `mpvPath` names a binary, and there are three honest shapes. An absolute path is used as written;
 		// a **bare command name** is what PATH is for, so it resolves through PATH and cannot depend on where Pi was
-		// started; anything else — `bin/mpv`, `./mpv` — is refused, because the OS would resolve it against the launch
-		// directory and the same settings file would confirm a different binary in another window.
-		if (isBareName(configured)) return confirm(ctx, configured, "mpvPath in settings.json");
+		// started; anything else — `bin/mpv`, `./mpv`, `C:mpv.exe` — is refused, because the OS would resolve it
+		// against a directory that depends on how Pi was launched and the same settings file would confirm a
+		// different binary in another window.
+		if (isBareName(configured)) {
+			// The bare name is NOT `exists`-checked: a command name is resolved by PATH, not by a stat, so nothing
+			// was searched for a file and the message may only say where the name came from (T41).
+			return confirm(ctx, configured, "mpvPath in settings.json as a bare command name");
+		}
 		if (!isAbsoluteFor(ctx.platform, configured)) {
-			return {
-				ok: false,
-				definitive: true,
-				message: `mpvPath in settings.json is "${configured}", which is a relative path: it would resolve against whatever directory Pi was started in — set the full path of the binary, a bare command name PATH can find, or clear it to search PATH`,
-			};
+			return { ok: false, definitive: true, message: relativeSettingRefusal(ctx.platform, configured) };
 		}
 		// A typo in `mpvPath` is the user's to see. Quietly falling back to PATH would hide it forever.
 		if (!ctx.exists(configured)) {
@@ -261,9 +270,38 @@ function isAbsoluteFor(platform: Platform, value: string): boolean {
 	return (platform === "win32" ? win32 : posix).isAbsolute(value);
 }
 
-/** A command name with no path in it: PATH resolves it, so it cannot depend on where Pi was started (R3-002). */
+/** `C:` or `c:`: a Windows drive designator, which is what makes the rest resolve against a per-drive cwd. */
+const DRIVE_DESIGNATOR = /^[A-Za-z]:/;
+
+/**
+ * A command name with no path in it: PATH resolves it, so it cannot depend on where Pi was started (R3-002).
+ *
+ * A drive designator disqualifies it (T41). `C:mpv.exe` carries no separator and still is not a bare name:
+ * Windows resolves it against the current directory **of drive C:**, which is the cwd dependence R3-002
+ * forbids — and the same settings file would confirm a different binary in another window. `C:\...`,
+ * `bin/mpv` and `./mpv` were already excluded by the separator check.
+ */
 function isBareName(value: string): boolean {
-	return !value.includes("/") && !value.includes("\\");
+	return !DRIVE_DESIGNATOR.test(value) && !value.includes("/") && !value.includes("\\");
+}
+
+/**
+ * The refusal for a `mpvPath` that is neither absolute in this platform's flavour nor a bare command name
+ * (R3-002). The sentence has to be true where it is printed, so the drive-relative case gets its own words:
+ * on Windows `C:mpv.exe` depends on the cwd of drive C:, and on POSIX the same value is a drive designator
+ * nothing here resolves — calling it a "Windows path that resolves against Pi's directory" would be wrong in
+ * one of the two places (T41).
+ */
+function relativeSettingRefusal(platform: Platform, value: string): string {
+	const head = `mpvPath in settings.json is "${value}"`;
+	const tail = "set the full path of the binary, a bare command name PATH can find, or clear it to search PATH";
+	if (!DRIVE_DESIGNATOR.test(value)) {
+		return `${head}, which is a relative path: it would resolve against whatever directory Pi was started in — ${tail}`;
+	}
+	if (platform === "win32") {
+		return `${head}, which is a drive-relative path: Windows resolves it against the current directory of that drive, not against the setting, so another window would confirm a different binary — ${tail}`;
+	}
+	return `${head}, which is a Windows drive path: this platform does not resolve drive letters, so it cannot be read as the binary the value means — ${tail}`;
 }
 
 /** Every PATH entry joined with the platform's own executable name, in the order the user put them. */
@@ -280,10 +318,15 @@ function pathCandidates(ctx: MpvDiscoveryContext): readonly string[] {
 /**
  * Put one candidate to the only test S6 accepts, and report the answer as the answer. A candidate that
  * exists but did not confirm is **inconclusive**, not a refusal: the 2 s ceiling is short enough that a
- * slow disk or a cold cache lands here, so the player still tries the command it names (R4-002). A
- * timeout and an error are two different causes and never share one sentence.
+ * slow disk or a cold cache lands here, so the player still tries the command it names (R4-002).
+ *
+ * Three failures, three sentences, and every one of them true: a binary that timed out was still running, a
+ * binary that answered with an error did answer, and a binary the OS never executed answered **nothing**, so
+ * saying it "answered with an error" would put words in the mouth of a process that never started (T41).
+ * `origin` says where the command came from — never that a candidate was found, because a bare name from the
+ * setting is confirmed without any `exists()` check.
  */
-function confirm(ctx: MpvDiscoveryContext, command: string, where: string): MpvDiscovery {
+function confirm(ctx: MpvDiscoveryContext, command: string, origin: string): MpvDiscovery {
 	const probe = ctx.run(command);
 	if (probe.ok) return { ok: true, command };
 	if (probe.timedOut === true) {
@@ -292,7 +335,7 @@ function confirm(ctx: MpvDiscoveryContext, command: string, where: string): MpvD
 			definitive: false,
 			command,
 			cause: "timeout",
-			message: `${command} (found via ${where}) did not answer --version within ${VERSION_TIMEOUT_MS / 1000} s, so it could not be confirmed: a slow or hung binary is not necessarily a broken one, so it will still be tried`,
+			message: `${command} (from ${origin}) did not answer --version within ${VERSION_TIMEOUT_MS / 1000} s, so it could not be confirmed: a slow or hung binary is not necessarily a broken one, so it will still be tried`,
 		};
 	}
 	return {
@@ -300,7 +343,9 @@ function confirm(ctx: MpvDiscoveryContext, command: string, where: string): MpvD
 		definitive: false,
 		command,
 		cause: "error",
-		message: `${command} (found via ${where}) answered --version with an error (${probe.reason}), so it could not be confirmed: it will still be tried`,
+		message: probe.started
+			? `${command} (from ${origin}) answered --version with an error (${probe.reason}), so it could not be confirmed: it will still be tried`
+			: `${command} (from ${origin}) could not be started (${probe.reason}), so it never answered --version and could not be confirmed: it will still be tried`,
 	};
 }
 
@@ -332,16 +377,18 @@ export const diskProbe: Pick<MpvDiscoveryContext, "exists" | "run"> = {
 				// fact than an answer and must not be reported as one (R4-002).
 				const code = "code" in result.error ? result.error.code : undefined;
 				if (code === "ETIMEDOUT") return { ok: false, timedOut: true };
-				return { ok: false, reason: result.error.message };
+				// Every other `error` here means the OS never executed the command: nothing answered anything (T41).
+				return { ok: false, started: false, reason: result.error.message };
 			}
 			if (result.status !== 0) {
 				const detail = (result.stderr ?? "").trim();
 				const code = result.status === null ? "no exit code" : `exit ${String(result.status)}`;
-				return { ok: false, reason: detail ? `${code}: ${detail}` : code };
+				return { ok: false, started: true, reason: detail ? `${code}: ${detail}` : code };
 			}
 			return { ok: true };
 		} catch (error) {
-			return { ok: false, reason: reasonOf(error) };
+			// `spawnSync` throwing means it never got as far as starting a child: it did not answer either.
+			return { ok: false, started: false, reason: reasonOf(error) };
 		}
 	},
 };
