@@ -69,6 +69,17 @@ Check the guard's result before announcing anything: `Release tag` runs on the t
 means `package.json` on `main` does not say `X.Y.Z`. Fix the version through another pull request, then
 delete the tag as described below and tag the new merge commit — never re-point the existing tag.
 
+The guard answers in three exit codes, and the workflow's verdict is one of them:
+
+| Exit | Meaning | What you read |
+| --- | --- | --- |
+| `0` | The tag is `v` + `package.json#version` | `release-tag: OK — vX.Y.Z is package.json X.Y.Z` |
+| `1` | The tag and the version disagree | `release-tag: FAIL — tag vX.Y.Z does not match package.json version A.B.C (expected vA.B.C)` |
+| `2` | The guard could not run at all | `release-tag: FAIL — no tag given; usage: node scripts/release-tag.mjs <tag>`, or an unreadable `package.json` |
+
+A `2` is never a version problem: it means the guard itself was invoked wrong or the manifest could not be
+read, so look at the workflow step before touching the version. `1` is the one that names both values.
+
 `--generate-notes` lists the merged pull requests. Read them before publishing: the notes are the only
 changelog a pinned user sees.
 

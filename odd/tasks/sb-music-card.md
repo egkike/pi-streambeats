@@ -343,6 +343,7 @@ Requisitos, todos verificables:
 | T42 | S6 | `R4-002` + `R3-002` de la review de T41: `started: false` se aplicaba a **todo** error de `spawnSync` salvo `ETIMEDOUT`, incluidos los que ocurren después de que el hijo arrancó (`ENOBUFS`), así que la frase decía «no llegó a arrancar» cuando sí arrancó; y la rama `catch` no tenía test | worker | **hecho** — el mapeo código→hecho es puro y probado, la cuarta frase dice la verdad, y `answered` es un campo requerido (L99) | `L99` |
 | T43 | S6 | Los dos `R4`/`R3` de la review de T42 sobre el mismo hecho: un `--version` **matado por una señal** tenía `status null` y ningún `result.error`, así que caía en la rama de «respondió» e imprimía «answered --version with an error (no exit code)». El tercer hallazgo —`answered` requerido rompería productores fuera de los cuatro archivos— **no lleva código**: `tsc -p .` compila todo el proyecto y no hay ninguno | worker | **hecho** — `exitProbe` es puro, `status null` es «corrió y la respuesta no llegó», y el cableado tiene una sola lectura (L100) | `L100` |
 | T44 | — | Las tres sugerencias **no bloqueantes** de la review de T12b (`review-41afbeca6560ecde`): el test de `$HOME` quedó medio convertido —dos expectativas en posix literal y una tercera que todavía pasa el `home` del fixture—, y el skip del `chmod` compone un booleano con un string-razón: `process.getuid?.() === 0 || chmod` | inline | **hecho** — el test entero en posix literal y el skip sale de `unreadableReason(): false | string`, que además devuelve la razón cuando corre como root (L103) | #99 |
+| T45 | — | Los cuatro hallazgos **no bloqueantes** de la review de #102: el CLI de la guarda sin test (R3-001), los códigos de salida sin documentar en `RELEASING.md` (R2-001), el `TagVerdict` que omitía campos que la función sí devuelve (R2-002), y la duda sobre el runner label (R1-001) | inline | **hecho** — el CLI queda pinneado con la versión leída del manifiesto, `RELEASING.md` tiene la tabla de códigos, el tipo está ensanchado y R1-001 no lleva código porque el label resuelve (L105) | #103 |
 | T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | **hecho** — de 19 rojos a 0 en la VM, y los 11 `skip` que quedan dicen una verdad; el fake escucha donde `ipcTarget` dice, sin tocar producción (L101) | #97 |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
@@ -2547,3 +2548,27 @@ corrida real es el día del release; lo que sí está probado es la función pur
 workflow consume. La afirmación de Windows en el README sale de L95, L101 y L103, y está escrita como lo que se verificó
 en la VM, no como promesa de soporte. Y la tabla `Requirements` del README sigue repitiendo el piso de Node y mpv que
 ahora también dice `Install`: los valores son los mismos y son ciertos, pero es duplicación, y queda anotada.
+
+L105 (T45: los cuatro hallazgos de la review de #102, antes del tag). Decisión del dueño, verbatim: **"T45 entero antes
+del tag"**, sobre la recomendación de hacerlo antes por una razón concreta: dos de los cuatro son lo que el día del
+release usa.
+
+**R3-001 era el único con consecuencia real, y ya no la tiene.** El test del CLI arranca el script como lo arranca el
+workflow y afirma los cuatro hechos: `v<version>` → 0 con `release-tag: OK`, `refs/tags/v<version>` → 0, `v999.0.0` → 1
+nombrando **los dos** valores en la línea `FAIL`, y sin argumento → 2 con la línea de uso. Y la versión esperada se **lee
+de `package.json`**, no se escribe en el test: un tag hardcodeado convertiría este test en rojo en el primer bump, o sea
+exactamente el día en que nadie quiere un rojo.
+
+**R2-001 quedó como tabla de tres filas** en `RELEASING.md` —código, qué significa, qué se lee— con la frase que importa:
+un `2` nunca es un problema de versión, es la guarda invocada mal o un manifiesto ilegible, así que se mira el paso del
+workflow antes de tocar el número. **R2-002** se cerró ensanchando `TagVerdict` a los campos que `compareTag` siempre
+devuelve y afirmándolos: un match no tiene `message`, un mismatch nombra el tag juzgado y el que habría coincidido.
+
+**R1-001 no lleva código, y la razón es verificable.** Decía que `runs-on: ubuntu-26.04` podría no resolver y que la
+guarda fallaría abierta. En este repo el label resuelve: los tres `check` de `ci.yml` y `pr-gate` corren ahí y están
+verdes en las corridas de hoy. Agregar un comentario al workflow para satisfacerlo costaría otra review de riesgo alto
+—el archivo es un workflow, o sea delivery— sin cambiar nada. Lo que sí queda escrito es la mitad estructural del
+hallazgo: una guarda que no arranca no bloquea, y por eso el acto del release sigue siendo decisión humana.
+
+Evidencia: el test enfocado da **8 tests / 2 suites** verdes; `pnpm check` **585 tests / 122 suites** (venían 581/121);
+y la suite entera en la VM sobre `main` en `6f5c93d`: **571 tests, 567 pasan, 0 fallan, 4 skips**.
