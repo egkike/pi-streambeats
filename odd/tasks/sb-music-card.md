@@ -338,6 +338,7 @@ Requisitos, todos verificables:
 | T10 | S8 | Test de frontera de capas + test del adaptador con host falso | worker | **hecho** — la mitad del host falso ya la pagó T9; el hueco real era otro: la raíz de composición no tenía ningún test (L70) | `872d5c2`, L70 |
 | T11 | S9 | Suite completa verde y reporte | inline | **hecho** — 320 tests / 79 suites, `pnpm check` verde y `gate` verde en `main` (L51) | — |
 | T12 | S19, S6 | **Rebanada 1**: descubrimiento de mpv fuera del PATH (candidatos, clave `mpvPath`, confirmación por `--version`) e identidad del pipe en Windows (sufijo aleatorio en vez del `uid` que ahí no existe) | worker | **hecho** — 625 líneas autoradas, publicada como un solo PR con `size:exception` (L96) | `L96` |
+| T40 | S6, S19 | `R4-002` + `R4-003` + `R3-002` de la review de T12.1: el aviso de falla se anunciaba y no se hacía cumplir, el techo de 2 s producía falsos negativos que contradecían ese aviso, y un `mpvPath` relativo resolvía contra el cwd | worker | **hecho** — definitivo se rechaza y se cumple, inconcluso se avisa y se intenta, y el `mpvPath` debe ser absoluto en el flavour de su plataforma (L97) | `L97` |
 | T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | pendiente — va después de T12; alcance confirmado por el dueño en L95 | — |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
@@ -384,6 +385,8 @@ de tareas escrita a mano es exactamente lo que envejeció en el archivo de regla
 | **Temas propios** | Los colores salen del tema del host, sin paletas propias | El dueño lo pida | AGENTS.md, TUI Rules |
 | **Pantalla de settings dentro de la card** | Las teclas se cambian con `/sb-music --keys` y el archivo, no con una UI | El dueño lo pida, o `--keys` deje de alcanzar | S22 |
 | **Pistas congeladas mientras el índice está parcial** (`R4-001`) | Un álbum que el índice no anuncia pero la caché ya conocía **se conserva** (regla de T39: sólo un índice entero borra un álbum), y como nadie le pide su página, sus pistas no se refrescan hasta que el índice vuelva entero: un track agregado a ese álbum no aparece mientras dure la degradación | Una página del catálogo muestre pistas viejas con el índice degradado, o el índice quede parcial más de una sesión. **El arreglo ya está identificado:** el álbum conservado **sí tiene slug** —viene de la caché—, así que se le puede pedir su página; y un 404 ahí resuelve la ambigüedad «retiro real vs fila ilegible», que hoy no se puede distinguir por eso se conserva | Review de #85 (`review-cce62496a4711518`), L93 |
+
+| **Arranque bloqueado hasta 2 s por el sondeo de mpv** (`R3-001`, `R4-001` de la review de T12.1) | El descubrimiento corre en el arranque de sesión y confirma el binario con `spawnSync` y techo de 2 s, así que un mpv configurado que se cuelga (o un disco frío) demora el arranque hasta ese techo. Es el precio de confirmar antes de anunciar; no hay una versión sin sondeo que siga cumpliendo S6 | El arranque de sesión se sienta lento en una máquina real, o alguien reporta un mpv configurado que cuelga. **El arreglo NO es bajar el timeout** —eso agrava el falso negativo de `R4-002`—: es mover el descubrimiento fuera del arranque (async, o bajo demanda en el primer play) | Review de #88 (`review-07b27af4a8291f40`), L96 |
 
 **Cerradas por dejar de ser ciertas** — se retiran en vez de quedar acá mintiendo: el **catálogo Bandcamp en
 streaming** ya no es exclusión, es `S20` / `T14`; el **mouse** ya no es exclusión, `S17` está entregada (`T13`,
@@ -2277,3 +2280,48 @@ máquina sin mpv recibe un aviso por sesión. `diskProbe.run` usa `spawnSync` co
 configurado que se cuelga puede demorar el arranque hasta 2 s. Y el nombre de la clave `mpvPath` no está documentado fuera
 del código y del archivo de defaults —`docs/` y `README.md` quedaban fuera de las superficies de esta rebanada—, lo que es
 deuda de la rebanada 2.
+
+L97 (T40: el estado que se anuncia es el que se ejecuta). Pedido del dueño, verbatim: **"Listo el merge. Luego dale con el
+arreglo de los tres: R4-002 + R4-003 + R3-002 y los otros 4 como propones"**.
+
+**Los tres hallazgos eran una tensión, no tres tareas.** `R4-003` pedía hacer cumplir el aviso de falla; `R4-002` decía que
+ese aviso puede ser falso, porque un mpv lento pero sano cae en el techo de 2 s. Hacer cumplir a ciegas mata un binario
+que funciona; no hacerlo miente sobre uno que de verdad falta. La salida fue dejar de tratar las dos cosas como una:
+
+- **Definitiva** — no hay candidato alguno: `mpvPath` que apunta a la nada, nada en PATH, nada en las ubicaciones
+  conocidas, o un `mpvPath` que no es absoluto. **No hay nada que ejecutar**, así que el player reporta y no spawnea.
+- **Inconclusa** — un candidato existe y no confirmó. El aviso dice **«no se pudo confirmar»**, nunca «no disponible», y el
+  player lo intenta igual.
+
+**Lo que hace que esto no se degrade otra vez es el tipo.** `MpvDiscovery` tiene tres formas: `ok` (con comando),
+`definitiva` (**sin** comando) e `inconclusa` (con comando, `cause: "timeout" | "error"` y mensaje). O sea que una falla no
+puede ser `ok`, y una definitiva no puede llevar comando: la invariante quedó **inrepresentable**, no comentada. En el
+borde, el spread de la raíz pasó a elegir entre `{mpvPath}`, `{refusal}` y `{mpvPath: candidato}` — y **se borró el
+`MPV_NAME[platform]`** que reintroducía la búsqueda por PATH que el aviso acababa de negar.
+
+**`R3-002`**: un `mpvPath` que no es absoluto en el flavour de su plataforma es una falla **definitiva** que nombra el
+setting. Un `C:\...` valida como absoluto en win32 y no en unix, y al revés.
+
+**`R4-002`**: el techo de 2 s dejó de ser un veredicto de «roto». Un timeout tiene su propia causa y su propia frase, porque
+un binario que no contestó a tiempo no es un binario que no contesta. `diskProbe.run` mapea `ETIMEDOUT` a esa rama.
+
+**`R4-003`**: `PlayerDeps.refusal` es aditivo, y la guarda vive una sola vez al tope de `#connect` —`#spawn` sólo se
+alcanza por ahí—, así que `start`, `play`, `pause`, `resume` y `setVolume` heredan el rechazo sin repetirlo.
+
+Evidencia: `pnpm check` verde con **565 tests / 120 suites** (venían 558/119). RED propios: un `mpvPath` relativo se
+confirmaba como `ok` (`true !== false`); linux aceptaba `C:\Tools\mpv.exe`; timeout y error daban el mismo `undefined` en
+vez de `'timeout'`; la raíz no decía nada ante un `mpvPath` relativo; y con una falla definitiva el player **sí** spawneaba.
+Y la triangulación que evita el arreglo tramposo: definitivo → **cero** spawns, inconcluso → **exactamente uno**.
+
+**Los otros cuatro hallazgos, con su disposición escrita.** `R3-001` + `R4-001` (los `spawnSync` de hasta 2 s en el
+arranque) entran a la tabla de riesgos aceptados **con disparador**, y con el arreglo correcto anotado: sacar el
+descubrimiento del arranque, **nunca** bajar el techo, que agravaría `R4-002`. `R3-003` queda como **desacuerdo
+documentado**: `randomUUID()` es hex y guiones, el filtro los preserva, y el colapso necesita una fuente inyectada hostil
+que el filtro existe para impedir. `R1-001` no lleva fila: ejecuta el mismo candidato que el código ya ejecutaba.
+
+**Y una limpieza mía de la entrega anterior**: `MPV_NAME` había quedado exportada sin consumidor externo y con dos
+comentarios duplicados. Vuelve a ser privada y con un solo comentario. El worker lo había marcado como riesgo de su
+entrega; lo cierro acá en vez de arrastrarlo.
+
+**Declarado, no tapado:** en la raíz el observable es el aviso, así que el cumplimiento del rechazo se prueba en el player
+—donde el fake de spawn no se llama nunca— y no en el test de la raíz, que necesitaría un socket real.

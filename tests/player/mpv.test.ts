@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	createMpvPlayer,
 	discoverMpv,
+	type MpvDiscovery,
 	type MpvDiscoveryContext,
 	type MpvValue,
 	mpvKnownLocations,
@@ -255,6 +256,8 @@ interface World {
 function world(options: {
 	readonly exists?: readonly string[];
 	readonly answers?: readonly string[];
+	/** Candidates that exist and never answer: still running when their budget ran out (R4-002). */
+	readonly silent?: readonly string[];
 	readonly configured?: string;
 	readonly platform?: "linux" | "darwin" | "win32";
 	readonly path?: string;
@@ -270,10 +273,21 @@ function world(options: {
 			run: (command) => {
 				runs.push(command);
 				const answers = options.answers ?? [];
-				return answers.includes(command) ? { ok: true } : { ok: false, reason: `${command} printed no version` };
+				if (answers.includes(command)) return { ok: true };
+				if ((options.silent ?? []).includes(command)) return { ok: false, timedOut: true };
+				return { ok: false, reason: `${command} printed no version` };
 			},
 		},
 	};
+}
+
+/**
+ * The inconclusive half of a discovery answer. The shape is asserted instead of cast: a test that assumed it
+ * would keep passing if discovery started calling every failure definitive, which is the rule under test here.
+ */
+function unconfirmed(found: MpvDiscovery): Extract<MpvDiscovery, { ok: false; definitive: false }> {
+	if (found.ok || found.definitive) assert.fail("expected a candidate that exists and did not confirm");
+	return found;
 }
 
 describe("finding mpv (S6)", () => {
@@ -397,6 +411,92 @@ describe("finding mpv (S6)", () => {
 		assert.deepEqual(discoverMpv(ctx), { ok: true, command: homebrew });
 	});
 
+	it("refuses a configured value that is not absolute instead of resolving it against the launch directory (R3-002)", () => {
+		// The same settings file confirmed a different binary depending on where Pi was started, so a
+		// relative value is not something to complete for the user: it is a setting they have to fix.
+		const { ctx, runs } = world({
+			configured: "bin/mpv",
+			path: "/usr/local/bin",
+			exists: ["bin/mpv", "/usr/local/bin/mpv"],
+			answers: ["bin/mpv", "/usr/local/bin/mpv"],
+		});
+
+		const found = discoverMpv(ctx);
+
+		assert.equal(found.ok, false);
+		assert.equal(found.ok ? undefined : found.definitive, true, "nothing can be spawned, so it is definitive");
+		assert.match(found.ok ? "" : found.message, /mpvPath/, "the message names the setting");
+		assert.match(found.ok ? "" : found.message, /bin\/mpv/, "and the value it holds");
+		assert.deepEqual(runs, [], "a relative setting is not a reason to ask PATH behind the user's back");
+	});
+
+	it("resolves a configured bare command name through PATH instead of refusing it (R4-001)", () => {
+		// A bare name is not a relative path: PATH is exactly the answer to "where do my commands live", and it
+		// cannot resolve against Pi's launch directory. Refusing it would stop playback for a setting that says
+		// what it means.
+		const { ctx, runs } = world({
+			configured: "mpv-beta",
+			path: "/usr/local/bin",
+			exists: ["/usr/local/bin/mpv-beta"],
+			answers: ["mpv-beta"],
+		});
+
+		assert.deepEqual(discoverMpv(ctx), { ok: true, command: "mpv-beta" });
+		assert.deepEqual(runs, ["mpv-beta"], "confirmed by name, so PATH is what resolved it");
+	});
+
+	it("validates absoluteness in the platform's own path flavour (R3-002)", () => {
+		// `C:\...` is absolute to Windows and relative to POSIX, so one shared flavour would be wrong in one
+		// of the two places, and this project has to run on both.
+		const windowsPath = "C:\\Tools\\mpv.exe";
+		const onWindows = world({
+			platform: "win32",
+			configured: windowsPath,
+			exists: [windowsPath],
+			answers: [windowsPath],
+		});
+		assert.deepEqual(discoverMpv(onWindows.ctx), { ok: true, command: windowsPath });
+
+		const onLinux = world({
+			platform: "linux",
+			configured: windowsPath,
+			exists: [windowsPath],
+			answers: [windowsPath],
+		});
+		const found = discoverMpv(onLinux.ctx);
+		assert.equal(found.ok, false);
+		assert.equal(found.ok ? undefined : found.definitive, true);
+		assert.deepEqual(onLinux.runs, [], "a Windows path is not a path this platform can run");
+	});
+
+	it("tells a candidate that never answered apart from one that answered with an error (R4-002)", () => {
+		// A binary still running at the ceiling may be a slow disk or a cold cache, not a broken install:
+		// one sentence for both causes would report a working mpv as a failure.
+		const silent = world({
+			configured: "/opt/mpv/bin/mpv",
+			exists: ["/opt/mpv/bin/mpv"],
+			silent: ["/opt/mpv/bin/mpv"],
+		});
+		const broken = world({ configured: "/opt/mpv/bin/mpv", exists: ["/opt/mpv/bin/mpv"] });
+
+		const timedOut = unconfirmed(discoverMpv(silent.ctx));
+		const answeredBadly = unconfirmed(discoverMpv(broken.ctx));
+
+		assert.notEqual(timedOut.message, "", "a candidate that never answers is still a state to show");
+		assert.notEqual(timedOut.message, answeredBadly.message, "two different causes never share one sentence");
+		assert.equal(timedOut.cause, "timeout", "the difference is data, not only prose");
+		assert.equal(answeredBadly.cause, "error");
+		assert.match(timedOut.message, /within 2 s/, "a timeout is named as a timeout");
+		assert.doesNotMatch(answeredBadly.message, /within 2 s/, "an answer that came back is not a timeout");
+		for (const message of [timedOut.message, answeredBadly.message]) {
+			assert.match(message, /could not be confirmed/, "both say only what is true: it did not confirm");
+			assert.doesNotMatch(message, /unavailable|not found/i, "neither claims the binary is unavailable");
+		}
+		// Inconclusive, not definitive: the candidate exists, so the player still tries it (R4-002).
+		assert.equal(timedOut.command, "/opt/mpv/bin/mpv", "the command to try is part of the answer");
+		assert.equal(answeredBadly.command, "/opt/mpv/bin/mpv");
+	});
+
 	it("claims only the locations this project can defend, and no package manager's guess", () => {
 		// Locking the lists down is the point: a candidate is a claim about where a binary lives, and an
 		// invented scoop/chocolatey path would send the user to a directory that never had mpv in it.
@@ -449,6 +549,33 @@ describe("spawning mpv (S6)", { skip: unixSockets }, () => {
 
 		assert.deepEqual(h.mpv.commandArgs(0), ["set_property", "volume", 70]);
 		assert.deepEqual(h.reports, [{ kind: "ready" }]);
+	});
+});
+
+describe("what discovery hands the player (S6, R4-002, R4-003)", { skip: unixSockets }, () => {
+	const refusal =
+		"mpv was not found: no mpv on PATH and none of /usr/bin/mpv, /usr/local/bin/mpv exists — install mpv or set mpvPath in settings.json";
+
+	it("enforces a refusal: the play path reports it and never spawns", async () => {
+		// R4-003: announced and enforced have to be the same fact. A refusal that only printed a notice would
+		// hand the bare name back to PATH, which is the binary nobody confirmed.
+		const h = createHarness({ mpvPath: "bin/mpv", refusal });
+		await h.player.play(track);
+
+		assert.deepEqual(h.spawns, [], "a definitive failure spawns nothing at all");
+		assert.deepEqual(h.reports, [{ kind: "unavailable", message: refusal }], "and the play path says why");
+	});
+
+	it("still tries an inconclusive candidate instead of refusing it", async () => {
+		// The other half of the triangulation: without it, the fix above could be satisfied by never spawning.
+		// R4-002: the candidate exists and did not confirm, so it is worth the one attempt it asks for.
+		const h = createHarness({ mpvPath: "/opt/mpv/bin/mpv" });
+		await h.mpv.listen(h.target);
+
+		await h.player.play(track);
+
+		assert.equal(h.spawns.length, 1, "an unconfirmed candidate is not a refusal");
+		assert.equal(h.spawns[0]?.command, "/opt/mpv/bin/mpv", "and it is the candidate the user pointed at");
 	});
 });
 

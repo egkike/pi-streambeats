@@ -22,7 +22,6 @@ import {
 	createMpvPlayer,
 	discoverMpv,
 	diskProbe,
-	MPV_NAME,
 	type MpvDiscoveryContext,
 	type PlayerSocket,
 	type SpawnedProcess,
@@ -137,12 +136,13 @@ export default function sbMusic(pi: ExtensionAPI, overrides: SbMusicOverrides = 
 				platform,
 				env,
 				home,
-				// The confirmed binary is one more injected value: the player stays testable without a process. A failed
-				// discovery is **not** a licence to look at PATH again — the resolver already did, and a `mpvPath` the
-				// user set and got wrong must fail as *that* path instead of quietly playing a different binary. So
-				// the configured value is handed over as-is; with nothing configured the bare name is exactly the
-				// lookup discovery just found empty, which keeps the old behaviour without pretending it was a choice.
-				mpvPath: mpv.ok ? mpv.command : settings.mpvPath?.trim() || MPV_NAME[platform],
+				// The confirmed binary is one more injected value: the player stays testable without a process. The two
+				// failures are wired differently on purpose (S6, R4-002, R4-003). **Definitive** — a relative
+				// `mpvPath`, one pointing nowhere, nothing on PATH and nothing in the known locations — has no command
+				// to spawn, so it travels as a refusal and the play path reports instead of spawning: handing PATH the
+				// bare name would confirm the very binary the notice just said it could not. **Inconclusive** still
+				// hands the candidate over, because a slow or wedged mpv is not a broken one.
+				...(mpv.ok ? { mpvPath: mpv.command } : mpv.definitive ? { refusal: mpv.message } : { mpvPath: mpv.command }),
 				volume: DEFAULT_VOLUME,
 			});
 		},
