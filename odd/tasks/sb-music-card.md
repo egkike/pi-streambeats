@@ -380,6 +380,7 @@ de tareas escrita a mano es exactamente lo que envejeció en el archivo de regla
 | **`sync` / descargas** | Fuera de S20: el catálogo se navega y se reproduce, no se descarga. La caché es de metadatos, nunca de audio | El dueño lo pida, o la reproducción en streaming deje de alcanzar | L2, S20 |
 | **Temas propios** | Los colores salen del tema del host, sin paletas propias | El dueño lo pida | AGENTS.md, TUI Rules |
 | **Pantalla de settings dentro de la card** | Las teclas se cambian con `/sb-music --keys` y el archivo, no con una UI | El dueño lo pida, o `--keys` deje de alcanzar | S22 |
+| **Pistas congeladas mientras el índice está parcial** (`R4-001`) | Un álbum que el índice no anuncia pero la caché ya conocía **se conserva** (regla de T39: sólo un índice entero borra un álbum), y como nadie le pide su página, sus pistas no se refrescan hasta que el índice vuelva entero: un track agregado a ese álbum no aparece mientras dure la degradación | Una página del catálogo muestre pistas viejas con el índice degradado, o el índice quede parcial más de una sesión. **El arreglo ya está identificado:** el álbum conservado **sí tiene slug** —viene de la caché—, así que se le puede pedir su página; y un 404 ahí resuelve la ambigüedad «retiro real vs fila ilegible», que hoy no se puede distinguir por eso se conserva | Review de #85 (`review-cce62496a4711518`), L93 |
 
 **Cerradas por dejar de ser ciertas** — se retiran en vez de quedar acá mintiendo: el **catálogo Bandcamp en
 streaming** ya no es exclusión, es `S20` / `T14`; el **mouse** ya no es exclusión, `S17` está entregada (`T13`,
@@ -2181,3 +2182,16 @@ contra un frame con sólo `▸ Chillhop/`; y el harness alimentando la lectura s
 declaradas verdes antes y después (retiro con índice entero, y no arrastrar un álbum anunciado cuya página falló).
 `pnpm check` verde: **535 tests / 117 suites** (venía de 530/117), `boundary` intacto, diff de 186 líneas autoradas en
 dos archivos (issue #84, PR de esta rama).
+
+L94 (el `R4-001` de la review de T39 entra al backlog, y la sesión se cierra). Pedido del dueño, verbatim: **"Listo el
+merge. Ahora debo salir, anota el hallazgo del review en el backlog y continuamos luego. Buen trabajo capo!"**.
+
+El hallazgo **no se arregla hoy**: queda como **fila con disparador** en «Riesgos aceptados y fuera de alcance», que es
+donde el proyecto guarda lo diferido desde L77 —no en `AGENTS.md`, que envejece sin que nada lo avise—. Y entra **con el
+arreglo ya identificado** adentro, no con una promesa: el álbum conservado tiene slug conocido, así que se le puede pedir
+su página y un 404 resuelve la ambigüedad que hoy obliga a conservarlo.
+
+**Estado al cerrar.** `main` en `e61e2d6` (merge de #85). Cuatro ciclos del catálogo cerrados hoy —T36 `L90`, T37 `L91`,
+T38 `L92`, T39 `L93`— con **535 tests / 117 suites** verdes, y la tabla de riesgos con esta única fila del catálogo, a
+propósito. Backlog vivo: **T12** (Windows: named pipe, `%APPDATA%`, mpv fuera del PATH) → **T35** (release `v0.1.0`,
+dispara cuando no quede ninguna fila abierta) → **hub de Gentle**. T12 es lo único que destraba el release.
