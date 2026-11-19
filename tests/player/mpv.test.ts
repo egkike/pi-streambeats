@@ -1,11 +1,12 @@
 /**
- * The mpv player (S6, S11, S19). Every test here drives a REAL unix socket — a `net.Server` in a
- * temporary directory — and a fake child process, so nothing touches mpv, the network or the user's
- * music folder (S9). The server records the commands it receives and answers them, which is the only
- * way to check the JSON-per-line protocol without believing a mock of the protocol itself.
+ * The mpv player (S6, S11, S19). Every test here drives a REAL transport — a `net.Server` listening where
+ * `ipcTarget` says the player will connect: a unix socket in a temporary directory on Linux and macOS, a named
+ * pipe on Windows — and a fake child process, so nothing touches mpv, the network or the user's music folder (S9).
+ * The server records the commands it receives and answers them, which is the only way to check the JSON-per-line
+ * protocol without believing a mock of the protocol itself.
  *
- * Windows named pipes are the other transport (S19) and arrive with T12; these tests speak the unix
- * socket they can create on the host that runs them.
+ * The target is never written down here: the same exported `ipcTarget` the player calls decides it, so the fake and
+ * the player cannot drift into two lists of where the socket lives (L101).
  */
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
@@ -18,6 +19,7 @@ import {
 	discoverMpv,
 	diskProbe,
 	exitProbe,
+	ipcTarget,
 	type MpvDiscovery,
 	type MpvDiscoveryContext,
 	type MpvProbe,
@@ -32,10 +34,27 @@ import {
 	type SpawnOptions,
 	spawnErrorProbe,
 } from "../../lib/player/mpv.ts";
+import type { Platform } from "../../lib/settings.ts";
 import type { Track } from "../../lib/types.ts";
 
-/** Unix sockets are the Linux/macOS transport; Windows pipes need the worker of T12. */
-const unixSockets = process.platform === "win32" ? "unix sockets are not the Windows transport (T12)" : false;
+/**
+ * The transport this suite speaks, decided by the host it runs on (S19): a unix socket on Linux and macOS, a named
+ * pipe on Windows. Both halves of every test — the fake server and the player — take it from `ipcTarget`, so each
+ * platform's own path rules are exercised instead of skipped.
+ */
+const hostPlatform: Platform =
+	process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
+
+/**
+ * A named pipe is a name, not a file: it has no parent directory to create, no POSIX mode to read, and no directory
+ * another process could symlink somewhere else. Those are the only facts this suite cannot state on win32, and they
+ * are still stated on Linux and macOS (L101).
+ */
+const socketDirectory =
+	process.platform === "win32" ? "a named pipe has no directory: nothing to create or hijack" : false;
+
+/** How many harnesses this process has built: a pipe name is global to the machine, so each one needs its own. */
+let harnesses = 0;
 
 const track: Track = { id: "/music/Chillhop/01 - Dawn.mp3", title: "Dawn", origin: "local" };
 
@@ -111,7 +130,8 @@ class FakeMpv {
 	}
 
 	async listen(path: string): Promise<void> {
-		mkdirSync(dirname(path), { recursive: true });
+		// A unix socket lives in a directory this test has to create; a named pipe is a name and has none (S19).
+		if (hostPlatform !== "win32") mkdirSync(dirname(path), { recursive: true });
 		await new Promise<void>((resolve, reject) => {
 			this.#server.once("error", reject);
 			this.#server.listen(path, () => resolve());
@@ -206,13 +226,18 @@ function createHarness(overrides: Partial<PlayerDeps> = {}): Harness {
 	const spawns: SpawnedCall[] = [];
 	const children: FakeChild[] = [];
 	const env = { XDG_RUNTIME_DIR: root };
-	const target = join(root, "pi-streambeats", "mpv.sock");
+	/**
+	 * The pipe's suffix is a value this test picks and fixes for the harness, so the target can be computed twice —
+	 * once here, once inside the player — and still be the same string. It carries the pid because a pipe name is
+	 * global to the machine: two suites running at once must not land on the same one (S19).
+	 */
+	const suffix = `${process.pid}-${++harnesses}`;
+	const deps = { platform: hostPlatform, env, uid: 1000, home: root, random: () => suffix, ...overrides };
+	const target = ipcTarget(deps);
 	let attempts = 0;
 
 	const player = createMpvPlayer({
-		platform: "linux",
-		env,
-		uid: 1000,
+		...deps,
 		spawn: (command, args, options) => {
 			spawns.push({ command, args, options });
 			const child = fakeChild();
@@ -815,7 +840,7 @@ describe("finding mpv (S6)", () => {
 
 /* --- the tests ------------------------------------------------------------------------------- */
 
-describe("spawning mpv (S6)", { skip: unixSockets }, () => {
+describe("spawning mpv (S6)", () => {
 	it("runs one mpv as a plain child with an explicit argv, never through a shell", async () => {
 		const h = createHarness({ mpvPath: "/opt/mpv/bin/mpv" });
 		await h.mpv.listen(h.target);
@@ -833,7 +858,7 @@ describe("spawning mpv (S6)", { skip: unixSockets }, () => {
 		assert.deepEqual(h.reports, [{ kind: "ready" }]);
 	});
 
-	it("creates the socket's own directory before mpv is asked to listen there", async () => {
+	it("creates the socket's own directory before mpv is asked to listen there", { skip: socketDirectory }, async () => {
 		const h = createHarness({ retryMs: 5, connectTimeoutMs: 10 });
 		await h.player.start();
 
@@ -852,7 +877,7 @@ describe("spawning mpv (S6)", { skip: unixSockets }, () => {
 	});
 });
 
-describe("what discovery hands the player (S6, R4-002, R4-003)", { skip: unixSockets }, () => {
+describe("what discovery hands the player (S6, R4-002, R4-003)", () => {
 	const refusal =
 		"mpv was not found: no mpv on PATH and none of /usr/bin/mpv, /usr/local/bin/mpv exists — install mpv or set mpvPath in settings.json";
 
@@ -879,7 +904,7 @@ describe("what discovery hands the player (S6, R4-002, R4-003)", { skip: unixSoc
 	});
 });
 
-describe("the JSON line protocol (S6)", { skip: unixSockets }, () => {
+describe("the JSON line protocol (S6)", () => {
 	it("writes one JSON object per line, with a request_id on every command", async () => {
 		const h = createHarness();
 		await h.mpv.listen(h.target);
@@ -961,7 +986,7 @@ describe("the JSON line protocol (S6)", { skip: unixSockets }, () => {
 	});
 });
 
-describe("what the card asks for (S6, S11)", { skip: unixSockets }, () => {
+describe("what the card asks for (S6, S11)", () => {
 	it("loads the resolved target with replace, names the title and starts playing", async () => {
 		const h = createHarness();
 		await h.mpv.listen(h.target);
@@ -1017,7 +1042,7 @@ describe("what the card asks for (S6, S11)", { skip: unixSockets }, () => {
 	});
 });
 
-describe("end-file (S11)", { skip: unixSockets }, () => {
+describe("end-file (S11)", () => {
 	it("reports a normal end so the caller can advance the queue", async () => {
 		const h = createHarness();
 		await h.mpv.listen(h.target);
@@ -1109,7 +1134,7 @@ describe("end-file (S11)", { skip: unixSockets }, () => {
 	});
 });
 
-describe("file-loaded (S12)", { skip: unixSockets }, () => {
+describe("file-loaded (S12)", () => {
 	it("asks mpv for the duration once the file is loaded and reports it with its track", async () => {
 		const h = createHarness();
 		await h.mpv.listen(h.target);
@@ -1188,7 +1213,7 @@ describe("file-loaded (S12)", { skip: unixSockets }, () => {
 	});
 });
 
-describe("connecting to the socket (S19)", { skip: unixSockets }, () => {
+describe("connecting to the socket (S19)", () => {
 	it("retries until mpv has created the socket", async () => {
 		const h = createHarness({ retryMs: 20, connectTimeoutMs: 2000 });
 
@@ -1261,7 +1286,7 @@ describe("connecting to the socket (S19)", { skip: unixSockets }, () => {
 	});
 });
 
-describe("the socket directory (R1-001)", { skip: unixSockets }, () => {
+describe("the socket directory (R1-001)", { skip: socketDirectory }, () => {
 	it("never reuses a socket directory that points somewhere else", async () => {
 		const h = createHarness({ retryMs: 5, connectTimeoutMs: 20 });
 		const elsewhere = join(root, "elsewhere");
@@ -1275,7 +1300,7 @@ describe("the socket directory (R1-001)", { skip: unixSockets }, () => {
 	});
 });
 
-describe("shutdown during startup (R4-004)", { skip: unixSockets }, () => {
+describe("shutdown during startup (R4-004)", () => {
 	it("sends SIGTERM to the child it spawned when quit lands before the socket connects", async () => {
 		// No server: the connect keeps retrying, which is the window where a quit used to leak mpv.
 		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
@@ -1308,7 +1333,7 @@ describe("shutdown during startup (R4-004)", { skip: unixSockets }, () => {
 	});
 });
 
-describe("the lifecycle the review found half-closed (T9a)", { skip: unixSockets }, () => {
+describe("the lifecycle the review found half-closed (T9a)", () => {
 	it("kills the child when the shutdown arrives, not when the connect budget ends (R4-003)", async () => {
 		// Nobody listens: the connect loop would keep trying for two seconds on its own.
 		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
@@ -1341,7 +1366,7 @@ describe("the lifecycle the review found half-closed (T9a)", { skip: unixSockets
 	});
 });
 
-describe("a lost connection (R4-005)", { skip: unixSockets }, () => {
+describe("a lost connection (R4-005)", () => {
 	it("gets one retry: the player is usable again without a new player", async () => {
 		const h = createHarness({ retryMs: 10, connectTimeoutMs: 2000 });
 		await h.mpv.listen(h.target);
@@ -1391,7 +1416,7 @@ describe("a lost connection (R4-005)", { skip: unixSockets }, () => {
 	});
 });
 
-describe("shutdown (S6)", { skip: unixSockets }, () => {
+describe("shutdown (S6)", () => {
 	it("sends quit and closes the connection", async () => {
 		const h = createHarness();
 		await h.mpv.listen(h.target);

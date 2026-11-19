@@ -11,8 +11,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ensurePrivateDir, privateTempDir } from "../../lib/player/mpv.ts";
 
-/** File modes and symlinks are POSIX facts; the Windows transport is a named pipe, due in T12. */
-const posixOnly = process.platform === "win32" ? "POSIX file modes are not the Windows transport (T12)" : false;
+/** File modes and symlinks are POSIX facts: on Windows the transport is a named pipe, which is a name and not a file. */
+const posixOnly =
+	process.platform === "win32" ? "POSIX file modes are not a Windows fact: a named pipe is not a file" : false;
 
 let root: string;
 
