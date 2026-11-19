@@ -20,7 +20,10 @@
  * Finding the binary is also this module's job (S6, T12): `discoverMpv` answers which command to
  * spawn, in the order S6 gives — the setting, then PATH, then the places each platform's installers
  * really use — and only a binary that answers `--version` is ever announced as found. A Windows
- * installer leaves mpv outside PATH (L15), so a bare `"mpv"` is not an answer there.
+ * installer leaves mpv outside PATH (L15), so a bare `"mpv"` is not an answer there. Because the
+ * confirmation is a real run with a budget, its failure has two shapes and they are not the same
+ * fact (R4-002, R4-003): nothing to spawn is a definitive refusal the player enforces, while a
+ * candidate that exists and did not confirm is inconclusive and is still tried.
  */
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -46,7 +49,7 @@ const DIR_NAME = "pi-streambeats";
 /** A directory only its owner may enter (R1-001): the socket's name is not a secret, its path is. */
 const PRIVATE_MODE = 0o700;
 
-/** How long `<command> --version` gets before a wedged binary counts as an answer of "no" (S6). */
+/** How long `<command> --version` gets before it is reported as not having answered (S6, R4-002). */
 const VERSION_TIMEOUT_MS = 2000;
 
 /* --- the IPC target and the argv: pure, platform in, string out (S6, S19) ---------------------- */
@@ -143,8 +146,13 @@ export function mpvArgs(target: string): readonly string[] {
 
 /* --- finding the binary: setting, then PATH, then the installers' own places (S6, T12) ---------- */
 
-/** What `<command> --version` answered: the only confirmation S6 accepts before playback is announced. */
-export type MpvProbe = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+/** What `<command> --version` answered, or whether it answered at all (S6). */
+export type MpvProbe =
+	| { readonly ok: true }
+	/** It was still running when its budget ran out: slow or wedged, which is not the same as wrong (R4-002). */
+	| { readonly ok: false; readonly timedOut: true }
+	/** It answered, and the answer was an error. */
+	| { readonly ok: false; readonly timedOut?: false; readonly reason: string };
 
 export interface MpvDiscoveryContext {
 	readonly platform: Platform;
@@ -158,16 +166,27 @@ export interface MpvDiscoveryContext {
 }
 
 /**
- * Which command to spawn, as data: the card cannot catch an exception, so a missing mpv is a state
- * with a message instead of a throw (S6). No `version` field: the caller would have nowhere to put it.
+ * What discovery decided, as data the caller can act on instead of prose it has to parse (S6, R4-002,
+ * R4-003). Two failures with two different consequences, so they are two different shapes:
+ *
+ * - **definitive**: nothing can be spawned — no candidate exists, or the configured value is not a path
+ *   this platform can resolve. There is no command to hand over, and the message is a refusal.
+ * - **inconclusive**: a candidate exists and did not confirm. `command` is still the best answer there
+ *   is, `cause` says which way it failed to confirm, and the message may not claim it is unavailable.
  */
 export type MpvDiscovery =
 	| { readonly ok: true; readonly command: string }
-	| { readonly ok: false; readonly message: string };
+	| { readonly ok: false; readonly definitive: true; readonly message: string }
+	| {
+			readonly ok: false;
+			readonly definitive: false;
+			readonly command: string;
+			readonly cause: "timeout" | "error";
+			readonly message: string;
+	  };
 
-/** The executable's file name per platform: a Windows installer always ships `mpv.exe`. */
-/** The binary name per platform: `mpv` everywhere except Windows, which ships `.exe` (S19). */
-export const MPV_NAME: Readonly<Record<Platform, string>> = { linux: "mpv", darwin: "mpv", win32: "mpv.exe" };
+/** The executable's file name per platform: `mpv` everywhere except Windows, which ships `mpv.exe` (S19). */
+const MPV_NAME: Readonly<Record<Platform, string>> = { linux: "mpv", darwin: "mpv", win32: "mpv.exe" };
 
 /**
  * Where mpv lands when it is not on PATH, per platform. Deliberately short: every entry is a path this
@@ -189,16 +208,29 @@ export function mpvKnownLocations(platform: Platform): readonly string[] {
 /**
  * The command to spawn (S6): the setting, then PATH, then the known locations. The first candidate
  * that exists is asked to answer `--version`, and its answer is final — a binary that exists and does
- * not answer is a failure **state**, never a reason to try the next one, because falling through would
- * announce a working mpv the user never asked for (S6, L15).
+ * not answer is never a reason to try the next one, because falling through would announce a working
+ * mpv the user never asked for (S6, L15). A `mpvPath` that is not absolute stops here as definitive
+ * (R3-002): the OS would resolve it against the directory Pi was started in, which is not a value
+ * this function is allowed to guess.
  */
 export function discoverMpv(ctx: MpvDiscoveryContext): MpvDiscovery {
 	const configured = ctx.configured?.trim();
 	if (configured) {
+		// R3-002: a relative value is resolved by the OS against whatever directory Pi was started in, so the
+		// same settings file would confirm a different binary in another window. It is not something to
+		// complete for the user either: PATH is theirs to choose with this setting, never to override it.
+		if (!isAbsoluteFor(ctx.platform, configured)) {
+			return {
+				ok: false,
+				definitive: true,
+				message: `mpvPath in settings.json is "${configured}", which is not an absolute path: it would resolve against whatever directory Pi was started in — set the full path of the binary, or clear it to search PATH`,
+			};
+		}
 		// A typo in `mpvPath` is the user's to see. Quietly falling back to PATH would hide it forever.
 		if (!ctx.exists(configured)) {
 			return {
 				ok: false,
+				definitive: true,
 				message: `mpvPath in settings.json points at ${configured}, which does not exist: fix it or install mpv`,
 			};
 		}
@@ -217,8 +249,14 @@ export function discoverMpv(ctx: MpvDiscoveryContext): MpvDiscovery {
 
 	return {
 		ok: false,
+		definitive: true,
 		message: `mpv was not found: no ${MPV_NAME[ctx.platform]} on PATH and none of ${known.join(", ")} exists — install mpv or set mpvPath in settings.json`,
 	};
+}
+
+/** Absolute in the platform's own flavour (R3-002): `C:\...` is absolute on win32 and nowhere else. */
+function isAbsoluteFor(platform: Platform, value: string): boolean {
+	return (platform === "win32" ? win32 : posix).isAbsolute(value);
 }
 
 /** Every PATH entry joined with the platform's own executable name, in the order the user put them. */
@@ -232,11 +270,31 @@ function pathCandidates(ctx: MpvDiscoveryContext): readonly string[] {
 	return entries.map((entry) => path.join(entry, MPV_NAME[ctx.platform]));
 }
 
-/** Put one candidate to the only test S6 accepts, and report the answer as the answer. */
+/**
+ * Put one candidate to the only test S6 accepts, and report the answer as the answer. A candidate that
+ * exists but did not confirm is **inconclusive**, not a refusal: the 2 s ceiling is short enough that a
+ * slow disk or a cold cache lands here, so the player still tries the command it names (R4-002). A
+ * timeout and an error are two different causes and never share one sentence.
+ */
 function confirm(ctx: MpvDiscoveryContext, command: string, where: string): MpvDiscovery {
 	const probe = ctx.run(command);
 	if (probe.ok) return { ok: true, command };
-	return { ok: false, message: `${command} (found via ${where}) does not answer --version: ${probe.reason}` };
+	if (probe.timedOut === true) {
+		return {
+			ok: false,
+			definitive: false,
+			command,
+			cause: "timeout",
+			message: `${command} (found via ${where}) did not answer --version within ${VERSION_TIMEOUT_MS / 1000} s, so it could not be confirmed: a slow or hung binary is not necessarily a broken one, so it will still be tried`,
+		};
+	}
+	return {
+		ok: false,
+		definitive: false,
+		command,
+		cause: "error",
+		message: `${command} (found via ${where}) answered --version with an error (${probe.reason}), so it could not be confirmed: it will still be tried`,
+	};
 }
 
 /**
@@ -262,7 +320,13 @@ export const diskProbe: Pick<MpvDiscoveryContext, "exists" | "run"> = {
 				timeout: VERSION_TIMEOUT_MS,
 				encoding: "utf8",
 			});
-			if (result.error) return { ok: false, reason: result.error.message };
+			if (result.error) {
+				// `spawnSync` reports its own budget as ETIMEDOUT: the binary was still running, which is a slower
+				// fact than an answer and must not be reported as one (R4-002).
+				const code = "code" in result.error ? result.error.code : undefined;
+				if (code === "ETIMEDOUT") return { ok: false, timedOut: true };
+				return { ok: false, reason: result.error.message };
+			}
 			if (result.status !== 0) {
 				const detail = (result.stderr ?? "").trim();
 				const code = result.status === null ? "no exit code" : `exit ${String(result.status)}`;
@@ -356,6 +420,13 @@ export interface PlayerDeps {
 	 * player only has to use it; `undefined` keeps the historical bare `"mpv"` meaning.
 	 */
 	readonly mpvPath?: string;
+	/**
+	 * Why playback cannot even be attempted, when discovery found nothing to spawn (S6, R4-003). With it
+	 * set the play path reports this message and never spawns, so what the session announced and what the
+	 * player does are the same fact. Additive: absent, the player spawns `mpvPath` as it always did, and an
+	 * unconcluded candidate is **not** a refusal (R4-002).
+	 */
+	readonly refusal?: string;
 	/** The level the session starts at, if the caller wants one applied on connect (S11: core owns 70). */
 	readonly volume?: number;
 	readonly retryMs?: number;
@@ -505,6 +576,7 @@ class MpvPlayer implements Player {
 	/* --- connecting -------------------------------------------------------------------------- */
 
 	async #connect(): Promise<void> {
+		if (this.#refuse()) return;
 		if (!this.#prepareSocketDir()) return;
 
 		const socket = await this.#reachNewChild();
@@ -552,6 +624,17 @@ class MpvPlayer implements Player {
 		// session volume would reset it silently after a recovery (R4-002).
 		await this.#applyInitialVolume();
 		this.#emit({ kind: "ready" });
+	}
+
+	/**
+	 * The refusal discovery handed over (S6, R4-003): reported, and enforced by never spawning a command
+	 * nobody confirmed. Saying it once and then trying the bare name again is the finding, not the fix.
+	 */
+	#refuse(): boolean {
+		const refusal = this.#deps.refusal;
+		if (refusal === undefined) return false;
+		this.#unavailable(refusal);
+		return true;
 	}
 
 	/** The socket's directory, or a report and `false`: an untrusted path is not worth an mpv process. */

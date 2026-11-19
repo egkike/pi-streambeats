@@ -86,6 +86,8 @@ interface FixtureOptions {
 	/** Overrides merged into the written `settings.json`; everything left out keeps its default (S2). */
 	readonly shortcuts?: Readonly<Record<string, string>>;
 	readonly asciiGlyphs?: boolean;
+	/** `settings.mpvPath` when the test is about which binary discovery hands the player (S6, T12). */
+	readonly mpvPath?: string;
 	/** Write this text instead of a settings object: the broken-file path (S2, R3-001). */
 	readonly raw?: string;
 }
@@ -112,6 +114,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
 		libraryRoot: library,
 		...(options.shortcuts === undefined ? {} : { shortcuts: options.shortcuts }),
 		...(options.asciiGlyphs === undefined ? {} : { asciiGlyphs: options.asciiGlyphs }),
+		...(options.mpvPath === undefined ? {} : { mpvPath: options.mpvPath }),
 	};
 	writeFileSync(settingsFile, options.raw ?? `${JSON.stringify(settings, null, "\t")}\n`);
 
@@ -459,6 +462,49 @@ describe("the entry point Pi loads (S1, S2, S8)", () => {
 					h.notices.some((notice) => notice.includes("mpv")),
 					`a binary that does not answer is a state to show, got: ${JSON.stringify(h.notices)}`,
 				);
+			} finally {
+				await shutdown(h);
+			}
+		});
+	});
+
+	it("refuses a relative mpvPath instead of letting PATH answer for it (R3-002, R4-003)", async () => {
+		// A relative value resolves against whatever directory Pi was launched from, so the same settings file
+		// could confirm different binaries. The probe would confirm anything: the point is that nothing on PATH
+		// is even asked, because this is a definitive failure the root hands over as a refusal.
+		const f = fixture({ mpvPath: "bin/mpv" });
+		await as(f, async () => {
+			const h = host();
+			sbMusic(h.pi, { fetch: catalogFetch, probe: FOUND_MPV });
+			try {
+				await command(h, "");
+
+				const mentions = h.notices.filter((notice) => notice.includes("mpvPath"));
+				assert.equal(mentions.length, 1, `the setting is named once per session, got: ${JSON.stringify(h.notices)}`);
+				assert.match(mentions[0] ?? "", /bin\/mpv/);
+				assert.match(mentions[0] ?? "", /not an absolute path/);
+				assert.deepEqual(h.notices, mentions, "nothing else was announced: no PATH candidate took its place");
+			} finally {
+				await shutdown(h);
+			}
+		});
+	});
+
+	it("says a candidate could not be confirmed without calling it unavailable (R4-002)", async () => {
+		// The 2 s ceiling is a false-negative source: a slow-but-working mpv lands here, and the only honest
+		// sentence is that it did not confirm — never that the binary is missing.
+		const f = fixture({});
+		await as(f, async () => {
+			const h = host();
+			sbMusic(h.pi, { fetch: catalogFetch, probe: { exists: () => true, run: () => ({ ok: false, timedOut: true }) } });
+			try {
+				await command(h, "");
+
+				const notice = h.notices.find((candidate) => candidate.includes("mpv"));
+				assert.ok(notice, `a binary that never answered is a state to show, got: ${JSON.stringify(h.notices)}`);
+				assert.match(notice, /could not be confirmed/);
+				assert.match(notice, /within 2 s/, "a timeout is named as a timeout");
+				assert.doesNotMatch(notice, /unavailable|not found/i, "and never as a binary that is not there");
 			} finally {
 				await shutdown(h);
 			}
