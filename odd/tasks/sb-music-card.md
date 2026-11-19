@@ -2131,6 +2131,14 @@ pinneó la forma honesta en vez de inventar un rojo. Las dos cosas están dichas
 `catalogCache.write` alimente `options.cache`, o sea que el archivo escrito es el que lee la próxima apertura. Sin eso la
 promoción no era observable. Afecta a todos los tests de catálogo que escriben.
 
+**La review bloqueó esta unidad, y con razón.** El refuter del linaje `review-2ef86522f1da707f` confirmó un hallazgo
+CRITICAL determinista: la rama de reuso se aplicaba a **toda** entrada, no sólo a las degradadas, así que una caché entera
+y vencida dejaba de re-bajar las páginas de álbum —y un álbum que sumara pistas no se enteraba nunca—, que es una
+regresión del baseline: el revalidado bajaba todas las páginas justamente para descubrir eso. Corrección acotada en un
+commit propio (plan declarado 70 líneas de diff, 27 usadas): el reuso pasa a ser **regla de entrada degradada**, y
+`readCatalog` recibe `reuseCached`, verdadero sólo cuando `cache.partial === true`. RED observado revirtiendo el fix: el
+test nuevo daba `actual: [], expected: ['chillhop']`.
+
 Evidencia: REDs propios por regla (el export del TTL, la marca en el round-trip, `write` en 0 donde se esperaba 1, las
 lecturas de índice, la lista de fetch `['chillhop','lofi']` contra `['lofi']`, y `['chillhop','chillhop','lofi']` contra
 `['chillhop','lofi']` al curarse), una triangulación que borra `tracks: known.tracks` y hace fallar el reuso con «0

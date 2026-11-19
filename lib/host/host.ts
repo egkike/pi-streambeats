@@ -418,13 +418,13 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 			// asked, and nothing is said while it works (L75).
 			catalogLoaded = true;
 			serveCache(cache);
-			void readCatalog(token, true);
+			void readCatalog(token, true, cache.partial === true);
 			return;
 		}
 		// The message has two forms because the total does not exist until the index is parsed (L75): the
 		// footer starts without it and only then can it say `3 of 12`.
 		dispatch({ kind: "catalog-reading", label: "catalog…" });
-		void readCatalog(token, false);
+		void readCatalog(token, false, false);
 	}
 
 	/** Paint from the cache, and remember its albums for the moments they are entered (S20). */
@@ -436,11 +436,13 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 	/**
 	 * One pass over the catalog: the index and then the albums it announces, in index order. `revalidating` is
 	 * the background refresh of a served cache, which says nothing in the footer while it works (L75).
+	 * `reuseCached` is on only when the entry being refreshed was degraded — the one read allowed to skip an
+	 * album page instead of downloading it again (R4-001).
 	 *
 	 * Every answer is checked against the pass token before it touches the state, and a pass that lost its
 	 * race writes nothing — the same discipline T21 established for folder reads, applied to the network.
 	 */
-	async function readCatalog(token: number, revalidating: boolean): Promise<void> {
+	async function readCatalog(token: number, revalidating: boolean, reuseCached: boolean): Promise<void> {
 		const reader = deps.catalog;
 		if (!reader) return;
 
@@ -469,10 +471,12 @@ export function registerSbMusic(pi: ExtensionAPI, deps: SbMusicDeps): void {
 		let resolved = 0;
 		for (const album of index.value) {
 			const known = catalogListings.get(album.slug);
-			if (known) {
-				// The index still announces an album we already hold, so its tracks are good and downloading them
-				// again is the expensive part of a pass done twice (R4-001). The title comes from the index: it is
-				// free and fresher than the copy the cache froze.
+			// Reuse is a **degraded-entry** rule, never a general one. A degraded read may skip a page because that
+			// is its whole reason to exist: the row it lost cannot be asked for by name, so the index is all it has.
+			// A whole stale entry must download them again — a track added to an album that already existed is only
+			// discoverable on its page, and reusing would freeze that album's track list for good (R4-001).
+			if (known && reuseCached) {
+				// The title comes from the index: it is free and fresher than the copy the cache froze.
 				const reused: CatalogAlbumListing = { slug: album.slug, title: album.title, tracks: known.tracks };
 				catalogListings.set(album.slug, reused);
 				listings.push(reused);

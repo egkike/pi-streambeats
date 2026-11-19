@@ -1832,9 +1832,10 @@ describe("the catalog opens, loads and revalidates (S20, L75)", () => {
 		assert.equal(h.catalogWrites.length, 0, "while nothing that is not a catalog is cached");
 	});
 
-	it("asks for no album page at all when a whole index has nothing new (R4-001)", async () => {
-		// A stale entry with every album is the case the reuse rule exists for: 12 albums were 12 downloads on
-		// every cold open, and the index alone says they are still there.
+	it("downloads every album page again for a whole stale entry, because a new track only appears there (R4-001)", async () => {
+		// The guard on the reuse rule. A whole entry is revalidated to learn what the site added, and a track added
+		// to an album that already existed is only discoverable on that album's page: reusing the cached tracks
+		// would freeze that album's track list for good. Reuse belongs to a degraded entry alone.
 		const h = harness();
 		h.options.catalog = { readIndex: indexOf([CHILLHOP]), readAlbum: albumsOf() };
 		h.options.cache = cacheOf([listingOf(CHILLHOP)], h.now.value - 25 * 60 * 60 * 1000);
@@ -1843,7 +1844,7 @@ describe("the catalog opens, loads and revalidates (S20, L75)", () => {
 		await open(h);
 		await flush();
 
-		assert.deepEqual(h.catalogCalls.albums, [], "an album the entry already had is never downloaded twice");
+		assert.deepEqual(h.catalogCalls.albums, [CHILLHOP.slug], "the page is asked for again, as it was before reuse");
 		assert.equal(h.catalogWrites.length, 1, "and the entry is written again, with another day ahead of it");
 	});
 
