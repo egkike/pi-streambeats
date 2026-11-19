@@ -354,6 +354,7 @@ Requisitos, todos verificables:
 | T34 | S20 | `R3-temp-empty-refetch` de la review de T14.2: una carpeta local **vacía** se vuelve a escanear en cada viaje de ida y vuelta, porque `switch-source` sólo pide lectura cuando `entries.length === 0` y no recuerda si ya se pidió | inline | **hecho** — el listado recuerda si fue leído (`SourceView.loaded`), así que una carpeta vacía ya leída no se re-escanea y un fallo sigue reintentando (L88) | `L88` |
 | T36 | S20 | `R4-002` + `R3-003`: un índice que sólo se reconoce en parte se cachea 24 h como un catálogo más chico, y a una pista sin número se le inventa uno que puede colisionar o saltar el orden | inline | **hecho** — la guarda de forma cuenta las filas ilegibles y las levanta como `scrape`, y el orden deja de inventar números (L90) | `L90` |
 | T37 | S20 | `R3-001` + `R4-001` + `R4-002` de la review de T36: la guarda `unrecognized > 0 → scrape` contradice S20 («falla sólo si no se scrapeó cero álbumes», L243/L696) y en arranque en frío manda la card a la biblioteca por una sola fila ilegible; además el conteo se descarta y la deriva no deja traza | worker | **hecho** — el índice parcial se sirve con las filas ilegibles como dato, no se cachea, deja traza y el pie lo dice (L91) | `L91` |
+| T38 | S20 | `R2-001` + `R4-001` de la review de #81: un `?? item` muerto que ensuciaba la forma del dato, y una entrada degradada que no se cacheaba nunca —cada apertura en frío re-bajaba el índice y todas las páginas de álbum— sin revalidación barata ni promoción | worker | **hecho** — TTL corto con marca, revalidación de sólo el índice, reuso de las pistas cacheadas y promoción al curarse (L92) | `L92` |
 | T35 | — | **Release `v0.1.0`**: `version` a `0.1.0`, `RELEASING.md` (semver, comandos, rollback), sección `Install` en el README con el `git:` pinneable y plataformas honestas, y la guarda de CI que falla si el tag no coincide con `package.json`. El acto —`git tag -a v0.1.0`, `gh release create --generate-notes`— lo mueve el dueño o lo muevo yo con su permiso | inline | abierta — **dispara cuando no quede ninguna otra fila abierta**, y va **antes** de publicar en el hub (L89) | — |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
@@ -2097,3 +2098,41 @@ verde antes y después, porque la decisión vive en `http.ts`; queda como guarda
 `pnpm check` verde: **521 tests / 116 suites** (venía de 515/116), `tests/boundary.test.ts` 13/13 — `lib/core` siguió
 puro y sincrónico. El test del grid vacío quedó **sin tocar y verde**: es la prueba de que se preservó la regla de S20
 mientras se aflojaba la que T36 había endurecido de más (issue #80, PR de esta rama).
+
+L92 (T38: `R2-001` y `R4-001` en sus dos fases). Pedido del dueño, verbatim: **"Listo el merge. Arreglemos todo de una,
+R2-001 y R4-001 fase 1 y fase 2 juntas... Se puede?"**. Se pudo, y se hizo en una sola unidad porque los tres son la
+misma pregunta —qué se hace con una lectura parcial— y viven en la misma pasada de `readCatalog`.
+
+**`R2-001`: el fallback era código muerto y además mentía.** `readAlbumGrid` hacía `row[1] ?? item`. Si la fila matcheó
+`GRID_ITEM`, el grupo de captura existe por construcción, así que el `?? item` era inalcanzable — y peor, dejaba que el
+array de «ids ilegibles» contuviera markup entero. Se borró; la guarda que queda (`id !== undefined`) es del chequeador de
+tipos, no del sitio, y el comentario lo dice.
+
+**`R4-001` fase 1: una entrada degradada se recuerda, pero con vida corta.** `CatalogCache.partial?: true` —escrito
+**sólo** cuando es cierto, igual que `partial` en `CatalogResult`, porque ausente y `false` no pueden ser dos formas del
+mismo hecho— y `CATALOG_PARTIAL_TTL_MS` de 45 minutos. La política del TTL quedó **dentro de `lib/catalog/cache.ts`**:
+`isCatalogFresh(cache, now, ttlMs?)` elige según la marca cuando nadie le pasa uno explícito, así el host no aprende
+vencimientos y los tests siguen moviendo la ventana sin esperar. `cacheOf` rechaza cualquier `partial` que no sea
+exactamente `true`: una entrada cuyo TTL depende de ese campo no se confía a medias.
+
+**`R4-001` fase 2: se revalida el índice, no el mundo.** La clave del orden: una fila ilegible da un `data-item-id`, **no
+un slug**, así que el álbum que faltó no se puede pedir por nombre —sólo redescubrir releyendo el índice—. Entonces: una
+entrada degradada se sirve y se revalida **aunque esté fresca** (si esperara sus 45 minutos, la fase 1 sería a la vez el
+límite de la curación), los slugs que el índice sigue anunciando reusan las pistas cacheadas —lo caro es bajarlas, no
+listarlas— y sólo se piden las páginas de los slugs que no estaban. Al terminar se escribe siempre la caché; si el índice
+volvió entero, la entrada se **promueve**: sin marca, 24 h otra vez, y el aviso se va con ella.
+
+**Lo que el worker declaró y yo acepto como límite conocido:** el contador de progreso cuenta los reusados como resueltos
+al instante, pero esa rama no está ejercitada de punta a punta (en la práctica un pase que reusa es el de revalidación, y
+ahí no se imprime contador); y `R2-001` **no tiene RED observable**, porque era inalcanzable por construcción — se
+pinneó la forma honesta en vez de inventar un rojo. Las dos cosas están dichas, no tapadas.
+
+**Cambio de infraestructura de test que hay que mirar:** el harness de `tests/host/host.test.ts` ahora hace que
+`catalogCache.write` alimente `options.cache`, o sea que el archivo escrito es el que lee la próxima apertura. Sin eso la
+promoción no era observable. Afecta a todos los tests de catálogo que escriben.
+
+Evidencia: REDs propios por regla (el export del TTL, la marca en el round-trip, `write` en 0 donde se esperaba 1, las
+lecturas de índice, la lista de fetch `['chillhop','lofi']` contra `['lofi']`, y `['chillhop','chillhop','lofi']` contra
+`['chillhop','lofi']` al curarse), una triangulación que borra `tracks: known.tracks` y hace fallar el reuso con «0
+tracks», y `pnpm check` verde: **530 tests / 117 suites** (venía de 521/116), `boundary` 13/13, `lib/core` sin tocar.
+Diff: 8 archivos, ~300 líneas autoradas (issue #82, PR de esta rama).

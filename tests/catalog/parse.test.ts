@@ -68,7 +68,8 @@ describe("readAlbumGrid (S20)", () => {
 	it("names the row whose album link it could not read, instead of shrinking the catalog quietly", () => {
 		// The tolerance is per item, and it is about a title: an album that loses its name keeps its row. A
 		// row whose link moved is different — the album is gone — so the row is reported by the id the site
-		// gave it: a count says "something is off", an id says which row to go look at.
+		// gave it: a count says "something is off", an id says which row to go look at. And an id is all it
+		// is: the array never holds the row's markup, so no consumer has to wonder which of the two it got.
 		const html = [
 			'<li data-item-id="album-1"><a href="/album/electric"><p class="title">Electric<br></p></li>',
 			'<li data-item-id="album-2"><a href="/album/groovy?from=grid"><p class="title">Groovy<br></p></li>',
@@ -78,6 +79,11 @@ describe("readAlbumGrid (S20)", () => {
 			albums: [{ slug: "electric", title: "Electric" }],
 			unreadable: ["album-2"],
 		});
+		assert.equal(
+			readAlbumGrid(html).unreadable.some((row) => row.includes("<")),
+			false,
+			"the report is the row's id, never the row's markup",
+		);
 	});
 
 	it("reports no unreadable row when the skip was a duplicate slug", () => {

@@ -13,7 +13,7 @@ import type {
 	Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { Component, OverlayHandle, TUI, TuiMouseEvent } from "@earendil-works/pi-tui";
-import { isCatalogFresh } from "../../lib/catalog/cache.ts";
+import { CATALOG_PARTIAL_TTL_MS, isCatalogFresh } from "../../lib/catalog/cache.ts";
 import { registerSbMusic, STATUS_KEY } from "../../lib/host/host.ts";
 import type { ScanResult } from "../../lib/library/scan.ts";
 import type { Player, PlayerReport } from "../../lib/player/mpv.ts";
@@ -408,9 +408,12 @@ function register(
 						read: () => h.options.cache,
 						write: (path, cache) => {
 							h.catalogWrites.push({ path, cache });
+							// The fake file behaves like the real one: what a pass wrote is what the next open reads. Without
+							// that feedback a promotion could not be observed, because it is a second read of the same file.
+							h.options.cache = cache;
 							return true;
 						},
-						// The real TTL rule (L75), so "fresh" means what the cache module means by it.
+						// The real TTL rule (L75, R4-001), so "fresh" means what the cache module means by it.
 						isFresh: (cache, now) => isCatalogFresh(cache, now),
 					},
 		catalogCachePath: CACHE_FILE,
@@ -1684,7 +1687,7 @@ describe("the catalog opens, loads and revalidates (S20, L75)", () => {
 	const partlyReadOf = (): CatalogScript["readIndex"] => () =>
 		Promise.resolve({ ok: true, value: [CHILLHOP], partial: ["album-2"] });
 
-	it("serves a partly read index without freezing the hole into the cache (S20)", async () => {
+	it("serves a partly read index and remembers it under the short TTL (S20, R4-001)", async () => {
 		const h = harness();
 		h.options.catalog = { readIndex: partlyReadOf(), readAlbum: albumsOf() };
 		register(h);
@@ -1693,7 +1696,16 @@ describe("the catalog opens, loads and revalidates (S20, L75)", () => {
 		await flush();
 
 		assert.match(frameOf(h), /Chillhop/, "the albums it could read are on the card");
-		assert.equal(h.catalogWrites.length, 0, "a partial read is not a catalog worth 24 h of cache");
+		assert.equal(
+			h.catalogWrites.length,
+			1,
+			"a partial pass is worth remembering: otherwise a permanently unreadable row costs every page on every open",
+		);
+		assert.equal(
+			h.catalogWrites[0]?.cache.partial,
+			true,
+			"stamped as degraded, so it earns the short TTL and a revalidation",
+		);
 	});
 
 	it("does not fall back to the library for a partly read index (S20)", async () => {
@@ -1728,7 +1740,8 @@ describe("the catalog opens, loads and revalidates (S20, L75)", () => {
 
 	it("keeps a catalog sentence off the library's footer when the reader moved away (S20)", async () => {
 		// A revalidation can finish after the reader switched sources, and a hole in the catalog has nothing to
-		// say about the folder on screen. The pass still writes nothing: the site's hole is not the cache's.
+		// say about the folder on screen. The pass still writes what it read — stamped degraded — but the
+		// sentence stays in the catalog's own footer.
 		const h = harness();
 		const index = defer<CatalogResult<readonly CatalogAlbum[]>>();
 		h.options.catalog = { readIndex: () => index.promise, readAlbum: albumsOf() };
@@ -1744,7 +1757,129 @@ describe("the catalog opens, loads and revalidates (S20, L75)", () => {
 		await flush();
 
 		assert.doesNotMatch(frameOf(h), /catalog partly read/, "the catalog's degradation stays its own");
-		assert.equal(h.catalogWrites.length, 0, "and a partial read never replaces the cache");
+		assert.equal(h.catalogWrites.length, 1, "and the pass remembered what it read, stamped degraded");
+		assert.equal(h.catalogWrites[0]?.cache.partial, true);
+	});
+
+	it("revalidates a partial entry even inside its TTL, because a shrunken list has to heal (R4-001)", async () => {
+		// The gesture the footer names is closing and reopening, and a 45-minute cache would make that gesture do
+		// nothing. An unreadable row gives an id, not a slug: the missing album cannot be asked for by name, so
+		// the only way to rediscover it is to read the index again.
+		const h = harness();
+		const index = defer<CatalogResult<readonly CatalogAlbum[]>>();
+		h.options.catalog = { readIndex: () => index.promise, readAlbum: albumsOf() };
+		h.options.cache = { ...cacheOf([listingOf(CHILLHOP)], h.now.value - 60_000), partial: true };
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.equal(h.catalogCalls.index, 1, "a partial entry is revalidated while it is still young");
+		assert.match(frameOf(h), /Chillhop/, "and it is served at once, so the opening waits for nothing");
+		assert.doesNotMatch(frameOf(h), /reading /, "the refresh says nothing in the footer while it works (L75)");
+
+		index.answer({ ok: true, value: [CHILLHOP, LOFI] });
+		await flush();
+
+		assert.match(frameOf(h), /Lo-fi/, "the healed index replaces the list on screen");
+	});
+
+	it("revalidates the index and fetches only the albums the entry did not have (R4-001)", async () => {
+		// The expensive part of a pass is the album pages, and an entry that already holds them is worth reusing:
+		// the index says which albums still exist, and its title is fresher and free. A whole index promotes the
+		// entry — no stamp — so the day-long TTL comes back with it.
+		const h = harness();
+		h.options.catalog = { readIndex: indexOf([CHILLHOP, LOFI]), readAlbum: albumsOf() };
+		h.options.cache = { ...cacheOf([listingOf(CHILLHOP)], h.now.value - 60 * 60 * 1000), partial: true };
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.deepEqual(h.catalogCalls.albums, [LOFI.slug], "the album the entry already had cost no page");
+		const promoted = h.catalogWrites.at(-1)?.cache;
+		assert.equal(promoted?.albums.length, 2, "and the cache keeps both albums once the index is whole");
+		assert.equal(promoted !== undefined && "partial" in promoted, false, "promoted: the stamp is gone, not false");
+		assert.ok(
+			promoted !== undefined && isCatalogFresh(promoted, h.now.value + CATALOG_PARTIAL_TTL_MS),
+			"so the entry is back on the day-long TTL, not the short one",
+		);
+
+		// Triangulation: a reuse that kept the slug but dropped the tracks would pass every assertion above and
+		// still show an empty album, so the album the entry already had is opened here.
+		h.overlays.at(-1)?.component.handleInput?.("\r");
+		await flush();
+		assert.match(frameOf(h), /Arcade Dreams/, "and the reused album still carries the tracks it was served from");
+		assert.deepEqual(h.catalogCalls.albums, [LOFI.slug], "with no request for the page it already had");
+	});
+
+	it("treats a pass that resolved no album as the catalog not being there (S20)", async () => {
+		// The tolerance of S20 is per album, never for the whole catalog: an index whose every page failed is a
+		// catalog that is not there, and caching it would hide the failure for a day. The pass now writes for
+		// every finished read, so this boundary is the one that keeps the funnel honest.
+		const h = harness();
+		h.options.catalog = {
+			readIndex: indexOf([CHILLHOP]),
+			readAlbum: () => Promise.resolve({ ok: false, failure: "scrape" }),
+		};
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.deepEqual(h.scanCalls, [ROOT], "the card fell back to the only listing it can still show");
+		assert.match(frameOf(h), /catalog unavailable · reopen to retry/, "and says why");
+		assert.equal(h.catalogWrites.length, 0, "while nothing that is not a catalog is cached");
+	});
+
+	it("asks for no album page at all when a whole index has nothing new (R4-001)", async () => {
+		// A stale entry with every album is the case the reuse rule exists for: 12 albums were 12 downloads on
+		// every cold open, and the index alone says they are still there.
+		const h = harness();
+		h.options.catalog = { readIndex: indexOf([CHILLHOP]), readAlbum: albumsOf() };
+		h.options.cache = cacheOf([listingOf(CHILLHOP)], h.now.value - 25 * 60 * 60 * 1000);
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.deepEqual(h.catalogCalls.albums, [], "an album the entry already had is never downloaded twice");
+		assert.equal(h.catalogWrites.length, 1, "and the entry is written again, with another day ahead of it");
+	});
+
+	it("stops apologising once the index heals (R4-001)", async () => {
+		// Closing and reopening the card is a new session, and that is exactly the gesture the footer names. The
+		// entry carries the degradation across it; the healed pass promotes the file, and the apology goes with it.
+		const h = harness();
+		let partial = true;
+		h.options.catalog = {
+			readIndex: () =>
+				Promise.resolve(
+					partial ? { ok: true, value: [CHILLHOP], partial: ["album-2"] } : { ok: true, value: [CHILLHOP, LOFI] },
+				),
+			readAlbum: albumsOf(),
+		};
+		register(h);
+		await start(h);
+		await open(h);
+		await flush();
+		const notice = "catalog partly read · reopen to retry";
+		assert.equal(frameOf(h).split(notice).length - 1, 1, "the degraded pass says it once");
+
+		await h.handlers.get("session_shutdown")?.(undefined, h.ctx);
+		partial = false;
+		await start(h);
+		await open(h);
+		await flush();
+
+		assert.match(frameOf(h), /Lo-fi/, "the healed index is on the card");
+		assert.deepEqual(
+			h.catalogCalls.albums,
+			[CHILLHOP.slug, LOFI.slug],
+			"the album the first session read was not downloaded a second time",
+		);
+		assert.equal(h.catalogWrites.at(-1)?.cache.partial, undefined, "the entry was promoted, so nothing claims a hole");
+		assert.doesNotMatch(frameOf(h), /catalog partly read/, "and a healed list does not keep apologising");
 	});
 
 	it("paints a stale cache first and revalidates it behind the reader's back", async () => {

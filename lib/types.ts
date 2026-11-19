@@ -104,9 +104,16 @@ export interface CatalogAlbumListing extends CatalogAlbum {
 export interface CatalogCache {
 	/** Bumped when the shape changes: an older file is a missing cache, never a half-read one. */
 	readonly version: 1;
-	/** Epoch milliseconds of the read that filled it; the 24 h TTL of L75 is measured from here. */
+	/** Epoch milliseconds of the read that filled it: the TTL of L75 is measured from here. */
 	readonly fetchedAt: number;
 	readonly albums: readonly CatalogAlbumListing[];
+	/**
+	 * The pass that froze this file left at least one index row unreadable (R4-001, L90). Written **only** when
+	 * it is true: a whole pass omits the field, because `absent` and `false` cannot be two shapes of one fact.
+	 * It is not decoration — a degraded entry earns a shorter TTL and is revalidated even while it is young, so
+	 * a shrunken list has a way to heal.
+	 */
+	readonly partial?: true;
 }
 
 /**

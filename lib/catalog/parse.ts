@@ -95,11 +95,14 @@ export function readAlbumGrid(html: string): AlbumGrid {
 
 	for (const row of html.matchAll(GRID_ITEM)) {
 		const item = row[0];
+		const id = row[1];
 		const slug = ALBUM_LINK.exec(item)?.[1];
 		if (!slug) {
-			// The id is the row's own attribute, so the group is there by construction; the whole row is the
-			// fallback because a degradation named vaguely still beats one nobody can point at.
-			unreadable.push(row[1] ?? item);
+			// The id is a capture group of `GRID_ITEM`, so a row that matched always carries one and there is no
+			// fallback: a fallback would let this array hold a whole `<li>` where every consumer promises an id,
+			// and the type would be a promise the value does not keep. The guard below is the type checker's, not
+			// the site's.
+			if (id !== undefined) unreadable.push(id);
 			continue;
 		}
 		// A repeated slug is the one benign skip: the same album twice is not markup we failed to read, so it
