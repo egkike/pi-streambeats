@@ -1,0 +1,27 @@
+name: Release tag
+
+# A release tag is a pin. `pi install git:github.com/egkike/pi-streambeats@v0.1.0` promises the code that
+# `package.json` calls `0.1.0`, so a tag that names another version has to fail loudly instead of shipping
+# a pin that lies. The guard reads `package.json` and compares it with the pushed ref (T35).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: release tag matches package.json
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.19.0"
+      # No install step on purpose: the guard reads package.json and compares strings, so it has nothing
+      # to fetch. Every dependency here would be one more way for a release tag to fail for the wrong reason.
+      - run: node scripts/release-tag.mjs "$GITHUB_REF_NAME"
