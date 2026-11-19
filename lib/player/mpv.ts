@@ -21,9 +21,10 @@
  * spawn, in the order S6 gives — the setting, then PATH, then the places each platform's installers
  * really use — and only a binary that answers `--version` is ever announced as found. A Windows
  * installer leaves mpv outside PATH (L15), so a bare `"mpv"` is not an answer there. Because the
- * confirmation is a real run with a budget, its failure has two shapes and they are not the same
- * fact (R4-002, R4-003): nothing to spawn is a definitive refusal the player enforces, while a
- * candidate that exists and did not confirm is inconclusive and is still tried.
+ * confirmation is a real run with a budget, its failure has more than one shape and they are not the
+ * same fact (R4-002, R4-003, T42): nothing to spawn is a definitive refusal the player enforces, while
+ * a candidate that exists and did not confirm is inconclusive and is still tried — and a run that
+ * started without an answer is neither of the two sentences that claim one thing or the other.
  */
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -147,20 +148,81 @@ export function mpvArgs(target: string): readonly string[] {
 /* --- finding the binary: setting, then PATH, then the installers' own places (S6, T12) ---------- */
 
 /**
- * What `<command> --version` answered, or whether it answered at all (S6). The three failures are three
- * facts, and `started` is the one that decides whether anything may be said about an answer (R4-002, T41).
+ * What `<command> --version` answered, or whether it answered at all (S6). The failures are different
+ * facts, and `started`/`answered` are the ones that decide what may be said about an answer (R4-002, T42).
  */
 export type MpvProbe =
 	| { readonly ok: true }
 	/** It was still running when its budget ran out: slow or wedged, which is not the same as wrong (R4-002). */
 	| { readonly ok: false; readonly timedOut: true }
-	/** It ran: `reason` is what it said, or how it ended without saying anything better. */
-	| { readonly ok: false; readonly timedOut?: false; readonly started: true; readonly reason: string }
+	/**
+	 * It ran. `answered` says whether an answer reached us, because those are two facts and only one of them
+	 * allows a sentence about an answer: `ENOBUFS` past `maxBuffer` is the documented way to lose a child's
+	 * output, and calling that a start failure would be false (R4-002, T42).
+	 *
+	 * WHY the boolean is **required**: a producer that loses the output has to say so, and the compiler is the
+	 * only place that can force it. A marker shape would let a forgetful producer print the answered sentence
+	 * for a run whose output never arrived — the exact false diagnostic this arm exists to prevent.
+	 */
+	| {
+			readonly ok: false;
+			readonly timedOut?: false;
+			readonly started: true;
+			readonly answered: boolean;
+			readonly reason: string;
+	  }
 	/**
 	 * The OS never executed it — a bare name nothing on PATH answers to, a directory, a file without the
-	 * execute bit — so **nothing answered**, and `reason` is the OS's own message (T41).
+	 * execute bit — so **nothing answered**, and `reason` is the OS's own message (T41). `neverStarted`
+	 * decides which codes are allowed into this shape (T42).
 	 */
 	| { readonly ok: false; readonly timedOut?: false; readonly started: false; readonly reason: string };
+
+/* --- reading a `--version` run: what its error proves (S6, R4-002, T42) ------------------------- */
+
+/**
+ * The `errno` codes that mean the OS refused to execute the command at all: no such file (`ENOENT`), no
+ * execute permission (`EACCES`), a directory (`EISDIR`), a path through a non-directory (`ENOTDIR`), a
+ * symlink loop (`ELOOP`), and a file the kernel will not load (`ENOEXEC`).
+ *
+ * WHY an allow-list and not "everything except ETIMEDOUT": `spawnSync` also reports errors that happen
+ * **after** the child exists — `ENOBUFS` when its output passes `maxBuffer` is the documented one — and
+ * those prove the opposite: the binary ran. Reading them as "never started" told the user the OS had
+ * refused a command it had executed (R4-002, T42). An unclassified code is not evidence either way, so it
+ * stays off this list and lands on the honest side.
+ */
+const NEVER_STARTED: ReadonlySet<string> = new Set(["ENOENT", "EACCES", "EISDIR", "ENOTDIR", "ELOOP", "ENOEXEC"]);
+
+/**
+ * Whether a `spawnSync` error code proves the OS never executed the command (R4-002, T42). Pure, so the
+ * fact is a value a test on any platform can pin without spawning anything, and the sentence cannot drift
+ * away from it. `undefined` — an error with no code, or no error at all — proves nothing.
+ */
+export function neverStarted(code: string | undefined): boolean {
+	return code !== undefined && NEVER_STARTED.has(code);
+}
+
+/** The slice of `spawnSync`'s error this module reads: `code` is the `errno` string when there is one. */
+export interface SpawnError {
+	readonly code?: string;
+	readonly message: string;
+}
+
+/**
+ * What a `spawnSync` error proves, as the probe the resolver reads (R4-002, R4-003). Pure and exported for
+ * the reason the predicate is: this is the wiring that carried the defect, so it has to be testable from a
+ * platform that never runs a binary. Three facts, and only one of them is a refusal:
+ *
+ * - `ETIMEDOUT` is `spawnSync`'s own budget: the binary was running and is slower than the ceiling.
+ * - A code in `neverStarted` is the OS refusing to execute it: nothing answered.
+ * - Anything else — `ENOBUFS` past `maxBuffer`, an unclassified code, no code at all — happens with a child
+ *   that exists, so the binary ran and its answer never reached us.
+ */
+export function spawnErrorProbe(error: SpawnError): Exclude<MpvProbe, { readonly ok: true }> {
+	if (error.code === "ETIMEDOUT") return { ok: false, timedOut: true };
+	if (neverStarted(error.code)) return { ok: false, started: false, reason: error.message };
+	return { ok: false, started: true, answered: false, reason: error.message };
+}
 
 export interface MpvDiscoveryContext {
 	readonly platform: Platform;
@@ -325,6 +387,11 @@ function pathCandidates(ctx: MpvDiscoveryContext): readonly string[] {
  * saying it "answered with an error" would put words in the mouth of a process that never started (T41).
  * `origin` says where the command came from — never that a candidate was found, because a bare name from the
  * setting is confirmed without any `exists()` check.
+ *
+ * A fourth case is neither of them (T42): a run that started and whose answer was lost — `ENOBUFS` past
+ * `maxBuffer` — ran, so it did not fail to start, and nothing came back, so it did not answer. Reusing either
+ * sentence there would state a fact we do not have, so it gets the one sentence that is true: it ran and no
+ * answer reached us.
  */
 function confirm(ctx: MpvDiscoveryContext, command: string, origin: string): MpvDiscovery {
 	const probe = ctx.run(command);
@@ -338,14 +405,24 @@ function confirm(ctx: MpvDiscoveryContext, command: string, origin: string): Mpv
 			message: `${command} (from ${origin}) did not answer --version within ${VERSION_TIMEOUT_MS / 1000} s, so it could not be confirmed: a slow or hung binary is not necessarily a broken one, so it will still be tried`,
 		};
 	}
+	if (probe.started === false) {
+		return {
+			ok: false,
+			definitive: false,
+			command,
+			cause: "error",
+			message: `${command} (from ${origin}) could not be started (${probe.reason}), so it never answered --version and could not be confirmed: it will still be tried`,
+		};
+	}
+	const outcome = probe.answered
+		? `answered --version with an error (${probe.reason})`
+		: `ran --version but its answer never reached us (${probe.reason})`;
 	return {
 		ok: false,
 		definitive: false,
 		command,
 		cause: "error",
-		message: probe.started
-			? `${command} (from ${origin}) answered --version with an error (${probe.reason}), so it could not be confirmed: it will still be tried`
-			: `${command} (from ${origin}) could not be started (${probe.reason}), so it never answered --version and could not be confirmed: it will still be tried`,
+		message: `${command} (from ${origin}) ${outcome}, so it could not be confirmed: it will still be tried`,
 	};
 }
 
@@ -372,22 +449,16 @@ export const diskProbe: Pick<MpvDiscoveryContext, "exists" | "run"> = {
 				timeout: VERSION_TIMEOUT_MS,
 				encoding: "utf8",
 			});
-			if (result.error) {
-				// `spawnSync` reports its own budget as ETIMEDOUT: the binary was still running, which is a slower
-				// fact than an answer and must not be reported as one (R4-002).
-				const code = "code" in result.error ? result.error.code : undefined;
-				if (code === "ETIMEDOUT") return { ok: false, timedOut: true };
-				// Every other `error` here means the OS never executed the command: nothing answered anything (T41).
-				return { ok: false, started: false, reason: result.error.message };
-			}
+			if (result.error) return spawnErrorProbe(result.error);
 			if (result.status !== 0) {
 				const detail = (result.stderr ?? "").trim();
 				const code = result.status === null ? "no exit code" : `exit ${String(result.status)}`;
-				return { ok: false, started: true, reason: detail ? `${code}: ${detail}` : code };
+				return { ok: false, started: true, answered: true, reason: detail ? `${code}: ${detail}` : code };
 			}
 			return { ok: true };
 		} catch (error) {
-			// `spawnSync` throwing means it never got as far as starting a child: it did not answer either.
+			// `spawnSync` throwing means it never got as far as creating a child — it refuses its arguments before it
+			// forks — so it did not answer either: this is a start failure by construction (R3-002, T42).
 			return { ok: false, started: false, reason: reasonOf(error) };
 		}
 	},
