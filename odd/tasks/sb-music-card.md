@@ -2730,3 +2730,25 @@ Windows.
 **Límite declarado.** Abrir la card en la TUI de la VM por ssh **no** se pudo: la sesión necesita un terminal real, y
 mantenerla viva a fuerza de `sleep` es justo lo que no corresponde. La prueba de punta a punta de la UI queda para la
 consola de la VM.
+
+L113 (v0.1.1, para que el fix llegue a quien está pinneado). Decisión del dueño, verbatim: **"Cortar 0.1.1 ahora"**.
+
+**Por qué un patch y no esperar.** `RELEASING.md` define el patch como «una fix donde la superficie queda exactamente
+como está documentada», y nombra el caso: un mensaje que mentía. Es literalmente lo que arregló #112. Y el pin es el único
+mecanismo de entrega que este proyecto tiene: el fix está en `main` desde `7565d63`, pero quien instaló `@v0.1.0` sigue
+viendo el aviso hasta que exista un tag nuevo.
+
+**Lo que cambia en el diff: una línea.** `package.json#version` a `0.1.1`, que es el único lugar donde el número vive.
+Ningún test se toca, y eso no es suerte: el test de la guarda **lee la versión del manifiesto** en vez de escribirla, que
+fue la decisión de T45 justamente para que el primer bump no pusiera la suite en rojo.
+
+**La secuencia es la del documento, sin atajos**: bump → PR → `gate` verde → merge del dueño → tag anotado sobre el merge
+commit → push del tag (que corre la guarda de verdad, por segunda vez) → `gh release create v0.1.1 --generate-notes` con
+dos líneas curadas arriba del listado generado.
+
+**Y el README, que era el hueco del bump.** Pedido del dueño, verbatim: **"No olvides README.md"**. El README fijaba
+`@v0.1.0` en los cinco comandos de instalación y desinstalación, y el estado decía «`v0.1.0` is the first release»: o sea
+que el documento habría mandado a los usuarios **justo a la versión con el aviso**. Ahora los ejemplos dicen `v0.1.1` y la
+nota de estado deja de nombrar una versión —«the first release is out and the card installs from git»— porque un número
+escrito en prosa envejece en cada release, y el pin ya se lee en `Install`. De paso, «19 numbered specs» pasó a «20»: la
+S20 del catálogo ya estaba y la frase había quedado vieja.
