@@ -2608,3 +2608,21 @@ con el comando pelado.
 comando sea el correcto. **No** está probado instalando la card de verdad en ese home: eso mutaría el entorno del dueño y
 no lo hice sin permiso. Si algún día se prueba, el ciclo de feedback de `AGENTS.md` ya dice cómo: abrir con la extensión
 cargada y mirar que la card exista.
+
+L108 (el `--` de Gentle Shell: por qué está y por qué no sobra). Pedido del dueño, verbatim: **"Estos -- son correctos
+en la install de gentle-shell? pi no lo usa"**.
+
+**Son correctos, y no son de Pi.** El `--` es el separador de **Gentle Shell** —el que separa sus propias opciones
+(`--link`, `--isolated`, `--home`) de lo que va a Pi— y está en su propia ayuda: `Usage: gentle-shell [options] [--
+pi-args...]`. Que Pi no lo use es exactamente el punto: no se le pasa a Pi, se lo saca de encima antes de reenviar.
+
+**Y es load-bearing, no decorativo, que es lo que la pregunta destapó.** `gentle-shell list` sin separador funciona
+—imprime los paquetes del home aislado—, así que la forma pelada *parece* alcanzar. Pero `gentle-shell install --help`
+**no** llega a Pi: imprime la ayuda de Gentle Shell, porque el `--help` lo intercepta su parser antes del reenvío. Lo
+mismo le pasaría a `-l` y a `--approve`, que `pi install` sí acepta. Con el separador, `gentle-shell -- install --help`
+devuelve la ayuda de `pi install`, que es el hecho que ya se había medido en L107.
+
+**Lo que cambió en el README** es la explicación, no el comando: ahora dice que el `--` es de Gentle Shell, que va
+después de sus flags y antes de los de Pi, y nombra la prueba concreta (`gentle-shell install --help` imprime la ayuda
+del Shell) para que nadie lo borre pensando que sobra. Un comando correcto sin la razón por la que es correcto dura
+hasta la primera limpieza.
