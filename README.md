@@ -22,10 +22,24 @@ music library and plays it with [mpv](https://mpv.io), without taking the keyboa
 
 ## Install
 
+With **Pi**:
+
 ```sh
 pi install git:github.com/egkike/pi-streambeats          # the tip of main
 pi install git:github.com/egkike/pi-streambeats@v0.1.0   # a release, pinned
 ```
+
+With **Gentle Shell**, the same sources, one word in front — because Gentle Shell keeps its own agent home by
+default (`~/.gentle-shell/agent`) with its own `settings.json`, so a package installed with plain `pi install`
+lands in the vanilla Pi home and the card will not appear in the Shell:
+
+```sh
+# everything after -- is forwarded to Pi, inside the home Gentle Shell resolved
+gentle-shell -- install git:github.com/egkike/pi-streambeats@v0.1.0
+```
+
+If you run Gentle Shell with `--link`, it shares your Pi home instead of its own (`gentle-shell home` prints
+the mode in effect), and the plain `pi install` covers both.
 
 The tag is the pin, and it is exact: `@v0.1.0` installs the commit whose `package.json` says `0.1.0`, and
 no other. The `Release tag` workflow fails when a pushed tag does not match that version, so a pin cannot

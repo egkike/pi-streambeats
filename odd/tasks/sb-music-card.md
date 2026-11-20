@@ -2590,3 +2590,21 @@ anterior contra el cual cortar, la lista arranca en el PR #2. Es honesto y es ru
 **Con esto no queda ninguna fila abierta en `## Tasks`.** El disparador del hub —«no quede ninguna fila `abierta` y no
 haya hallazgos de review pendientes»— se cumple hoy, así que publicar en el hub de Gentle es lo único que queda, y es una
 decisión del dueño: son topics en el repo y en `package.json`, no un cambio de código.
+
+L107 (el `Install` del README no servía para Gentle Shell, y esa es la mitad de los usuarios). Pedido del dueño:
+**"En la sección Install no deberíamos mencionar también como hacerlo con gentle-shell? la extension es para pi y
+gentle-shell se supone"**. Sí, y el hueco era peor que una omisión: era una instrucción que no funciona en el setup por
+defecto.
+
+**Lo que la verificación encontró, sin instalar nada.** Gentle Shell corre por defecto con un **agent home aislado**
+(`~/.gentle-shell/agent`, modo `--isolated` según su propia ayuda) y ahí vive su `settings.json`, con sus `packages`. Un
+`pi install` pelado escribe en el home de Pi vanilla, así que la card no aparecería en el Shell. El camino correcto existe
+y lo prueba el propio host: `gentle-shell -- <pi-args>` reenvía a Pi **dentro del home resuelto** — `gentle-shell -- list`
+devuelve los cuatro paquetes de `~/.gentle-shell/agent`, y `gentle-shell -- install --help` devuelve la ayuda de
+`pi install`. Así que la forma es `gentle-shell -- install git:…@v0.1.0`, y con `--link` el home es el de Pi y alcanza
+con el comando pelado.
+
+**Lo que está probado y lo que no.** Está probado que el `--` ejecuta Pi en el home resuelto, que es lo que hace que el
+comando sea el correcto. **No** está probado instalando la card de verdad en ese home: eso mutaría el entorno del dueño y
+no lo hice sin permiso. Si algún día se prueba, el ciclo de feedback de `AGENTS.md` ya dice cómo: abrir con la extensión
+cargada y mirar que la card exista.
