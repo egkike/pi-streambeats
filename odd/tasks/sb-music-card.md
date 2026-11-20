@@ -385,7 +385,7 @@ de tareas escrita a mano es exactamente lo que envejeció en el archivo de regla
 
 | Riesgo o exclusión | Qué es | Revisar cuando | Origen |
 |---|---|---|---|
-| **Publicación en el hub de Gentle** | El repo no lleva ningún topic, ni siquiera `gentle-hub-project`, que es el que lo hace aparecer en el hub. Publicar una tarjeta que lleva a un README sin nada instalable gasta la primera impresión | **No quede ninguna fila `abierta` en `## Tasks`** y no haya hallazgos de review pendientes de arreglar — o sea **después de T35** (el release), que es la última fila que queda abierta. Ese día se agregan los topics y el hub lo crawlea en horas | L59, verbatim del dueño |
+| **Publicación en el hub de Gentle** | El repo no lleva ningún topic, ni siquiera `gentle-hub-project`, que es el que lo hace aparecer en el hub. Publicar una tarjeta que lleva a un README sin nada instalable gasta la primera impresión | **No quede ninguna fila `abierta` en `## Tasks`** y no haya hallazgos de review pendientes de arreglar — o sea **después de T35** (el release), que es la última fila que queda abierta. Ese día se agregan los topics y el hub lo crawlea en horas — **hecho el 2026-11-20**: diez topics puestos con la lista que el hermano en Go ya usaba (L115) | L59, verbatim del dueño |
 | **`sync` / descargas** | Fuera de S20: el catálogo se navega y se reproduce, no se descarga. La caché es de metadatos, nunca de audio | El dueño lo pida, o la reproducción en streaming deje de alcanzar | L2, S20 |
 | **Temas propios** | Los colores salen del tema del host, sin paletas propias | El dueño lo pida | AGENTS.md, TUI Rules |
 | **Pantalla de settings dentro de la card** | Las teclas se cambian con `/sb-music --keys` y el archivo, no con una UI | El dueño lo pida, o `--keys` deje de alcanzar | S22 |
@@ -2776,3 +2776,26 @@ que probó; una que sólo dice «funciona» está declarando más. La fila dice 
 documentada pero se verificó el reenvío del comando, no la card corriendo desde ese home), y que la VM no tiene proveedor
 de modelos, así que el panel de arranque avisa `No models available` — irrelevante para la card, pero explica por qué el
 host se ve así al abrirla.
+
+L115 (el hub, publicado: la duda del `package.json` y la lista del hermano). Pedido del dueño, verbatim: **"Para qué
+irían los topics en package.json?"**, y después **"El proyecto hermano de este streambeats-player en Go está publicado en
+el hub con gentle-hub-project. Quizas puedas revisar ese repo para mas info"**.
+
+**El `package.json` era un invento mío, y el hermano lo demuestra.** No existe un campo `topics`; lo que existe es
+`keywords`, que ya estaba poblado con las palabras correctas. Y el argumento que cierra: el hermano
+(`egkike/streambeats-player`) está publicado en el hub **y es Go** —no tiene `package.json`—, así que el mecanismo que yo
+había nombrado no existe y no hace falta. Lo dije antes de revisar la fuente, que es exactamente el error que L109 y
+L112 ya habían anotado.
+
+**Lo que el hermano sí muestra.** Sus topics son `bubbletea`, `ghostty`, `go`, `mpv`, `terminal`, `tui`, `streambeats`,
+`gentle-hub-project`, `kde-plasma`: **un topic de hub entre topics de tecnología, dominio y plataforma**, y ningún archivo
+de metadata más —revisado el listado de la raíz, no hay config de hub—. O sea que el repo se publica con los topics y
+nada más. Este repo tenía **cero**.
+
+**Agregados los diez, con la lista del hermano**: `gentle-hub-project`, `pi`, `pi-extension`, `gentle-shell`, `mpv`,
+`music`, `tui`, `terminal`, `streambeats`, `windows`. Verificado con `gh repo view … --json repositoryTopics`, que los
+devuelve todos.
+
+**Queda una diferencia con el hermano, anotada y no ejecutada.** Su descripción está cargada de palabras clave y es
+bilingüe (`ES … | EN …`); la de este repo es una línea corta en inglés. Si el hub mira la descripción, esa diferencia se
+nota. Cambiarla es una decisión del dueño y no la tomé por mi cuenta.
