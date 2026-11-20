@@ -26,7 +26,7 @@ With **Pi**:
 
 ```sh
 pi install git:github.com/egkike/pi-streambeats          # the tip of main
-pi install git:github.com/egkike/pi-streambeats@v0.1.1   # a release, pinned
+pi install git:github.com/egkike/pi-streambeats@v0.2.0   # a release, pinned
 ```
 
 With **Gentle Shell**, the same command with `gentle-shell` in front of it — the Shell recognises the Pi
@@ -35,7 +35,7 @@ with its own `settings.json`). A plain `pi install` would land in the vanilla Pi
 appear in the Shell:
 
 ```sh
-gentle-shell install git:github.com/egkike/pi-streambeats@v0.1.1
+gentle-shell install git:github.com/egkike/pi-streambeats@v0.2.0
 ```
 
 Gentle Shell parses its own options first (`--link`, `--isolated`, `--home`) and hands the subcommand to Pi,
@@ -47,9 +47,9 @@ the mode in effect), and the plain `pi install` covers both.
 **To remove it.** The same source string you installed, with `remove` (or `uninstall`):
 
 ```sh
-pi remove git:github.com/egkike/pi-streambeats@v0.1.1              # Pi
-pi uninstall git:github.com/egkike/pi-streambeats@v0.1.1          # the same command
-gentle-shell remove git:github.com/egkike/pi-streambeats@v0.1.1   # Gentle Shell
+pi remove git:github.com/egkike/pi-streambeats@v0.2.0              # Pi
+pi uninstall git:github.com/egkike/pi-streambeats@v0.2.0          # the same command
+gentle-shell remove git:github.com/egkike/pi-streambeats@v0.2.0   # Gentle Shell
 ```
 
 `pi list` (or `gentle-shell list`) prints the exact source strings that are configured, which is the string
@@ -66,7 +66,7 @@ creates is the mpv socket — `$XDG_RUNTIME_DIR/pi-streambeats/mpv.sock` on Linu
 otherwise inside the cache directory, and `~/Library/Caches/pi-streambeats/` on macOS; Windows uses a named
 pipe, which is not a file. Any of them is safe to delete while the card is not playing.
 
-The tag is the pin, and it is exact: `@v0.1.1` installs the commit whose `package.json` says `0.1.1`, and
+The tag is the pin, and it is exact: `@v0.2.0` installs the commit whose `package.json` says `0.2.0`, and
 no other. The `Release tag` workflow fails when a pushed tag does not match that version, so a pin cannot
 quietly point at different code. Without a tag you get the tip of `main` — the next release while it is
 being built.
@@ -118,6 +118,10 @@ history never reach the model's context.
 - **Two sources.** Your own folders and the free [StreamBeats](https://streambeats.bandcamp.com/music)
   catalog, in the same card. It opens in the catalog; `l` swaps to your library, and `l` again brings you
   back to the album you were on. Local files are read, never touched. See [The catalog](#the-catalog).
+- **A footer you can read.** The row at the bottom paints each key in the text role, its help in `dim` and
+  the separators in `border`, so the eye lands on what you can press instead of on a flat line of letters. A
+  row too narrow to spell every key drops the words first, then the keys, and always ends in `…` when it had
+  to cut something: a footer that ends clean has announced everything.
 - **mpv plays.** The card drives a real `mpv` process over its JSON IPC socket, so playback survives the
   card being hidden and the audio is not tied to the terminal's redraw loop.
 
@@ -151,7 +155,7 @@ Some terminals need “Option as Meta” enabled before <kbd>⌥</kbd> reaches t
 | `l` | Switch source: catalog ↔ your library |
 | `/` | Filter the current folder |
 | `s` | Stop and empty the queue |
-| `+` `-` | Volume |
+| `+` `-` | Volume up, down — the footer announces both as one `+/- vol` |
 | `z` | Shuffle the rest of the queue |
 | `esc` | Hide the card (clears the filter first) |
 
