@@ -234,6 +234,15 @@ describe("the key table (S13)", () => {
 		}
 	});
 
+	it("prints each hinted label once, so a merged hint cannot be duplicated back into the row (L117, R2-001)", () => {
+		// `+/- vol` lives on the `volume-up` binding and `-` stays dispatch-only. Nothing in the type stops a
+		// later edit from re-flagging `-`, so the printed labels are what this pins: one glyph set, one cell.
+		const labels = footerHints().map((hint) => hint.key);
+
+		assert.deepEqual(labels, [...new Set(labels)]);
+		assert.equal(labels.includes("+/-"), true);
+	});
+
 	it("announces both volume directions with one hint and still dispatches both (S13, L117)", () => {
 		const keys = footerHints().map((hint) => hint.key);
 

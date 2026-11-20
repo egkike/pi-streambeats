@@ -349,6 +349,7 @@ Requisitos, todos verificables:
 | T44 | — | Las tres sugerencias **no bloqueantes** de la review de T12b (`review-41afbeca6560ecde`): el test de `$HOME` quedó medio convertido —dos expectativas en posix literal y una tercera que todavía pasa el `home` del fixture—, y el skip del `chmod` compone un booleano con un string-razón: `process.getuid?.() === 0 || chmod` | inline | **hecho** — el test entero en posix literal y el skip sale de `unreadableReason(): false | string`, que además devuelve la razón cuando corre como root (L103) | #99 |
 | T45 | — | Los cuatro hallazgos **no bloqueantes** de la review de #102: el CLI de la guarda sin test (R3-001), los códigos de salida sin documentar en `RELEASING.md` (R2-001), el `TagVerdict` que omitía campos que la función sí devuelve (R2-002), y la duda sobre el runner label (R1-001) | inline | **hecho** — el CLI queda pinneado con la versión leída del manifiesto, `RELEASING.md` tiene la tabla de códigos, el tipo está ensanchado y R1-001 no lleva código porque el label resuelve (L105) | #103 |
 | T46 | S13 | La fila de pie por tramos con rol propio en `lib/core/view.ts` (tecla `text`, ayuda `dim`, separador `border`) y `+/- vol` como un solo hint en `lib/core/model.ts` | inline | **hecho** — 206 tests en los dos archivos de test; la barra a 90 columnas crece de 16 a 18 celdas y `pnpm check` queda verde (591 tests / 122 suites). Sin commit: la entrega —issue, rama, PR— la decide el dueño (L117) | — |
+| T47 | S13 | Los cuatro hallazgos **no bloqueantes** de la review de #120 sobre `fitSegments` y el hint `+/-`: el corte que podía terminar sin `…` (R3-001), el `…` que heredaba el rol del tramo cortado (R3-002), el lazo con tres casos sin predicado con nombre (R2-002) y el label merged sin invariante que lo impidiera duplicarse (R2-001) | inline | **hecho** — `fitSegments` reserva la celda del marcador en cada iteración y cierra con `…` en el rol de texto; el marcador ya no hereda `border`/`dim`; la lógica quedó en `fitsBeforeMarker` + `takeCells`; un test pinnea que los labels del pie son únicos | — |
 | T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | **hecho** — de 19 rojos a 0 en la VM, y los 11 `skip` que quedan dicen una verdad; el fake escucha donde `ipcTarget` dice, sin tocar producción (L101) | #97 |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
@@ -2919,3 +2920,28 @@ en el binding de `volume-up` sin nada que impida re-marcar `-` como hint; R2-002
 en un lazo; **R3-001** `fitSegments` todavía puede terminar sin `…` cuando el presupuesto restante es exactamente
 una tecla de una celda que no es el último tramo (`room` queda en 0 y no se empuja nada); R3-002 el `…` hereda el
 rol del tramo cortado, así que un corte dentro de una ayuda sale en `dim` en vez del rol de la tecla.
+
+L118 (los cuatro hallazgos de la review de #120). El dueño pidió, verbatim: **"Luego arreglemos los Cuatro
+hallazgos del review, te parece bien?"**. Aprobado el PR #120 (`466aa09`) y con `main` al día, los cuatro se
+trabajan como un candidato aparte: la review los declaró no bloqueantes y no abre corrección sobre un candidato
+ya aprobado, así que tocarlos ahí habría reabierto todo.
+
+**R3-001, el único con sustancia.** El corte podía terminar sin `…` cuando el presupuesto restante era
+exactamente una tecla de una celda que no era el último tramo: `room` quedaba en 0, no se empujaba nada y la
+fila cerraba en el separador anterior, una celda corta, leyéndose como un final deliberado mientras escondía
+teclas. Reproducido antes de tocar código, con la copia literal de `fitSegments`: **8 presupuestos** (21, 25,
+29, 33, 37, 41, 51 y uno más) cortaban en silencio, y en el host se alcanza con una terminal de ~27 columnas
+porque la card pide el 80% (`width: "80%"`). El test que lo pinnea recorre **todos** los anchos de 8 a 70 en
+lugar de un caso: el bug dependía del ancho y se escondía del caso único.
+
+**Los otros tres, más chicos.** El `…` heredaba el rol del tramo que interrumpía, así que un corte dentro de un
+separador salía pintado en `border` y se volvía tan callado como los puntos de los que avisa (R3-002): ahora el
+marcador va siempre en el rol de texto. El lazo con tres casos interactuando se parte en `fitsBeforeMarker` y
+`takeCells`, con la celda del marcador como constante (`MARKER_CELLS`), para que el caso del borde sea auditable
+sin seguir aritmética (R2-002). Y la única defensa de R2-001 que el tipo no da —nada impide re-marcar `-` como
+hint y reintroducir las seis celdas duplicadas— queda pinneada por un test que exige labels únicos en el pie.
+
+Verificación: RED observado en los dos hallazgos con sustancia (ancho 23 cortando en silencio; `…` en `border`
+a 57 columnas), después GREEN, y `pnpm check` verde con 594 tests / 122 suites. Se suma una función de test,
+`footerOf`, que ancla la fila por la primera tecla que anuncia en lugar de por un índice de línea: el índice
+cambiaba con el alto del frame y ya había hecho fallar el test contra una hairline.

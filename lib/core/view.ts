@@ -484,28 +484,44 @@ function segmentsWidth(segments: readonly FooterSegment[]): number {
 }
 
 /**
- * Drop whole segments, then the tail of one, and let the ellipsis say the row was cut: a key that vanishes
- * behind a clean edge is a key the row claims to announce and does not (S13, L117).
+ * Fit the row into `budget` cells: whole segments while they fit, then as much of the next one as fits, closed
+ * by an ellipsis. A row that hides keys always says so — a cut that lands behind a clean edge claims to
+ * announce keys it dropped (S13, L117, R3-001).
  */
 function fitSegments(segments: readonly FooterSegment[], budget: number): readonly FooterSegment[] {
+	if (segmentsWidth(segments) <= budget) return segments;
+
 	const fitted: FooterSegment[] = [];
 	let left = budget;
-	for (const [index, segment] of segments.entries()) {
-		if (left <= 0) break;
+	for (const segment of segments) {
 		const width = printableLength(segment.text);
-		const last = index === segments.length - 1;
-		if (width < left || (width === left && last)) {
+		if (fitsBeforeMarker(width, left)) {
 			fitted.push(segment);
 			left -= width;
 			continue;
 		}
-		// It does not fit, or it lands exactly on the budget while keys still follow: either way the row was
-		// cut, and one cell of ellipsis is what makes that visible.
-		const room = width === left ? left - 1 : left;
-		if (room > 0) fitted.push({ ...segment, text: truncate(segment.text, room) });
-		break;
+		const head = takeCells(segment.text, left - MARKER_CELLS);
+		if (head !== "") fitted.push({ ...segment, text: head });
+		// The marker is the row's own voice, not the role of whatever it interrupted: a cut inside a separator
+		// would otherwise be painted as punctuation and go as quiet as the dots it warns about (R3-002).
+		fitted.push({ text: ELLIPSIS, role: "text" });
+		return fitted;
 	}
 	return fitted;
+}
+
+/** The cell the cut marker costs: it is reserved on every iteration, so no segment can eat it (R3-001). */
+const MARKER_CELLS = 1;
+
+/** True when `width` cells fit in `left` and still leave the cell the cut marker needs. */
+function fitsBeforeMarker(width: number, left: number): boolean {
+	return width <= left - MARKER_CELLS;
+}
+
+/** The first `cells` code points of `text`, counted the way `truncate` counts them. */
+function takeCells(text: string, cells: number): string {
+	if (cells <= 0) return "";
+	return [...text].slice(0, cells).join("");
 }
 
 function progressBar(theme: ViewTheme, elapsedMs: number, totalMs: number, width: number, glyphs: Glyphs): string {
