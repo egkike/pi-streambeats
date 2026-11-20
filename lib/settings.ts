@@ -152,9 +152,12 @@ export function mergeSettings(raw: unknown, defaults: Settings): { settings: Set
 	if (!root && raw.libraryRoot !== undefined) ignored.push("libraryRoot");
 	const libraryRoot = root ?? defaults.libraryRoot;
 
-	// An empty string is "not set", not a command called nothing: it would spawn a nameless binary (S6).
+	// An empty string is "not set", not "ignored" — and it is the value this module writes as its own default, so
+	// reporting it warned about our own file on every start after the first (L112). A value of another type is still
+	// named, because that user did type something. `libraryRoot` keeps the stricter rule: its default is never
+	// empty, so an empty one was written by hand and is worth saying out loud.
 	const mpvPath = text(raw.mpvPath);
-	if (!mpvPath && raw.mpvPath !== undefined) ignored.push("mpvPath");
+	if (raw.mpvPath !== undefined && typeof raw.mpvPath !== "string") ignored.push("mpvPath");
 
 	let asciiGlyphs = defaults.asciiGlyphs;
 	if (typeof raw.asciiGlyphs === "boolean") asciiGlyphs = raw.asciiGlyphs;

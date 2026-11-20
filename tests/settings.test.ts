@@ -294,6 +294,26 @@ describe("the mpv path (S6)", () => {
 		assert.match(result.warning ?? "", /mpvPath/);
 	});
 
+	it("does not warn about the empty default it wrote itself", () => {
+		// What a user does: start once, which writes the default file, and start again. The second start must
+		// not report our own "not set" as something it ignored — that warning arrived in the Windows 11 VM
+		// the first time the product ran the way a user runs it (L112).
+		loadSettings(ctx());
+		const again = loadSettings(ctx());
+
+		assert.equal(again.settings.mpvPath, "");
+		assert.equal(again.warning, undefined, `the file this module wrote must load cleanly, got: ${again.warning}`);
+	});
+
+	it("treats a value made only of spaces as not set, without calling it ignored", () => {
+		writeSettings(JSON.stringify({ mpvPath: "   " }));
+
+		const result = loadSettings(ctx());
+
+		assert.equal(result.settings.mpvPath, "");
+		assert.equal(result.warning, undefined);
+	});
+
 	it("writes the key into the file it creates, so it is discoverable without the docs", () => {
 		loadSettings(ctx());
 
