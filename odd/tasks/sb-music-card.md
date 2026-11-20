@@ -2818,3 +2818,27 @@ página del hub nombra los topics exactos y se lee en un minuto.
 era una línea corta en inglés. Ahora dice qué es, en los dos idiomas, y nombra **Linux, macOS y Windows** —la plataforma
 que se acaba de verificar usándola—: 287 caracteres, dentro del límite de 350. `package.json#description` sigue distinto
 a propósito: es la que leería un registro npm, y no publicamos ahí.
+
+L116 (el hub, confirmado con datos). Aviso del dueño, verbatim: **"Ya se actualizó el hub"**.
+
+**La predicción se cumplió entera, y el «límite declarado» de L115 deja de ser límite.** El snapshot del hub
+(`/data/gentle-hub.json`) pasó de `synced_at: 2026-11-20T01:17:02Z` a `2026-11-20T02:17:02Z`, y la entrada del repo cambió
+exactamente como se había anticipado:
+
+| Campo | 01:17 | 02:17 |
+|---|---|---|
+| `sections` | `["project"]` | **`["resource"]`** |
+| `resource_types` | `[]` | **`["extension"]`** |
+| `description` | la línea vieja en inglés | la bilingüe `ES \| EN` con Linux, macOS y Windows |
+| `stars` | 0 | 1 |
+
+**Por qué esto importa más que la anécdota.** En L115 quedó escrito como límite que «el snapshot no expone los topics por
+entrada, así que el mapeo topic → sección se deduce de las columnas y de la instrucción de la página, no de su código».
+Esa frase era honesta pero incompleta: una deducción que se puede refutar con una observación, y que se cumplió, es una
+deducción que ahora tiene evidencia. La diferencia entre las dos cosas es la que separa «creo que el hub lee
+`gentle-shell-extension`» de «el hub leyó `gentle-shell-extension` y lo publicó como extensión».
+
+**El orden que funcionó, para la próxima publicación en el hub:** la página nombra los topics exactos → el snapshot
+muestra en qué sección cae cada clase → se ponen los topics → se espera el crawl (fue de una hora) → se verifica contra el
+snapshot. Y la trampa que costó dos vueltas: **la convención de un repo hermano no es la especificación** (L115), y una
+rama «mergeada» puede llevar una versión vieja del documento (la corrección de #117).
