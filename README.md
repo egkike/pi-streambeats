@@ -29,19 +29,17 @@ pi install git:github.com/egkike/pi-streambeats          # the tip of main
 pi install git:github.com/egkike/pi-streambeats@v0.1.0   # a release, pinned
 ```
 
-With **Gentle Shell**, the same sources, one word in front — because Gentle Shell keeps its own agent home by
-default (`~/.gentle-shell/agent`) with its own `settings.json`, so a package installed with plain `pi install`
-lands in the vanilla Pi home and the card will not appear in the Shell:
+With **Gentle Shell**, the same command with `gentle-shell` in front of it — the Shell recognises the Pi
+subcommand and runs it in its own agent home, which it keeps separate by default (`~/.gentle-shell/agent`,
+with its own `settings.json`). A plain `pi install` would land in the vanilla Pi home and the card would not
+appear in the Shell:
 
 ```sh
-# `--` is Gentle Shell's separator, not Pi's: its own flags (--link, --isolated, --home) go before it
-# and everything after reaches Pi untouched, inside the home Gentle Shell resolved
-gentle-shell -- install git:github.com/egkike/pi-streambeats@v0.1.0
+gentle-shell install git:github.com/egkike/pi-streambeats@v0.1.0
 ```
 
-The `--` is load-bearing, not decoration. Gentle Shell parses its own flags first, so a Pi flag placed
-before the separator is read by the Shell instead: `gentle-shell install --help` prints *Gentle Shell's* help,
-not `pi install`'s, and the same would happen to `-l` or `--approve`. After the `--`, the arguments are Pi's.
+Gentle Shell parses its own options first (`--link`, `--isolated`, `--home`) and hands the subcommand to Pi,
+so `install`, `remove` and `list` read exactly as they do under `pi`.
 
 If you run Gentle Shell with `--link`, it shares your Pi home instead of its own (`gentle-shell home` prints
 the mode in effect), and the plain `pi install` covers both.
