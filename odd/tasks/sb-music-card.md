@@ -2752,3 +2752,27 @@ que el documento habría mandado a los usuarios **justo a la versión con el avi
 nota de estado deja de nombrar una versión —«the first release is out and the card installs from git»— porque un número
 escrito en prosa envejece en cada release, y el pin ya se lee en `Install`. De paso, «19 numbered specs» pasó a «20»: la
 S20 del catálogo ya estaba y la frase había quedado vieja.
+
+L114 (el dueño usó la card en Windows, y eso cierra la rebanada). Reporte del dueño, verbatim: **"Listo, hice todas las
+pruebas y funcionó bien todo"**.
+
+**Lo que estaba verificado hasta acá, y lo que no.** De Windows se sabía: la suite entera en verde (573 tests, 0 rojos), el
+transporte por named pipe contra mpv real, que `pi install …@v0.1.1` resuelve el tag y monta la extensión, que el arranque
+crea su `settings.json`, que el catálogo se baja y se cachea, y que `pi remove` la saca dejando los restos que el README
+documenta. **No** estaba verificado lo único que un usuario hace: abrir la card y reproducir. Eso no se puede manejar por
+ssh sin inventar timers, así que quedaba en la consola de la VM.
+
+**Ya está, y en la versión publicada.** El dueño corrió `/sb-music` en la VM con `v0.1.1` instalada, navegó la biblioteca
+y reprodujo —con mpv en `C:\Program Files\MPV Player`, fuera del `PATH`— y reportó que funcionó todo. Con eso «Windows
+soportado» deja de apoyarse en una suite y pasa a apoyarse en el producto usado, que es la vara que `AGENTS.md` pide
+(«una integración no está lista cuando el gate está verde: está lista cuando abre en Pi»).
+
+**Lo que cambió en el README es una fila, y no es cosmética**: la tabla de plataformas decía «the whole suite runs there»
+y ahora dice que la card se usó ahí —instalada desde el tag, abierta, navegando y reproduciendo con mpv fuera del
+`PATH`— con el número de tests al día (573, no 563). Una plataforma que sólo exhibe su suite está declarando menos de lo
+que probó; una que sólo dice «funciona» está declarando más. La fila dice las dos cosas con su fuente.
+
+**Lo que sigue sin probarse, y se dice:** Gentle Shell en Windows (no está instalado en la VM; su instalación está
+documentada pero se verificó el reenvío del comando, no la card corriendo desde ese home), y que la VM no tiene proveedor
+de modelos, así que el panel de arranque avisa `No models available` — irrelevante para la card, pero explica por qué el
+host se ve así al abrirla.

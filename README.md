@@ -85,7 +85,7 @@ being built.
 | --- | --- |
 | Linux | The suite runs here: `pnpm check` on Ubuntu 26.04 with Node 22.19, 24 and 26 |
 | macOS | The real mpv transport: the `ipc` job runs the probe on a macOS runner against Homebrew mpv. The suite itself runs on Ubuntu, and the darwin code path is covered there because the platform-dependent functions take `platform` as a parameter |
-| Windows | Windows 11 with mpv 0.42.0, on a VM: the whole suite runs there — 563 tests, 0 failures. The tests Windows cannot run skip with the reason the OS gives: POSIX permission bits and `chmod`, control characters in file names, and a socket directory a named pipe does not have. There is no Windows job in CI |
+| Windows | Windows 11 with mpv 0.42.0, on a VM, where the card itself was used: installed from the tag, opened, browsed the library and played a file with mpv found outside `PATH`. The whole suite runs there too — 573 tests, 0 failures — and the tests Windows cannot run skip with the reason the OS gives: POSIX permission bits and `chmod`, control characters in file names, and a socket directory a named pipe does not have. There is no Windows job in CI |
 
 **If mpv is not on `PATH`.** The Windows installer (`winget install shinchiro.mpv`) leaves mpv in
 `C:\Program Files\MPV Player` and does not touch `PATH`. The card looks for mpv in one order: `mpvPath` in
