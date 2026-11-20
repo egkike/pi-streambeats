@@ -798,6 +798,9 @@ describe("/sb-music --keys reads and edits the keys (S22)", () => {
 		assert.match(text, /prev\s+ctrl\+alt\+p .*previous track · registered/);
 		// The card's own keys come from the one table the footer renders (S13), not from a second list.
 		assert.match(text, /inside the card · ↑ move · enter open · space pause/);
+		// And one merged hint for both volume directions (L117): the panel prints what the footer prints.
+		assert.equal(text.includes("+/- vol"), true);
+		assert.equal(text.includes("· - vol"), false, "the second volume hint is gone, not hidden inside the merged one");
 		assert.deepEqual(h.overlays, [], "reading opens no card");
 		assert.equal(h.created.players, 0, "and builds no session");
 		assert.deepEqual(h.saved, [], "reading writes nothing");

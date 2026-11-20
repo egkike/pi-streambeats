@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "chosen": "01-dos-tonos.html",
+  "handoffs": {
+    "01-dos-tonos.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-11-20T16:47:24.545Z",
+      "startedAt": null,
+      "implementedAt": "2026-11-20T16:47:31.140Z",
+      "feature": "odd/tasks/sb-music-card.md",
+      "note": "Implementado en el worktree de `main`: tramos con rol en `footerLine` (tecla `text`, ayuda `dim`, separador `border`) y `+/- vol` como un solo hint. `pnpm check` verde (590 tests / 122 suites). Pendiente: verificación independiente y entrega (issue, rama, commit, PR)."
+    }
+  }
+}

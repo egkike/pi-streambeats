@@ -8,7 +8,7 @@
  */
 import { posix, win32 } from "node:path";
 import type { LibraryEntry, Role, Track, ViewTheme } from "../types.ts";
-import { type CardState, currentView, footerHints, visibleEntries } from "./model.ts";
+import { type CardState, currentView, type FooterHint, footerHints, visibleEntries } from "./model.ts";
 
 /** The whole glyph family (S16). One family per frame: geometric or ASCII, never a mix. */
 export interface Glyphs {
@@ -380,6 +380,19 @@ function windowStart(total: number, visible: number, cursor: number): number {
 
 /* --- the footer (S3, S11, S13) --------------------------------------------------------------- */
 
+/**
+ * One stretch of the footer with the role it carries (L117). The row used to be a single string painted in
+ * one role, so a key and the help beside it were the same colour; the key is the only cell in the row a
+ * reader can act on, so it is the one that keeps the text role while its help answers in `dim`.
+ *
+ * No weight: `bold` already means "the row under the pointer" and "the command in the header", and a third
+ * meaning would spend a signal the terminal has only one of.
+ */
+interface FooterSegment {
+	readonly text: string;
+	readonly role: Role;
+}
+
 function footerLine(state: CardState, theme: ViewTheme, width: number, options: ViewOptions, glyphs: Glyphs): string {
 	const pad = width >= 4 ? HORIZONTAL_PADDING : 0;
 	const inner = width - pad * 2;
@@ -391,13 +404,15 @@ function footerLine(state: CardState, theme: ViewTheme, width: number, options: 
 	const overhead = progress ? clock(progress.elapsedMs).length + clock(progress.totalMs).length + 2 : 0;
 	const canProgress = progress !== undefined && inner >= overhead + MIN_BAR + 1;
 	const budget = canProgress ? inner - overhead - MIN_BAR - 1 : inner;
-	const left = footerText(state, budget, options);
+	const left = footerSegments(state, budget, options);
+	const leftWidth = segmentsWidth(left);
+	const leftText = paintSegments(theme, left);
 
 	if (!canProgress || !progress) {
-		return spaces(pad) + paint(theme, footerRole(state), left) + spaces(inner - left.length) + spaces(pad);
+		return spaces(pad) + leftText + spaces(inner - leftWidth) + spaces(pad);
 	}
 
-	const barWidth = Math.min(MAX_BAR, Math.max(MIN_BAR, inner - left.length - overhead - 1));
+	const barWidth = Math.min(MAX_BAR, Math.max(MIN_BAR, inner - leftWidth - overhead - 1));
 	const elapsed = clock(progress.elapsedMs);
 	const totalText = clock(progress.totalMs);
 	const right =
@@ -406,52 +421,91 @@ function footerLine(state: CardState, theme: ViewTheme, width: number, options: 
 		progressBar(theme, progress.elapsedMs, progress.totalMs, barWidth, glyphs) +
 		" " +
 		paint(theme, "dim", totalText);
-	return (
-		spaces(pad) +
-		paint(theme, footerRole(state), left) +
-		spaces(inner - left.length - overhead - barWidth) +
-		right +
-		spaces(pad)
-	);
-}
-
-function footerRole(state: CardState): Role {
-	return state.notice || state.failure ? "accent" : "muted";
+	return spaces(pad) + leftText + spaces(inner - leftWidth - overhead - barWidth) + right + spaces(pad);
 }
 
 /**
  * Who speaks in the footer: a notice (S11, S14), then a folder that could not be shown (S5), then the
  * read in flight (S21); with nothing to report, every key is announced (S13).
  */
-function footerText(state: CardState, budget: number, options: ViewOptions): string {
-	if (state.notice) return truncate(printable(state.notice), budget);
+function footerSegments(state: CardState, budget: number, options: ViewOptions): readonly FooterSegment[] {
+	if (state.notice) return [{ text: truncate(printable(state.notice), budget), role: "accent" }];
 	// A folder that could not be shown names it the way the header does (S5): the failure arrived as
 	// data, so the breadcrumb is formatted here and one rule covers both lines — no absolute home
 	// path can reach the card (S14, S15).
 	if (state.failure) {
 		const folder = breadcrumb(state.failure.path, options.libraryRoot);
-		return truncate(printable(`cannot show ${folder}: ${state.failure.reason}`), budget);
+		const text = truncate(printable(`cannot show ${folder}: ${state.failure.reason}`), budget);
+		return [{ text, role: "accent" }];
 	}
 	// A read in flight says what it is reading (S21). The library's read names a folder, so it is repeated as
 	// the header's breadcrumb and no absolute home path can reach the card (S15); the catalog's read is
 	// already a label the shell composed (`catalog · 3 of 12 albums`, L75) and is printed as it arrived.
 	if (state.reading) {
 		const what = state.source === "library" ? breadcrumb(state.reading, options.libraryRoot) : printable(state.reading);
-		return truncate(printable(`reading ${what}`), budget);
+		return [{ text: truncate(printable(`reading ${what}`), budget), role: "muted" }];
 	}
-	return hintText(budget);
+	return hintSegments(budget);
 }
 
 /**
  * Hints come from the model's only key table (S13), never from a second list. The row first tries
  * `key help`, then falls back to keys alone, so it drops help before it drops a key.
  */
-function hintText(budget: number): string {
+function hintSegments(budget: number): readonly FooterSegment[] {
 	const hints = footerHints();
-	const full = hints.map((hint) => `${hint.key} ${hint.help}`).join(SEPARATOR);
-	const compact = hints.map((hint) => hint.key).join(SEPARATOR);
-	const text = [...full].length <= budget ? full : compact;
-	return truncate(text, budget);
+	const full = hintRow(hints, true);
+	const compact = hintRow(hints, false);
+	return fitSegments(segmentsWidth(full) <= budget ? full : compact, budget);
+}
+
+/** One row of hints (S13): the key keeps the text role, its help answers in `dim`, `border` separates them. */
+function hintRow(hints: readonly FooterHint[], withHelp: boolean): readonly FooterSegment[] {
+	const segments: FooterSegment[] = [];
+	for (const hint of hints) {
+		if (segments.length > 0) segments.push({ text: SEPARATOR, role: "border" });
+		segments.push({ text: hint.key, role: "text" });
+		if (withHelp) {
+			segments.push({ text: " ", role: "text" });
+			segments.push({ text: hint.help, role: "dim" });
+		}
+	}
+	return segments;
+}
+
+/** Paint the segments in order: each prefixes its own role, and `paint` restores the text role (S3). */
+function paintSegments(theme: ViewTheme, segments: readonly FooterSegment[]): string {
+	return segments.map((segment) => paint(theme, segment.role, segment.text)).join("");
+}
+
+/** Cells the segments occupy, counted the way `truncate` counts them. */
+function segmentsWidth(segments: readonly FooterSegment[]): number {
+	return segments.reduce((total, segment) => total + printableLength(segment.text), 0);
+}
+
+/**
+ * Drop whole segments, then the tail of one, and let the ellipsis say the row was cut: a key that vanishes
+ * behind a clean edge is a key the row claims to announce and does not (S13, L117).
+ */
+function fitSegments(segments: readonly FooterSegment[], budget: number): readonly FooterSegment[] {
+	const fitted: FooterSegment[] = [];
+	let left = budget;
+	for (const [index, segment] of segments.entries()) {
+		if (left <= 0) break;
+		const width = printableLength(segment.text);
+		const last = index === segments.length - 1;
+		if (width < left || (width === left && last)) {
+			fitted.push(segment);
+			left -= width;
+			continue;
+		}
+		// It does not fit, or it lands exactly on the budget while keys still follow: either way the row was
+		// cut, and one cell of ellipsis is what makes that visible.
+		const room = width === left ? left - 1 : left;
+		if (room > 0) fitted.push({ ...segment, text: truncate(segment.text, room) });
+		break;
+	}
+	return fitted;
 }
 
 function progressBar(theme: ViewTheme, elapsedMs: number, totalMs: number, width: number, glyphs: Glyphs): string {

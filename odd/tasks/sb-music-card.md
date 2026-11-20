@@ -99,6 +99,10 @@ S13 — Teclas dentro de la card, todas anunciadas en su fila de pie: `↑`/`↓
 Las teclas de selección respetan las keybindings de Pi (`tui.select.*`) cuando estén disponibles. El mapa de
 transporte de la app Go se hereda como **teclas**, no como fila visual: esa fila del repo Go es decorativa
 (README: "The transport row at the bottom is visual only") y el piso de craft prohíbe chrome muerto.
+La fila de pie tiene jerarquía por rol (L117): la tecla queda en el rol de texto, su ayuda en `dim` y el
+separador en `border`. No se usa `bold`, que ya significa «la fila bajo el puntero» y «el comando del
+encabezado» en la misma card. `+` y `-` se anuncian como un solo `+/- vol` —dos bindings, un hint— porque dos
+hints de la misma palabra costaban seis celdas que la fila no tenía.
 
 S14 — Navegación y frontera: la card arranca en `libraryRoot` y navega el árbol hacia arriba hasta **HOME**
 inclusive como techo; si `libraryRoot` está fuera de HOME, el techo es `libraryRoot`. En el techo `u` avisa
@@ -344,6 +348,7 @@ Requisitos, todos verificables:
 | T43 | S6 | Los dos `R4`/`R3` de la review de T42 sobre el mismo hecho: un `--version` **matado por una señal** tenía `status null` y ningún `result.error`, así que caía en la rama de «respondió» e imprimía «answered --version with an error (no exit code)». El tercer hallazgo —`answered` requerido rompería productores fuera de los cuatro archivos— **no lleva código**: `tsc -p .` compila todo el proyecto y no hay ninguno | worker | **hecho** — `exitProbe` es puro, `status null` es «corrió y la respuesta no llegó», y el cableado tiene una sola lectura (L100) | `L100` |
 | T44 | — | Las tres sugerencias **no bloqueantes** de la review de T12b (`review-41afbeca6560ecde`): el test de `$HOME` quedó medio convertido —dos expectativas en posix literal y una tercera que todavía pasa el `home` del fixture—, y el skip del `chmod` compone un booleano con un string-razón: `process.getuid?.() === 0 || chmod` | inline | **hecho** — el test entero en posix literal y el skip sale de `unreadableReason(): false | string`, que además devuelve la razón cuando corre como root (L103) | #99 |
 | T45 | — | Los cuatro hallazgos **no bloqueantes** de la review de #102: el CLI de la guarda sin test (R3-001), los códigos de salida sin documentar en `RELEASING.md` (R2-001), el `TagVerdict` que omitía campos que la función sí devuelve (R2-002), y la duda sobre el runner label (R1-001) | inline | **hecho** — el CLI queda pinneado con la versión leída del manifiesto, `RELEASING.md` tiene la tabla de códigos, el tipo está ensanchado y R1-001 no lleva código porque el label resuelve (L105) | #103 |
+| T46 | S13 | La fila de pie por tramos con rol propio en `lib/core/view.ts` (tecla `text`, ayuda `dim`, separador `border`) y `+/- vol` como un solo hint en `lib/core/model.ts` | inline | **hecho** — 206 tests en los dos archivos de test; la barra a 90 columnas crece de 16 a 18 celdas y `pnpm check` queda verde (591 tests / 122 suites). Sin commit: la entrega —issue, rama, PR— la decide el dueño (L117) | — |
 | T12b | S19, S6 | **Rebanada 2**: que la suite sea honesta en Windows — portar lo portable (los 16 fallos de la línea base: separadores con el flavour de la plataforma inyectada, aserciones sin modos POSIX), saltear con razón verdadera lo que el SO hace imposible (control chars en nombres, `chmod`), y un **fake de mpv por named pipe** para que los tests del player corran en win32 en vez de saltearse | worker | **hecho** — de 19 rojos a 0 en la VM, y los 11 `skip` que quedan dicen una verdad; el fake escucha donde `ipcTarget` dice, sin tocar producción (L101) | #97 |
 | T13 | S17 | Mouse: cablear `hits` del render al host y al reducer (click, rueda, hover) | worker | **hecho** — verificado por el dueño en el host (L53) | `e0d22a0`, `eb081c2` (PR #52) |
 | T24 | S17 | Hit map fresco: invalidarlo cuando el modelo cambia antes del frame, y una sola guarda para el click repetido | worker | **hecho** — verificado en el host junto con T13 (L54) | `1f7fcc9` (PR #55) |
@@ -2842,3 +2847,59 @@ deducción que ahora tiene evidencia. La diferencia entre las dos cosas es la qu
 muestra en qué sección cae cada clase → se ponen los topics → se espera el crawl (fue de una hora) → se verifica contra el
 snapshot. Y la trampa que costó dos vueltas: **la convención de un repo hermano no es la especificación** (L115), y una
 rama «mergeada» puede llevar una versión vieja del documento (la corrección de #117).
+
+L117 (pedido del dueño, verbatim): **"Se puede hacer la opción 01 con Ancho completo · la ayuda aparece Con 164
+columnas entra la forma key help. La ayuda en dim queda claramente subordinada: la tecla manda, la palabra
+acompaña. Con una tecla solo +/- vol. Solo dime si se puede y luego te digo cual"**. Elegido después, verbatim:
+**"2. 01 + +/- vol como una sola tecla (recomendada)"**. El dato que cerró la cuenta del ancho, verbatim:
+**"Sale esto: tput cols / 195"**.
+
+Qué se hizo. La fila de pie dejó de ser un string pintado en un solo rol. `footerLine` arma tramos
+(`FooterSegment`: texto + rol) y `footerSegments` conserva la precedencia de siempre —notice y failure en
+`accent`, reading en `muted`, después las teclas—; los hints salen de `footerHints()`, así que sigue habiendo
+una sola tabla (S13). En la tabla de teclas, `+` imprime `+/-` y `-` deja de ser hint: dos bindings, un hint,
+y `actionFor` no cambia, así que `+` sigue subiendo y `-` sigue bajando.
+
+La cuenta, con la card real. `width: "80%"` (`lib/host/host.ts:746`) fija la card en el 80% del terminal, no en
+el ancho entero: a 195 columnas son 156 de card, 152 de cuerpo útil. La forma completa medía 137 sobre un
+presupuesto de 138 —entraba por una celda, con la barra en 4— y con el merge mide 131, así que la barra sube a
+10 y el umbral del terminal baja de 194 a 187 columnas. A 90 columnas, el test que pinnea la fila pasa de una
+barra de 16 a una de 18: el mismo cambio, medido donde la suite lo puede ver.
+
+Lo que se descartó, y por qué. El peso (`bold`) en la tecla parecía la forma obvia de subrayar la jerarquía,
+pero `bold` ya es la señal de «fila bajo el puntero» y del comando del encabezado, y hay un test que lo fija
+(`highlights exactly one row, and never the cursor row's own marker`). Un tercer significado gastaba la única
+señal de peso que tiene la card; la jerarquía queda en el rol, que es la teoría de color del archivo. El
+artboard `design/sb-music-footer/01-dos-tonos.html` se actualizó a eso: color pleno, sin peso.
+
+Verificación. RED observado primero (el pie imprimía `+ · -` y los roles no existían), después GREEN: 205 tests
+en `tests/core/view.test.ts` + `tests/core/model.test.ts` y `pnpm check` verde con 590 tests / 122 suites.
+
+Handoff del diseño (mismo L117): el elegido es `design/sb-music-footer/01-dos-tonos.html`, y
+`02-tecla-acentuada.html` y `03-keycap-fondo.html` quedan como alternativas descartadas —la 02 gasta el
+`accent` que ya significa cursor y aviso, y la 03 no entra a 90 columnas con barra—. El artboard se abre con
+`/gentle:design open sb-music-footer`.
+
+Verificación independiente (mismo L117). Seis ítems PASS y un CONCERN real: la truncación por tramos no era
+carácter-idéntica a la de un solo string. Cuando un tramo caía **exacto** sobre el presupuesto y quedaban teclas
+detrás, `fitSegments` cortaba limpio y la fila terminaba en un separador suelto, sin `…`: decía anunciar trece
+teclas y perdía tres sin avisar. El verificador lo dio por inalcanzable porque ningún test renderiza por debajo
+de 78 columnas, pero sí se alcanza en el host: `overlayOptions` pide el 80% del terminal, así que un terminal de
+78 columnas produce una card de 62 y ahí el presupuesto cae justo en 44, que es la suma exacta hasta el separador
+de `s`. Corregido: el tramo que no entra completo —o que entra justo y no es el último— gasta una celda en `…`
+(`fitSegments`), y lo pinnea un test a 62 columnas que además exige que `esc` no se nombre cuando no entró.
+
+Segundo hallazgo, más chico: el cambio del panel `sb-music keys` (que imprime la misma tabla) estaba sin pin.
+`tests/host/host.test.ts:800` sólo miraba las tres primeras teclas, así que un retroceso del merge en el panel
+no hacía fallar nada. Ahora afirma `+/- vol` y —ojo con esto— que `· - vol` no aparece: `"- vol"` es subcadena de
+`"+/- vol"`, así que la aserción obvia pasaba por el motivo equivocado.
+
+Los otros PASS: los roles quedan pinneados por línea exacta con el tema `marked`; `notice`/`failure`/`reading`
+conservan texto y rol; `footerRole`/`hintText`/`footerText` no dejan llamadores muertos; y `pnpm check` queda
+verde con 591 tests / 122 suites (206 en los dos archivos de test que toca esta unidad).
+
+Publicación (mismo L117). La rebanada mide 664 líneas autoradas contando los tres artboards de
+`design/sb-music-footer/`; el código y sus tests son 232, y el resto es HTML estático de diseño. Se publica como
+**un solo PR** —el artboard es la spec visual del cambio y separarlo obligaría al reviewer a cruzar dos— con la
+etiqueta `size:exception`, que es la salida que el repo define para pasar la heurística de ~400. El carril de
+docs no abre issue propio: viaja con el código que describe.
