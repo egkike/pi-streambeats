@@ -34,9 +34,14 @@ default (`~/.gentle-shell/agent`) with its own `settings.json`, so a package ins
 lands in the vanilla Pi home and the card will not appear in the Shell:
 
 ```sh
-# everything after -- is forwarded to Pi, inside the home Gentle Shell resolved
+# `--` is Gentle Shell's separator, not Pi's: its own flags (--link, --isolated, --home) go before it
+# and everything after reaches Pi untouched, inside the home Gentle Shell resolved
 gentle-shell -- install git:github.com/egkike/pi-streambeats@v0.1.0
 ```
+
+The `--` is load-bearing, not decoration. Gentle Shell parses its own flags first, so a Pi flag placed
+before the separator is read by the Shell instead: `gentle-shell install --help` prints *Gentle Shell's* help,
+not `pi install`'s, and the same would happen to `-l` or `--approve`. After the `--`, the arguments are Pi's.
 
 If you run Gentle Shell with `--link`, it shares your Pi home instead of its own (`gentle-shell home` prints
 the mode in effect), and the plain `pi install` covers both.
