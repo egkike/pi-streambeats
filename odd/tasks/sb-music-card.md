@@ -365,7 +365,7 @@ Requisitos, todos verificables:
 | T37 | S20 | `R3-001` + `R4-001` + `R4-002` de la review de T36: la guarda `unrecognized > 0 → scrape` contradice S20 («falla sólo si no se scrapeó cero álbumes», L243/L696) y en arranque en frío manda la card a la biblioteca por una sola fila ilegible; además el conteo se descarta y la deriva no deja traza | worker | **hecho** — el índice parcial se sirve con las filas ilegibles como dato, no se cachea, deja traza y el pie lo dice (L91) | `L91` |
 | T38 | S20 | `R2-001` + `R4-001` de la review de #81: un `?? item` muerto que ensuciaba la forma del dato, y una entrada degradada que no se cacheaba nunca —cada apertura en frío re-bajaba el índice y todas las páginas de álbum— sin revalidación barata ni promoción | worker | **hecho** — TTL corto con marca, revalidación de sólo el índice, reuso de las pistas cacheadas y promoción al curarse (L92) | `L92` |
 | T39 | S20 | `R4-002` + `R3-001` + `R3-002` de la review de #83: una pasada parcial escribía su lista **encima** de la caché entera y el recorte sobrevivía la sesión; el contador de reusados podía saltar 0 → n; y el harness compartía la caché escrita por defecto | worker | **hecho** — sólo un índice entero borra un álbum; el reuso quedó estructuralmente fuera de todo pase que cuente; y el harness comparte sólo si el test lo pide (L93) | `L93` |
-| T35 | — | **Release `v0.1.0`**: `version` a `0.1.0`, `RELEASING.md` (semver, comandos, rollback), sección `Install` en el README con el `git:` pinneable y plataformas honestas, y la guarda de CI que falla si el tag no coincide con `package.json`. El acto —`git tag -a v0.1.0`, `gh release create --generate-notes`— lo mueve el dueño o lo muevo yo con su permiso | inline | **preparada** — la preparación está en #101 (L104); falta sólo el acto, que mueve el dueño o yo con su permiso | #101 |
+| T35 | — | **Release `v0.1.0`**: `version` a `0.1.0`, `RELEASING.md` (semver, comandos, rollback), sección `Install` en el README con el `git:` pinneable y plataformas honestas, y la guarda de CI que falla si el tag no coincide con `package.json`. El acto —`git tag -a v0.1.0`, `gh release create --generate-notes`— lo mueve el dueño o lo muevo yo con su permiso | inline | **hecho** — publicado: tag anotado `v0.1.0` sobre el merge de #104, la guarda dio verde en el push del tag y el release salió con notas (L106) | #101 |
 | T22 | S21 | Hacer que `ctrl+c` llegue a Pi con la card enfocada: requiere un camino en el host, no en la card | — | **cerrada como límite documentado** — `handleInput` devuelve `void` (L48); el README lo dice desde L69 | — |
 | T17 | S13, S15 | Ciclo de tres estados en `ctrl+alt+z`; se retira `l` y el tamaño deja de depender del foco | worker | **hecho** — verificado por el dueño en el host (L41) | `77ce72f`, `714df3c` |
 | T18 | — | Política de runners macOS en `gate`: `macos-26` sale del `check`, queda sólo el `ipc probe` | inline | **decidida** — PR #37, registrada en `L40` | `55ec075` |
@@ -2572,3 +2572,21 @@ hallazgo: una guarda que no arranca no bloquea, y por eso el acto del release si
 
 Evidencia: el test enfocado da **8 tests / 2 suites** verdes; `pnpm check` **585 tests / 122 suites** (venían 581/121);
 y la suite entera en la VM sobre `main` en `6f5c93d`: **571 tests, 567 pasan, 0 fallan, 4 skips**.
+
+L106 (T35 publicado: el tag, la guarda y el release). Autorización del dueño, verbatim: **"Lo muevo yo cuando mergees"**.
+
+**El acto, con la guarda mirando.** `v0.1.0` es un tag **anotado** sobre `5805494`, que es el merge commit de #104 y
+también el `HEAD` de `main` en ese momento: `git rev-parse v0.1.0^{commit}` y el merge commit son el mismo hash, así que
+el pin no apunta a un commit distinto del que se mergeó. Al empujar el tag corrió `Release tag` por primera vez:
+`success` en 9 s, y el log dice la línea que importa —`release-tag: OK — v0.1.0 is package.json 0.1.0`—, con el código de
+salida 0 que el test del CLI de T45 pinea. Publicado con `gh release create v0.1.0 --title v0.1.0 --generate-notes`:
+<https://github.com/egkike/pi-streambeats/releases/tag/v0.1.0>, `isDraft: false` y `isPrerelease: false`.
+
+**Las notas son todo el historial, y eso es lo que `--generate-notes` hace en un primer release.** Al no haber release
+anterior contra el cual cortar, la lista arranca en el PR #2. Es honesto y es ruidoso: si el dueño quiere un «qué hay en
+0.1.0» curado, se agrega con `gh release edit v0.1.0 --notes-file`, sin tocar el tag — el camino que el propio
+`RELEASING.md` documenta para unas notas equivocadas.
+
+**Con esto no queda ninguna fila abierta en `## Tasks`.** El disparador del hub —«no quede ninguna fila `abierta` y no
+haya hallazgos de review pendientes»— se cumple hoy, así que publicar en el hub de Gentle es lo único que queda, y es una
+decisión del dueño: son topics en el repo y en `package.json`, no un cambio de código.
