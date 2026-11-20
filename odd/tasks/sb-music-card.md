@@ -2690,3 +2690,43 @@ macOS, y en Windows un named pipe que no es un archivo.
 --help` y de `docs/packages.md` («Personal installs are written to `~/.pi/agent/settings.json`»), y las rutas de
 `lib/settings.ts` y `lib/catalog/cache.ts`, que es lo que el código crea de verdad. Desinstalar de verdad es una acción
 sobre el entorno del dueño y sigue esperando su permiso, igual que la instalación.
+
+L112 (el aviso que sólo aparece usándolo: el módulo se quejaba de su propio archivo). Pregunta del dueño, verbatim:
+**"La VM de Windows 11 tiene lo necesario para instalar y probar?"**, y después **"Arreglarlo ahora"**.
+
+**La VM tenía lo necesario menos dos cosas, y las dos se resolvieron.** Pi 1.5.2, mpv 0.42.0 en `C:\Program Files\MPV
+Player\mpv.exe` **fuera del PATH** (el escenario exacto de S6), Node 22.23.2, red y 60 GB libres; faltaban música y Gentle
+Shell. Se generó un WAV de tres segundos con Python —`.wav` está entre las nueve extensiones, así que no hizo falta bajar
+nada— y se copió a `%USERPROFILE%\Music`. Gentle Shell no se instaló: era la prueba de Pi, y sigue pendiente.
+
+**Lo que la prueba real encontró, y que ningún test veía.** Al arrancar Pi en la VM apareció
+`Warning: ...\pi-streambeats\settings.json: ignored mpvPath`. Ese archivo lo había escrito **este módulo** en el arranque
+anterior con `"mpvPath": ""` —el estado «buscá mpv»—, y en el siguiente arranque `mergeSettings` veía la clave presente y
+vacía, la mandaba a `ignored` y el host avisaba. O sea: **todo usuario, en las tres plataformas, desde la segunda
+sesión**, con un aviso sobre algo que nunca configuró. Reproducido en Linux sin VM, y ningún test lo atrapaba porque
+ninguno cargaba el archivo que el propio módulo escribe: el caso existente usa `mpvPath: 42`.
+
+**El arreglo, y la asimetría a propósito.** Un string vacío o de sólo espacios significa «no configurado», no «ignorado»:
+la clave se reporta sólo cuando el valor es de otro tipo, que es cuando alguien escribió algo de verdad. `libraryRoot`
+conserva la regla estricta porque su default nunca es vacío: un `""` ahí lo escribió una persona y merece decirse. La
+verificación diferencial sobre el módulo compartido lo confirma: de nueve entradas, **sólo cambian** `mpvPath: ""` y
+`mpvPath: "   "` (de `ignored mpvPath` a `none`); `libraryRoot` vacío y numérico, un shortcut vacío, `asciiGlyphs`
+numérico y los valores válidos salen **byte a byte iguales** que en `origin/main`.
+
+Evidencia: RED propio (los dos tests nuevos fallaban con el código de `main`), GREEN 29/29 en el archivo, `pnpm check`
+**587 tests / 122 suites**, y la suite entera en la VM sobre `main` en `82932d4` con el fix encima: **573 tests, 569
+pasan, 0 fallan, 4 skips**.
+
+**Un run mío fue inválido, y la salida lo decía.** El primer intento de probar el fix de punta a punta con `pi -e` seguía
+mostrando el aviso: Pi había avisado que la extensión estaba **duplicada** y usó la **instalada** (`.pi\agent\git\…`,
+v0.1.0 sin el fix), no el checkout. Leer la salida completa antes de concluir es lo que separó «el fix no funciona» de
+«estoy midiendo el binario viejo».
+
+**Lo que la prueba dejó verificado de paso.** `pi remove git:…@v0.1.0` funciona de verdad —`Removed`, `pi list` →`No
+packages installed.`— y los restos son los que el README documenta: `settings.json` en `%APPDATA%` y `catalog.json` en
+`%LOCALAPPDATA%`, con ningún `node.exe` colgado. Ese `catalog.json` prueba además que el catálogo se bajó y se cacheó en
+Windows.
+
+**Límite declarado.** Abrir la card en la TUI de la VM por ssh **no** se pudo: la sesión necesita un terminal real, y
+mantenerla viva a fuerza de `sleep` es justo lo que no corresponde. La prueba de punta a punta de la UI queda para la
+consola de la VM.
