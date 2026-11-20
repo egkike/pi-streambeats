@@ -152,6 +152,14 @@ function bar(width: number, elapsedMs: number, totalMs: number): string {
 	return `${"━".repeat(head)}╸${"─".repeat(width - 1 - head)}`;
 }
 
+/**
+ * The footer row, found by the first hint it announces: a frame can draw the bottom edge, drop it or need a
+ * different index depending on its height, so the row itself is the anchor, not a line number.
+ */
+function footerOf(frame: { lines: readonly string[] }): string {
+	return [...frame.lines].reverse().find((line) => line.includes("↑")) ?? "";
+}
+
 /** The filter input: the prompt, the term and the caret that makes it read as an input (S18). */
 function filterRow(term: string, width: number): string {
 	return fill(` /${term}▏`, width);
@@ -346,6 +354,32 @@ describe("the footer (S3, S13)", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 78, 10, options({ elapsedMs: 47_000 }));
 
 		assert.equal(frame.lines[8], framed(footerLine(HINTS, `0:47 ${bar(6, 47_000, 245_000)} 4:05`, contentWidth(78))));
+	});
+
+	it("ends a cut row with an ellipsis at every budget, not only the one a 78-column terminal asks for (S13, L117, R3-001)", () => {
+		// A cut that lands exactly on a one-cell key used to leave the marker out: the row closed on the previous
+		// separator, one cell short, and read as a deliberate end while still hiding keys. Every budget the row
+		// can be given is checked here, because the bug depended on the width and hid from the single case.
+		const full = footerOf(renderFrame(card({ cursor: 4 }), plain, 600, 6, options()));
+
+		assert.equal(full.includes("…"), false, "a row wide enough to spell every key is not cut at all");
+
+		for (let width = 8; width <= 70; width++) {
+			const line = footerOf(renderFrame(card({ cursor: 4 }), plain, width, 6, options()));
+			const inner = line.slice(1, -1);
+			const text = inner.trimEnd();
+
+			assert.equal([...line].length, width, `width ${width} keeps its budget`);
+			assert.equal(text.includes("esc") || text.endsWith("…"), true, `width ${width}: "${text}" hides keys silently`);
+		}
+	});
+
+	it("paints the cut marker in the key role, never in the separator's (R3-002)", () => {
+		// A cut landing inside the ` · ` separator used to inherit its role, so the marker was painted in
+		// `border` and went as quiet as the punctuation it warns about.
+		const footer = footerOf(renderFrame(card({ cursor: 4 }), marked, 57, 6, options()));
+
+		assert.equal(footer.includes("{border} · {text}…"), true, footer);
 	});
 
 	it("ends a cut row with an ellipsis, so it never looks complete while it hides keys (S13, L117)", () => {
