@@ -2792,10 +2792,29 @@ L112 ya habían anotado.
 de metadata más —revisado el listado de la raíz, no hay config de hub—. O sea que el repo se publica con los topics y
 nada más. Este repo tenía **cero**.
 
-**Agregados los diez, con la lista del hermano**: `gentle-hub-project`, `pi`, `pi-extension`, `gentle-shell`, `mpv`,
-`music`, `tui`, `terminal`, `streambeats`, `windows`. Verificado con `gh repo view … --json repositoryTopics`, que los
-devuelve todos.
+**Agregados los diez que el hermano sugiere**, y después **corregidos leyendo la fuente del hub**. Pedido del dueño,
+verbatim: **"Pon bilingue pero primero verifica el hub https://gentlemanprogramming.com/gentle-hub/ para ver si nos
+faltan agregar topics o sub-topics"**. La página lo dice con todas las letras y **el hermano no era la guía correcta para
+este repo**:
 
-**Queda una diferencia con el hermano, anotada y no ejecutada.** Su descripción está cargada de palabras clave y es
-bilingüe (`ES … | EN …`); la de este repo es una línea corta en inglés. Si el hub mira la descripción, esa diferencia se
-nota. Cambiarla es una decisión del dueño y no la tomé por mi cuenta.
+- **`gentle-shell-package`** — para un **repositorio de recurso de Shell**, que es lo que este repo es. Faltaba.
+- **`gentle-shell-extension`** — el **subtype opcional**; sin él, el listado aparece como «Resource» genérico en vez de
+  como extensión. Faltaba.
+- **`gentle-hub-project`** — para «cualquier proyecto de comunidad». Se agregó y después **se sacó**: el snapshot del hub
+  (`/data/gentle-hub.json`, 150 entradas) muestra que `resource` con subtype (65) y `project` sin subtype (43) son las dos
+  clases normales, y que las 8 entradas `resource` **sin** subtype son proyectos que no declaran `gentle-shell-package`.
+  Llevar los dos topics nos habría listado en las dos secciones, entre repos de otra clase (`noteflow`, `scouter`,
+  `claudeops-tui`). El hermano en Go lo usa solo porque es exactamente eso: un proyecto, no un paquete de Shell.
+
+La lista final, verificada con `gh repo view … --json repositoryTopics`: `gentle-shell`, `gentle-shell-extension`,
+`gentle-shell-package`, `mpv`, `music`, `pi`, `pi-extension`, `streambeats`, `terminal`, `tui`, `windows`.
+
+**Límite declarado:** el snapshot **no expone los topics por entrada**, así que el mapeo topic → sección se deduce de las
+columnas `sections`/`resource_types` y de la instrucción de la página, no de su código. Es la lectura más consistente; no
+es una certeza. La lección es la de siempre en este documento: **la convención de un hermano no es la especificación**; la
+página del hub nombra los topics exactos y se lee en un minuto.
+
+**La descripción, ahora bilingüe y con las plataformas.** Mismo pedido: el hermano publica `ES … | EN …` y la nuestra
+era una línea corta en inglés. Ahora dice qué es, en los dos idiomas, y nombra **Linux, macOS y Windows** —la plataforma
+que se acaba de verificar usándola—: 287 caracteres, dentro del límite de 350. `package.json#description` sigue distinto
+a propósito: es la que leería un registro npm, y no publicamos ahí.
