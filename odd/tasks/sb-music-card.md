@@ -2649,3 +2649,24 @@ bajo `pi`.
 **La lección, escrita porque es la tercera vez que aparece en este documento:** una medición sostiene exactamente lo
 que mide. «`--help` lo intercepta el Shell» no autoriza «cualquier flag lo intercepta»; para eso hacía falta leer el
 parser o probar el comando real, y la fuente estaba a un `grep` de distancia.
+
+L110 (las notas del release, curadas). Pedido del dueño, verbatim: **"Luego agrega un «qué hay en 0.1.0» curado como
+me dijiste"**.
+
+**Se agregó sin tocar el tag, que es el camino que `RELEASING.md` ya documentaba.** `gh release edit v0.1.0
+--notes-file` **reemplaza** el cuerpo entero, así que el archivo se armó con la sección curada **encima** del changelog
+automático que `--generate-notes` había generado: las 64 entradas de PRs siguen ahí, debajo, y el tag sigue apuntando al
+mismo commit. Verificado después: `isDraft: false`, `tagName: v0.1.0`, y el cuerpo abre con `## What's in 0.1.0`.
+
+**Qué tiene la sección, y de dónde sale cada afirmación.** La card (esquina y expandida, render por líneas exactas,
+mouse, filtro, `asciiGlyphs`), la biblioteca (sólo lectura, techo en `HOME`, ocultos afuera, **nueve** extensiones de
+audio), la reproducción (mpv por JSON IPC con socket unix o named pipe, la carpeta como cola, `playlist ended` y
+`cannot open, skipping`, el now-playing en la barra), el descubrimiento de mpv con sus tres veredictos, el catálogo con
+su caché de metadatos y sin audio ni tokens en disco, los settings y su escritura atómica, las plataformas con lo que se
+verificó en la VM, y los dos comandos de instalación. Nada nuevo: es lo que el documento, el README y el código ya
+decían, junto en un solo lugar para quien lee el release y no el repo.
+
+**Los límites van en las notas, no escondidos en el backlog.** Que `ctrl+c` no llega a Pi con la card enfocada, que el
+arranque puede esperar hasta dos segundos por el sondeo de mpv (y que el arreglo **no** es bajar el techo), que un álbum
+que el índice dejó de anunciar conserva sus pistas cacheadas, y que no hay pantalla de settings dentro de la card. Un
+release que sólo enumera features enseña a descubrir los límites de la peor manera.
