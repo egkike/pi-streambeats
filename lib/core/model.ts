@@ -220,8 +220,11 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
 	// change its words, and two keys for one round trip would have given the question two grammars.
 	{ id: "l", label: "l", action: "switch-source", help: "source", hint: true },
 	{ id: "s", label: "s", action: "stop", help: "stop", hint: true },
-	{ id: "+", label: "+", action: "volume-up", help: "vol", hint: true },
-	{ id: "-", label: "-", action: "volume-down", help: "vol", hint: true },
+	// One hint for both volume directions (L117): the row printed `+ vol · - vol`, two hints of the same
+	// word for six cells it did not have at 90 columns. The bindings stay two, so `+` still goes up and `-`
+	// still goes down; only what the footer prints merged.
+	{ id: "+", label: "+/-", action: "volume-up", help: "vol", hint: true },
+	{ id: "-", label: "-", action: "volume-down", help: "vol", hint: false },
 	{ id: "z", label: "z", action: "toggle-shuffle", help: "shuffle", hint: true },
 	{ id: "escape", label: "esc", action: "hide", help: "hide", hint: true },
 	// The host adapter maps ctrl-c to `interrupt`; it shares the one hide action, and it is not a

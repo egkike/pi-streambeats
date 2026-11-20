@@ -133,7 +133,15 @@ function folderRow(marker: string, name: string, width = 90): string {
 	return fill(` ${marker} ${name.padEnd(width - 10)} ${"    "} `, width);
 }
 
-const HINTS = "↑ · enter · space · n · p · u · / · l · s · + · - · z · esc";
+const HINTS = "↑ · enter · space · n · p · u · / · l · s · +/- · z · esc";
+
+/**
+ * The same hints with the roles they carry (L117): the key stays in the default text role, the separator
+ * gives up its own role to `border`, and only the help answers in `dim`. No weight is spent: `bold` already
+ * means "the row under the pointer".
+ */
+const MARKED_HINTS =
+	"↑{border} · {text}enter{border} · {text}space{border} · {text}n{border} · {text}p{border} · {text}u{border} · {text}/{border} · {text}l{border} · {text}s{border} · {text}+/-{border} · {text}z{border} · {text}esc";
 
 function footerLine(hints: string, right: string, width: number): string {
 	return between(` ${hints}`, `${right} `, width);
@@ -178,7 +186,7 @@ describe("the expanded card at 90 columns (S3, S9)", () => {
 			framed(entryRow("▸ ", "04 - Paper Planes.mp3", "2:57", contentWidth(90))),
 			framed(entryRow("  ", "05 - Rainy Window.mp3", "4:31", contentWidth(90))),
 			framed(ruleLine(contentWidth(90))),
-			framed(footerLine(HINTS, `0:47 ${bar(16, 47_000, 245_000)} 4:05`, contentWidth(90))),
+			framed(footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, contentWidth(90))),
 			edgeBottom(90),
 		]);
 	});
@@ -212,7 +220,7 @@ describe("the expanded card at 78 columns (S3, S9)", () => {
 				entryRow("  ", "07 - Midnight Commute (extended midnight mix, remastered deluxe e…", "6:12", contentWidth(78)),
 			),
 			framed(ruleLine(contentWidth(78))),
-			framed(footerLine(HINTS, `0:47 ${bar(4, 47_000, 222_000)} 3:42`, contentWidth(78))),
+			framed(footerLine(HINTS, `0:47 ${bar(6, 47_000, 222_000)} 3:42`, contentWidth(78))),
 			edgeBottom(78),
 		]);
 	});
@@ -311,16 +319,47 @@ describe("roles (S3, S16)", () => {
 });
 
 describe("the footer (S3, S13)", () => {
+	it("paints the key in the text role and the separator in border, so the row has a hierarchy (L117)", () => {
+		const frame = renderFrame(card({ cursor: 4 }), marked, 90, 10, options());
+
+		const pad = " ".repeat(contentWidth(90) - HINTS.length - 2);
+
+		assert.equal(frame.lines[8], framed(` ${MARKED_HINTS}${pad} `, marked));
+	});
+
+	it("keeps the help in dim, subordinated to the key, when the budget lets it in (L117)", () => {
+		// 140 columns buys the `key help` form: the merged volume hint and an ordinary one, both spelled
+		// out, prove the key keeps the text role and only the help drops to dim.
+		const footer = renderFrame(card({ cursor: 4 }), marked, 140, 10, options()).lines[8] ?? "";
+
+		assert.equal(footer.includes("{border} · {text}+/- {dim}vol{text}"), true, footer);
+		assert.equal(footer.includes("{border} · {text}enter {dim}open{text}"), true, footer);
+	});
+
 	it("announces every key from the model's table and the progress at 90 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 90, 10, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[8], framed(footerLine(HINTS, `0:47 ${bar(16, 47_000, 245_000)} 4:05`, contentWidth(90))));
+		assert.equal(frame.lines[8], framed(footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, contentWidth(90))));
 	});
 
 	it("shrinks the progress bar instead of dropping a key at 78 columns", () => {
 		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 78, 10, options({ elapsedMs: 47_000 }));
 
-		assert.equal(frame.lines[8], framed(footerLine(HINTS, `0:47 ${bar(4, 47_000, 245_000)} 4:05`, contentWidth(78))));
+		assert.equal(frame.lines[8], framed(footerLine(HINTS, `0:47 ${bar(6, 47_000, 245_000)} 4:05`, contentWidth(78))));
+	});
+
+	it("ends a cut row with an ellipsis, so it never looks complete while it hides keys (S13, L117)", () => {
+		// A 195-column terminal asks for a 156-column card (`width: "80%"`), but a 78-column one asks for 62,
+		// and there the compact row lands exactly on its budget at a separator. Without the ellipsis the row
+		// would end on a clean edge and silently lose `+/-`, `z` and `esc` while claiming to announce them.
+		const frame = renderFrame(card({ cursor: 4, playing: B }), plain, 62, 10, options({ elapsedMs: 47_000 }));
+		const footer = frame.lines[8] ?? "";
+		const inner = footer.slice(1, -1);
+		const left = inner.slice(0, inner.indexOf("0:47"));
+
+		assert.equal([...footer].length, 62);
+		assert.equal(left.trimEnd().endsWith("…"), true, left);
+		assert.equal(inner.includes("esc"), false, "the keys that did not fit are not claimed");
 	});
 
 	it("drops the progress when the total is not known yet instead of inventing one", () => {
@@ -407,7 +446,7 @@ describe("the footer (S3, S13)", () => {
 			framed(" ".repeat(contentWidth(90))),
 			framed(" ".repeat(contentWidth(90))),
 		]);
-		assert.equal(frame.lines[12], framed(footerLine(HINTS, `0:47 ${bar(16, 47_000, 245_000)} 4:05`, contentWidth(90))));
+		assert.equal(frame.lines[12], framed(footerLine(HINTS, `0:47 ${bar(18, 47_000, 245_000)} 4:05`, contentWidth(90))));
 	});
 });
 

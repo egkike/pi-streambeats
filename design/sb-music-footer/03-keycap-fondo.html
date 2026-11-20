@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keycap con fondo: la tecla se ve como una tecla · sb-music</title>
+<style>
+*{box-sizing:border-box}
+:root{--page:#0f1115;--panel:#15181f;--edge:#272b35;--bg:#14161b;--surface:#2a2e38;--border:#4b5263;
+--text:#d7d7d7;--dim:#8f9099;--muted:#6b6f7a;--accent:#7aa2f7;--success:#9ece6a;--warning:#e0af68;--error:#f7768e;
+--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace;
+--sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{margin:0;background:var(--page);color:var(--text);font-family:var(--sans);padding:36px 28px 72px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+h1{font-size:29px;line-height:1.2;margin:0 0 12px;letter-spacing:-.01em}
+.thesis{margin:0;max-width:76ch;color:var(--dim);font-size:15px}
+.panel{background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:16px 16px 18px;margin:20px 0 0}
+.panel h2{font-family:var(--mono);font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin:0 0 6px;font-weight:600}
+.cap{font-size:13px;color:var(--muted);margin:0 0 12px;max-width:90ch}
+.term{font-family:var(--mono);font-size:13px;line-height:1.45;background:var(--bg);border:1px solid var(--edge);border-radius:8px;padding:12px 14px;overflow-x:auto;white-space:pre}
+.term+.term{margin-top:12px}
+.term.wide{font-size:11.5px}
+.row{white-space:pre}
+.border{color:var(--border)} .plain{color:var(--text)} .bold{color:var(--text);font-weight:700}
+.dim{color:var(--dim)} .muted{color:var(--muted)} .help{color:var(--dim)}
+.accent{color:var(--accent)} .success{color:var(--success)} .warning{color:var(--warning)}
+.k-text{color:var(--text);font-weight:700} .k-accent{color:var(--accent);font-weight:700}
+.chip{background:var(--surface);color:var(--text);font-weight:700}
+.sel{background:var(--surface)}
+.roles{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 0;padding:0;list-style:none}
+.roles li{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--edge);border-radius:999px;padding:4px 10px}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px;vertical-align:baseline}
+.notes{margin:6px 0 0;padding:0 0 0 18px;color:var(--dim);font-size:13.5px}
+.notes li{margin:6px 0;max-width:92ch}
+code{font-family:var(--mono);font-size:12.5px;color:var(--text)}
+.callout{margin:14px 0 0;padding:11px 14px;border-left:2px solid var(--warning);background:#1a1a16;color:var(--dim);font-size:13.5px;border-radius:0 6px 6px 0}
+.callout strong{color:var(--text);font-weight:600}
+.foot{margin:30px 0 0;padding-top:18px;border-top:1px solid var(--edge);color:var(--muted);font-size:12.5px;max-width:92ch}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="eyebrow">sb-music · fila del pie · alternativa 03/03</p>
+<h1>Keycap con fondo: la tecla se ve como una tecla</h1>
+<p class="thesis">La tecla se pinta con fondo <code>surface</code> y texto pleno, con una celda de aire a cada lado: el keycap de verdad, no una letra más grande. El separador se retira a <code>border</code> y la ayuda queda <code>dim</code>.</p>
+<section class="panel">
+<h2>Hoy · 90 columnas · reproduciendo</h2>
+<p class="cap">Referencia: todo <code>muted</code>.</p>
+<div class="term">
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="bold">sb-music</span><span class="dim">/ StreamBeats</span><span class="plain">                                                 </span><span class="dim">7 tracks · 24:10</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="success">▸ </span><span class="success">Neon Skyline · Synthwave Sessions</span><span class="plain">                                              </span><span class="muted"> 4:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Harbor Lights · Midnight Drive</span><span class="plain">                                                 </span><span class="muted"> 3:12</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="sel"><span class="plain"> </span><span class="accent">› </span><span class="bold">Midnight Drive · Afterglow Arcade</span><span class="plain">                                              </span><span class="muted"> 2:58</span><span class="plain"> </span></span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Chrome Sunrise · Static Bloom</span><span class="plain">                                                  </span><span class="muted"> 3:41</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Paper Satellites · Harbor Lights</span><span class="plain">                                               </span><span class="muted"> 4:22</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Static Bloom · Neon Skyline</span><span class="plain">                                                    </span><span class="muted"> 3:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Afterglow Arcade · Chrome Sunrise</span><span class="plain">                                              </span><span class="muted"> 2:47</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="muted">↑</span><span class="muted"> · </span><span class="muted">enter</span><span class="muted"> · </span><span class="muted">space</span><span class="muted"> · </span><span class="muted">n</span><span class="muted"> · </span><span class="muted">p</span><span class="muted"> · </span><span class="muted">u</span><span class="muted"> · </span><span class="muted">/</span><span class="muted"> · </span><span class="muted">l</span><span class="muted"> · </span><span class="muted">s</span><span class="muted"> · </span><span class="muted">+</span><span class="muted"> · </span><span class="muted">-</span><span class="muted"> · </span><span class="muted">z</span><span class="muted"> · </span><span class="muted">esc</span><span class="plain">       </span><span class="dim">0:47</span><span class="plain"> </span><span class="success">▓▓</span><span class="dim">░░░░░░░░</span><span class="plain"> </span><span class="dim">4:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">└</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">┘</span></div>
+</div>
+</section>
+<section class="panel">
+<h2>Con aire · 90 columnas sin progreso</h2>
+<p class="cap">Las 13 teclas con aire miden <strong>85 celdas</strong> y hay 86: entra raspando, sin reloj ni barra. Es el único estado donde el keycap se lee como una tecla.</p>
+<div class="term">
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="bold">sb-music</span><span class="dim">/ StreamBeats</span><span class="plain">                                                 </span><span class="dim">7 tracks · 24:10</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="success">▸ </span><span class="success">Neon Skyline · Synthwave Sessions</span><span class="plain">                                              </span><span class="muted"> 4:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Harbor Lights · Midnight Drive</span><span class="plain">                                                 </span><span class="muted"> 3:12</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="sel"><span class="plain"> </span><span class="accent">› </span><span class="bold">Midnight Drive · Afterglow Arcade</span><span class="plain">                                              </span><span class="muted"> 2:58</span><span class="plain"> </span></span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Chrome Sunrise · Static Bloom</span><span class="plain">                                                  </span><span class="muted"> 3:41</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Paper Satellites · Harbor Lights</span><span class="plain">                                               </span><span class="muted"> 4:22</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Static Bloom · Neon Skyline</span><span class="plain">                                                    </span><span class="muted"> 3:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Afterglow Arcade · Chrome Sunrise</span><span class="plain">                                              </span><span class="muted"> 2:47</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="chip"> ↑ </span><span class="border"> · </span><span class="chip"> enter </span><span class="border"> · </span><span class="chip"> space </span><span class="border"> · </span><span class="chip"> n </span><span class="border"> · </span><span class="chip"> p </span><span class="border"> · </span><span class="chip"> u </span><span class="border"> · </span><span class="chip"> / </span><span class="border"> · </span><span class="chip"> l </span><span class="border"> · </span><span class="chip"> s </span><span class="border"> · </span><span class="chip"> + </span><span class="border"> · </span><span class="chip"> - </span><span class="border"> · </span><span class="chip"> z </span><span class="border"> · </span><span class="chip"> esc </span><span class="plain"> </span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">└</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">┘</span></div>
+</div>
+</section>
+<section class="panel">
+<h2>Con aire · 90 columnas reproduciendo</h2>
+<p class="cap">Con el reloj y la barra el presupuesto cae a 65 celdas y los 85 keycaps no entran: la fila cae al esquema «dos tonos». La misma card muestra dos lenguajes según si hay total conocido.</p>
+<div class="term">
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="bold">sb-music</span><span class="dim">/ StreamBeats</span><span class="plain">                                                 </span><span class="dim">7 tracks · 24:10</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="success">▸ </span><span class="success">Neon Skyline · Synthwave Sessions</span><span class="plain">                                              </span><span class="muted"> 4:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Harbor Lights · Midnight Drive</span><span class="plain">                                                 </span><span class="muted"> 3:12</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="sel"><span class="plain"> </span><span class="accent">› </span><span class="bold">Midnight Drive · Afterglow Arcade</span><span class="plain">                                              </span><span class="muted"> 2:58</span><span class="plain"> </span></span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Chrome Sunrise · Static Bloom</span><span class="plain">                                                  </span><span class="muted"> 3:41</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Paper Satellites · Harbor Lights</span><span class="plain">                                               </span><span class="muted"> 4:22</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Static Bloom · Neon Skyline</span><span class="plain">                                                    </span><span class="muted"> 3:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Afterglow Arcade · Chrome Sunrise</span><span class="plain">                                              </span><span class="muted"> 2:47</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="k-text">↑</span><span class="border"> · </span><span class="k-text">enter</span><span class="border"> · </span><span class="k-text">space</span><span class="border"> · </span><span class="k-text">n</span><span class="border"> · </span><span class="k-text">p</span><span class="border"> · </span><span class="k-text">u</span><span class="border"> · </span><span class="k-text">/</span><span class="border"> · </span><span class="k-text">l</span><span class="border"> · </span><span class="k-text">s</span><span class="border"> · </span><span class="k-text">+</span><span class="border"> · </span><span class="k-text">-</span><span class="border"> · </span><span class="k-text">z</span><span class="border"> · </span><span class="k-text">esc</span><span class="plain">       </span><span class="dim">0:47</span><span class="plain"> </span><span class="success">▓▓</span><span class="dim">░░░░░░░░</span><span class="plain"> </span><span class="dim">4:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">└</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">┘</span></div>
+</div>
+</section>
+<section class="panel">
+<h2>Sin aire · 90 columnas reproduciendo</h2>
+<p class="cap">Pegando el fondo a la letra sí entra, pero las teclas de una celda (<code>↑ n p u / l s + - z</code>) quedan como letras resaltadas y las demás como bloques de 3 a 5: el ritmo de la fila se rompe.</p>
+<div class="term">
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="bold">sb-music</span><span class="dim">/ StreamBeats</span><span class="plain">                                                 </span><span class="dim">7 tracks · 24:10</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="success">▸ </span><span class="success">Neon Skyline · Synthwave Sessions</span><span class="plain">                                              </span><span class="muted"> 4:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Harbor Lights · Midnight Drive</span><span class="plain">                                                 </span><span class="muted"> 3:12</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="sel"><span class="plain"> </span><span class="accent">› </span><span class="bold">Midnight Drive · Afterglow Arcade</span><span class="plain">                                              </span><span class="muted"> 2:58</span><span class="plain"> </span></span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Chrome Sunrise · Static Bloom</span><span class="plain">                                                  </span><span class="muted"> 3:41</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Paper Satellites · Harbor Lights</span><span class="plain">                                               </span><span class="muted"> 4:22</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Static Bloom · Neon Skyline</span><span class="plain">                                                    </span><span class="muted"> 3:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="plain">  </span><span class="plain">Afterglow Arcade · Chrome Sunrise</span><span class="plain">                                              </span><span class="muted"> 2:47</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">│</span></div>
+<div class="row"><span class="border">│</span><span class="plain"> </span><span class="chip">↑</span><span class="border"> · </span><span class="chip">enter</span><span class="border"> · </span><span class="chip">space</span><span class="border"> · </span><span class="chip">n</span><span class="border"> · </span><span class="chip">p</span><span class="border"> · </span><span class="chip">u</span><span class="border"> · </span><span class="chip">/</span><span class="border"> · </span><span class="chip">l</span><span class="border"> · </span><span class="chip">s</span><span class="border"> · </span><span class="chip">+</span><span class="border"> · </span><span class="chip">-</span><span class="border"> · </span><span class="chip">z</span><span class="border"> · </span><span class="chip">esc</span><span class="plain">       </span><span class="dim">0:47</span><span class="plain"> </span><span class="success">▓▓</span><span class="dim">░░░░░░░░</span><span class="plain"> </span><span class="dim">4:05</span><span class="plain"> </span><span class="border">│</span></div>
+<div class="row"><span class="border">└</span><span class="border">────────────────────────────────────────────────────────────────────────────────────────</span><span class="border">┘</span></div>
+</div>
+</section>
+<p class="callout"><strong>Decisión:</strong> ¿la misma fila puede verse distinta según el ancho y el estado? Si la respuesta es no, esta alternativa queda descartada para el ancho real de la card.</p>
+<section class="panel"><h2>Qué cuesta implementarlo</h2><ul class="notes">
+<li>Cuesta <strong>2 celdas por tecla</strong> (el aire a cada lado): 26 celdas sobre 59. A 90 columnas hay 86 útiles sin barra y 65 con barra; a 89 columnas entra siempre.</li>
+<li>Técnicamente es posible hoy: <code>theme.bg("surface")</code> + <code>bgEnd</code> ya se usan para la fila del cursor. Pero depende de que <code>surface</code> se distinga del fondo de la card en el tema real del host, y eso no lo controla la extensión.</li>
+<li>Los tests de 78/90 no se rompen porque comparan texto: el problema es de producto (dos pieles para la misma fila), no de suite.</li>
+</ul></section>
+<ul class="roles">
+<li><span class="sw" style="background:#2a2e38"></span>surface · keycap</li>
+<li><span class="sw" style="background:#d7d7d7"></span>text · letra de la tecla</li>
+<li><span class="sw" style="background:#6b6f7a"></span>muted · separador ·</li>
+<li><span class="sw" style="background:#8f9099"></span>dim · ayuda</li>
+<li><span class="sw" style="background:#4b5263"></span>border · marco</li>
+</ul>
+<p class="foot">Paleta ilustrativa: los valores reales salen de los roles del tema del host (<code>lib/host/theme.ts</code>), no de estos hex. El contenido de la biblioteca es inventado. Se dibuja sólo con fg/bg + bold: sin inverse, sin underline, sin emoji.</p>
+</div>
+</body>
+</html>

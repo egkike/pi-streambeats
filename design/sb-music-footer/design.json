@@ -1,0 +1,28 @@
+{
+  "title": "Fila de teclas del modo expandido",
+  "feature": "odd/tasks/sb-music-card.md",
+  "brief": "Alternativas de color para la fila del pie de la card expandida de /sb-music: hoy toda la fila sale en muted y a 78/90 columnas sólo entran las teclas, sin la ayuda. Tres direcciones que difieren en estrategia, no sólo en color. Contenido de biblioteca inventado; paleta ilustrativa, los valores reales salen de los roles del tema del host.",
+  "artboards": [
+    {
+      "file": "01-dos-tonos.html",
+      "title": "Dos tonos: peso + ayuda en dim",
+      "tradeoff": "Cero celdas de costo y el acento queda reservado para cursor y aviso; la jerarquía es sutil y depende del contraste text/dim del tema",
+      "width": 1180,
+      "height": 1800
+    },
+    {
+      "file": "02-tecla-acentuada.html",
+      "title": "Tecla en accent",
+      "tradeoff": "La tecla más legible a cualquier ancho; gasta el acento en 13 lugares y compite con el aviso y el caret del filtro",
+      "width": 1180,
+      "height": 1520
+    },
+    {
+      "file": "03-keycap-fondo.html",
+      "title": "Keycap con fondo surface",
+      "tradeoff": "El que más se parece a una tecla; cuesta 2 celdas por tecla y con progreso no entra a 90 columnas, así que la fila cambia de piel según el estado",
+      "width": 1180,
+      "height": 1680
+    }
+  ]
+}

@@ -234,6 +234,18 @@ describe("the key table (S13)", () => {
 		}
 	});
 
+	it("announces both volume directions with one hint and still dispatches both (S13, L117)", () => {
+		const keys = footerHints().map((hint) => hint.key);
+
+		// Two hints of the same word (`+ vol · - vol`) spent six cells the row did not have; one `+/- vol`
+		// buys them back. The table keeps both bindings, so only what the footer prints merged.
+		assert.equal(keys.includes("+/-"), true);
+		assert.equal(keys.includes("+"), false);
+		assert.equal(keys.includes("-"), false);
+		assert.equal(actionFor("+"), "volume-up");
+		assert.equal(actionFor("-"), "volume-down");
+	});
+
 	it("announces / now that it opens the filter (S18, no dead chrome)", () => {
 		const hint = footerHints().find((candidate) => candidate.action === "start-filter");
 
