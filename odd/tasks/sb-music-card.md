@@ -2626,3 +2626,26 @@ devuelve la ayuda de `pi install`, que es el hecho que ya se había medido en L1
 después de sus flags y antes de los de Pi, y nombra la prueba concreta (`gentle-shell install --help` imprime la ayuda
 del Shell) para que nadie lo borre pensando que sobra. Un comando correcto sin la razón por la que es correcto dura
 hasta la primera limpieza.
+
+L109 (el comando de Gentle Shell va directo, y mi `--` era una teoría sobre una medición). Pedido del dueño, verbatim:
+**"Otra vez pusiste -- en gentle-shell: gentle-shell -- install git:github.com/egkike/pi-streambeats@v0.1.0 ... por qué
+no pones el comando como debe ser directamente en vez de tantas vueltas?"**.
+
+**Tenía razón, y L108 era una conclusión mal fundada.** La medición de la que salió —`gentle-shell install --help`
+imprime la ayuda del Shell— prueba algo sobre `--help`, no sobre los flags de `pi install`: extrapolé de un caso al
+resto y lo escribí como hecho. La fuente dice lo contrario de lo que documenté: el CLI de Gentle Shell
+(`~/.gentle-shell/current/node_modules/gentle-pi/bin/gentle-shell.mjs`) guarda un `piSubcommand` y su propio comentario
+explica que un subcomando de Pi **va como `argv[0]`** —«argv[0] must stay the bare subcommand for pi to dispatch it»—
+y que el home aislado no auto-provisiona cuando hay subcomando justamente por eso. O sea:
+`gentle-shell install …` es la forma que el binario espera, y el `--` es la forma genérica para pasarle argumentos
+sueltos a Pi, no la del subcomando.
+
+**El README quedó con el comando directo y sin ceremonia**, más la única línea que explica por qué `gentle-shell` en
+frente cambia el resultado: el Shell reconoce el subcomando y lo corre en su home aislado, mientras un `pi install`
+pelado escribe en el home de Pi vanilla. Y la frase sobre su parser se limita a lo verificable: parsea sus opciones
+(`--link`, `--isolated`, `--home`) y le pasa el subcomando a Pi, así que `install`, `remove` y `list` se leen igual que
+bajo `pi`.
+
+**La lección, escrita porque es la tercera vez que aparece en este documento:** una medición sostiene exactamente lo
+que mide. «`--help` lo intercepta el Shell» no autoriza «cualquier flag lo intercepta»; para eso hacía falta leer el
+parser o probar el comando real, y la fuente estaba a un `grep` de distancia.
