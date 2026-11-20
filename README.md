@@ -44,6 +44,28 @@ so `install`, `remove` and `list` read exactly as they do under `pi`.
 If you run Gentle Shell with `--link`, it shares your Pi home instead of its own (`gentle-shell home` prints
 the mode in effect), and the plain `pi install` covers both.
 
+**To remove it.** The same source string you installed, with `remove` (or `uninstall`):
+
+```sh
+pi remove git:github.com/egkike/pi-streambeats@v0.1.0              # Pi
+pi uninstall git:github.com/egkike/pi-streambeats@v0.1.0          # the same command
+gentle-shell remove git:github.com/egkike/pi-streambeats@v0.1.0   # Gentle Shell
+```
+
+`pi list` (or `gentle-shell list`) prints the exact source strings that are configured, which is the string
+`remove` expects. Removing the package never touches your music library, and it leaves the card's own two
+paths behind — they are yours, not the package's:
+
+| | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| `settings.json` | `~/.config/pi-streambeats/` | `~/.config/pi-streambeats/` | `%APPDATA%\pi-streambeats\` |
+| catalog metadata | `~/.cache/pi-streambeats/catalog.json` | `~/Library/Caches/pi-streambeats/catalog.json` | `%LOCALAPPDATA%\pi-streambeats\catalog.json` |
+
+Delete those two if you want the configuration and the cache gone as well. The only other path the card
+creates is the mpv socket — `$XDG_RUNTIME_DIR/pi-streambeats/mpv.sock` on Linux when that variable is set,
+otherwise inside the cache directory, and `~/Library/Caches/pi-streambeats/` on macOS; Windows uses a named
+pipe, which is not a file. Any of them is safe to delete while the card is not playing.
+
 The tag is the pin, and it is exact: `@v0.1.0` installs the commit whose `package.json` says `0.1.0`, and
 no other. The `Release tag` workflow fails when a pushed tag does not match that version, so a pin cannot
 quietly point at different code. Without a tag you get the tip of `main` — the next release while it is

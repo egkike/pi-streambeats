@@ -2670,3 +2670,23 @@ decían, junto en un solo lugar para quien lee el release y no el repo.
 arranque puede esperar hasta dos segundos por el sondeo de mpv (y que el arreglo **no** es bajar el techo), que un álbum
 que el índice dejó de anunciar conserva sus pistas cacheadas, y que no hay pantalla de settings dentro de la card. Un
 release que sólo enumera features enseña a descubrir los límites de la peor manera.
+
+L111 (desinstalar: el comando existía y el README no lo decía). Pedido del dueño, verbatim: **"Cómo se desinstall? no veo
+indicaciones para eso en el README... se puede desinstalar?"**.
+
+**Sí, y el hueco era del README, no del producto.** `pi remove <source>` (alias `pi uninstall`) está en la ayuda de Pi y en
+`docs/packages.md`, y Gentle Shell acepta el mismo subcomando —su propio código nombra `install/remove/list/...`— así que
+`gentle-shell remove` es la forma del Shell. El README publicaba cómo entrar y no cómo salir, que en una extensión que
+escribe archivos propios no es un detalle.
+
+**Lo que ahora dice, y lo que cada cosa afirma.** El comando para los dos hosts, con la salvedad de que el `<source>` es
+**el string exacto** que se instaló —y que `pi list` / `gentle-shell list` lo imprimen, así que no hay que recordarlo—. Y
+lo que queda después: desinstalar **no toca la biblioteca de música** y deja los dos paths propios de la card,
+`settings.json` y la caché de metadatos, con su ruta por plataforma, porque son del usuario y no del paquete. El socket
+de mpv va aparte: `$XDG_RUNTIME_DIR` en Linux cuando existe, la carpeta de caché como fallback, `~/Library/Caches` en
+macOS, y en Windows un named pipe que no es un archivo.
+
+**Verificado leyendo, no ejecutando.** No desinstalé nada: el comando, el alias y el string esperado salen de `pi remove
+--help` y de `docs/packages.md` («Personal installs are written to `~/.pi/agent/settings.json`»), y las rutas de
+`lib/settings.ts` y `lib/catalog/cache.ts`, que es lo que el código crea de verdad. Desinstalar de verdad es una acción
+sobre el entorno del dueño y sigue esperando su permiso, igual que la instalación.
