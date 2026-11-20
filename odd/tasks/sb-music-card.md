@@ -2949,3 +2949,16 @@ cambiaba con el alto del frame y ya había hecho fallar el test contra una hairl
 Cierre de L118. PR **#122** mergeado como `f853b6b` (commit de trabajo `92348bf`), issue #121 cerrada. `main` local
 al día y la suite entera verde ahí: **594 tests / 122 suites**. Con esto los cuatro hallazgos de la review de #120
 quedan cerrados y la fila de pie cumple su promesa en todos los anchos, no sólo en los que la suite miraba.
+
+Release v0.2.0 (pedido del dueño, verbatim: **"Saquemos nuevo release y actualiza el README.md"**). `0.1.1` →
+`0.2.0` por la tabla de `RELEASING.md`: es un cambio que el usuario nota sin quedar roto (jerarquía del pie,
+`+/- vol`, el `…` del corte), y no se removió ninguna tecla, no se renombró ninguna clave de settings y ningún
+path publicado se movió. README actualizado en los cinco pins y con la degradación del pie documentada.
+
+Tag `v0.2.0` sobre el merge commit `96268d6` (PR #124, issue #125), guard verde en el propio log del workflow:
+`release-tag: OK — v0.2.0 is package.json 0.2.0`. Release publicada y notas reescritas a mano: las automáticas
+listaban PRs de docs de la tanda anterior y el propio bump, y son lo único que lee alguien que pinnea.
+
+Un tropiezo que vale como lección: el PR se abrió sin `Closes #N` y `issue-gate` lo rechazó, porque `package.json`
+cuenta como carril de código aunque el cambio sea una versión. Editar el cuerpo del PR no re-dispara el workflow:
+hubo que reejecutarlo (`gh run rerun`) y ahí pasó.
