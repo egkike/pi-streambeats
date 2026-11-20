@@ -2903,3 +2903,19 @@ Publicación (mismo L117). La rebanada mide 664 líneas autoradas contando los t
 **un solo PR** —el artboard es la spec visual del cambio y separarlo obligaría al reviewer a cruzar dos— con la
 etiqueta `size:exception`, que es la salida que el repo define para pasar la heurística de ~400. El carril de
 docs no abre issue propio: viaja con el código que describe.
+
+Entrega (mismo L117). PR **#120** sobre `feat/119-card-footer-roles` (commit `4c6dfb1`), con `Closes #119` y
+`size:exception`. Review nativa **aprobada** —linaje `review-44b6f95a2970f480`, lentes resilience, readability y
+reliability— y autoridad quemada; la aprobación no autoriza el delivery, que sigue siendo decisión del dueño.
+
+El primer intento de review murió por un stall del proveedor `commandcode` con `z-ai/glm-5.3-flash`: 120 s de
+stream idle sobre 131 s de completación, con credenciales instantáneas. Los logs del host lo ubicaban dentro de su
+distribución normal (120 runs previos: mediana 18,6 s, p99 96,7 s, máximo 132 s), y ese mismo día el proveedor
+estaba degradado en general —la mediana de la sesión pasó de ~8 s a 10,7 s y el p90 se duplicó—. Con el perfil
+`opencode-go` los tres revisores completaron en 10 s, 51 s y 48 s.
+
+Cuatro hallazgos **no bloqueantes** de la review, a trabajar aparte y no en este candidato: R2-001 el `+/-` vive
+en el binding de `volume-up` sin nada que impida re-marcar `-` como hint; R2-002 `fitSegments` mezcla tres casos
+en un lazo; **R3-001** `fitSegments` todavía puede terminar sin `…` cuando el presupuesto restante es exactamente
+una tecla de una celda que no es el último tramo (`room` queda en 0 y no se empuja nada); R3-002 el `…` hereda el
+rol del tramo cortado, así que un corte dentro de una ayuda sale en `dim` en vez del rol de la tecla.
